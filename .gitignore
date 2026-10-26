@@ -1,0 +1,20 @@
+# task worktrees and scratch ds4 trees
+.worktrees/
+.ds4/
+
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+
+# Python and package builds
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
