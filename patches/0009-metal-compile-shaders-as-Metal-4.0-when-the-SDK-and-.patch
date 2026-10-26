@@ -1,0 +1,61 @@
+From d07d0caeae2b81c3183879081bd4b37f2ed1e908 Mon Sep 17 00:00:00 2001
+From: Koudai Aono <koxudaxi@gmail.com>
+Date: Mon, 12 Oct 2026 11:00:29 +0900
+Subject: [PATCH 09/9] metal: compile shaders as Metal 4.0 when the SDK and OS
+ are 26 or later
+
+The default language version follows the SDK of the host executable, which hides Metal 4 under old-SDK hosts. Patch by Paul Everitt (ds4-engine PR #206).
+
+Upstream: offer upstream, together with the macOS 15 language-version fix still to be written
+Retire-when: upstream sets the language version itself
+Carried-commits: ebdcb0f
+---
+ ds4_metal.m | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/ds4_metal.m b/ds4_metal.m
+index 423788d..4718987 100644
+--- a/ds4_metal.m
++++ b/ds4_metal.m
+@@ -2811,6 +2811,20 @@ static bool ds4_gpu_ported_m5_decode_feature_enabled(
+     return pre_m5 || ds4_gpu_device_is_m5_apple_silicon();
+ }
+ 
++static MTLCompileOptions *ds4_gpu_compile_options(void) {
++    /* The default language version follows the SDK the host executable was
++     * linked against, not this library's: under a Python built on an older
++     * SDK it is below 4.0 (Metal 3.2 under uv's CPython), which hides
++     * <MetalPerformancePrimitives>. */
++    MTLCompileOptions *options = [MTLCompileOptions new];
++#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
++    if (@available(macOS 26.0, *)) {
++        options.languageVersion = MTLLanguageVersion4_0;
++    }
++#endif
++    return options;
++}
++
+ static int ds4_gpu_compile_tensor_probe(void) {
+ #if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+     if (!g_device) return 0;
+@@ -2839,7 +2853,7 @@ static int ds4_gpu_compile_tensor_probe(void) {
+ 
+         NSError *error = nil;
+         NSString *source = [NSString stringWithUTF8String:src];
+-        id<MTLLibrary> probe_library = [g_device newLibraryWithSource:source options:[MTLCompileOptions new] error:&error];
++        id<MTLLibrary> probe_library = [g_device newLibraryWithSource:source options:ds4_gpu_compile_options() error:&error];
+         if (!probe_library) {
+             fprintf(stderr, "ds4: Metal 4 tensor API probe compile failed: %s\n",
+                     error ? [[error localizedDescription] UTF8String] : "(unknown)");
+@@ -6898,7 +6912,7 @@ int ds4_gpu_init(void) {
+             g_device = nil;
+             return 0;
+         }
+-        MTLCompileOptions *options = [MTLCompileOptions new];
++        MTLCompileOptions *options = ds4_gpu_compile_options();
+         NSMutableDictionary *macros = [NSMutableDictionary new];
+         if (g_metal4_tensor_api_enabled) {
+             macros[@"DS4_METAL_HAS_TENSOR"] = @"1";
+-- 
+2.49.0
+
