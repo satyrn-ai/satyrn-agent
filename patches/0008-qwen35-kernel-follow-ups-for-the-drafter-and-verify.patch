@@ -1,0 +1,1187 @@
+From f27935f37ffbb69166bf6a9e36ee587bfeba553a Mon Sep 17 00:00:00 2001
+From: Koudai Aono <koxudaxi@gmail.com>
+Date: Wed, 7 Oct 2026 21:25:08 +0900
+Subject: [PATCH 08/9] qwen35: kernel follow-ups for the drafter and verify
+
+The drafter's attention with head_dim fixed at compile time, verify attention on shared K/V tiles, and Q4_K dequantized from one 16-byte load per piece.
+
+Upstream: not offered, fork only
+Retire-when: with patches 5 and 6
+Carried-commits: b00831d 17a9818 2fefe5f
+---
+ ds4.c                      |  17 +-
+ ds4_gpu.h                  |  29 ++-
+ ds4_metal.m                |  83 +++++++-
+ metal/dflash.metal         |  86 ++++++++
+ metal/qwen35_mma.metal     |  71 ++++++-
+ metal/qwen4.metal          | 239 ++++++++++++++++++++++
+ tests/test_qwen4_kernels.c | 400 +++++++++++++++++++++++++++++++++++--
+ 7 files changed, 903 insertions(+), 22 deletions(-)
+
+diff --git a/ds4.c b/ds4.c
+index c28fba8..653867b 100644
+--- a/ds4.c
++++ b/ds4.c
+@@ -60757,8 +60757,13 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
+ /* Dense qwen35 gated GQA attention over positions 0..pos: [q|gate] per head,
+  * RMS-normed q and k with partial NeoX rope, f16 K/V, softmax(qk/sqrt(D))v
+  * times sigmoid(gate), then the output projection.  attn_slot numbers the
+- * attention layers; under a verify, row t takes the key splits of a decode
+- * at pos0 + t through the slot's 8 entries of the rows table.
++ * attention layers.  In DFlash mode (verify mode MMA) the rows take the
++ * shared-tile verify attention when the layer has six query heads per KV
++ * head of 256 (ds4_gpu_qwen35_attn_verify_shared_tensor),
++ * row t's arithmetic a function of pos0 + t alone; with
++ * DS4_QWEN35_VERIFY_ATTN_PER_ROW=1 (read per call), and under the exact
++ * diagnostic, row t takes the key splits of a decode at pos0 + t through the
++ * slot's 8 entries of the rows table.
+  *
+  * Off a verify, prompt batches (T > 8) take llama.cpp's flash-attention
+  * tiling (ds4_gpu_qwen35_attn_fa_tensor) and decode rows (T <= 8) take the
+@@ -60776,7 +60781,13 @@ static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, c
+                                           pos0, g->ctx_cap, DS4_ROPE_FREQ_BASE, DS4_RMS_EPS))) {
+         return false;
+     }
+-    const bool attn = g->qwen35_verify_now != DS4_QWEN35_VERIFY_OFF
++    const bool shared = g->qwen35_verify_now == DS4_QWEN35_VERIFY_MMA && DS4_N_HEAD_DIM == 256u &&
++                        DS4_N_HEAD == 6u * DS4_N_HEAD_KV && !getenv("DS4_QWEN35_VERIFY_ATTN_PER_ROW");
++    const bool attn = shared
++        ? ds4_gpu_qwen35_attn_verify_shared_tensor(g->attn_o, g->q, g->gate, g->layer_k_cache[il],
++                                                   g->layer_v_cache[il], g->qwen35_verify_part, T, DS4_N_HEAD,
++                                                   DS4_N_HEAD_KV, DS4_N_HEAD_DIM, pos0, scale) != 0
++        : g->qwen35_verify_now != DS4_QWEN35_VERIFY_OFF
+         ? ds4_gpu_qwen35_attn_verify_tensor(g->attn_o, g->q, g->gate, g->layer_k_cache[il], g->layer_v_cache[il],
+                                             g->pos3, g->qwen35_verify_table, (uint64_t)attn_slot * 8u,
+                                             g->qwen35_verify_part, T, DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM,
+diff --git a/ds4_gpu.h b/ds4_gpu.h
+index 535be48..81e4181 100644
+--- a/ds4_gpu.h
++++ b/ds4_gpu.h
+@@ -309,6 +309,8 @@ enum {
+     DS4_GPU_TEST_OUTPUT_HC_WEIGHTS4 = 1u << 5,
+     DS4_GPU_TEST_HC_RMS_SCALE_PROJ = 1u << 6,
+     DS4_GPU_TEST_Q6_K_MM_BYTEWISE = 1u << 7,
++    DS4_GPU_TEST_Q4_K_MMA_BYTEWISE = 1u << 8,
++    DS4_GPU_TEST_Q4_K_MMA_WORD = 1u << 9,
+ };
+ void ds4_gpu_test_set_flags(uint32_t flags);
+ void ds4_gpu_release_zero_prefix_prefill_mask_cache(void);
+@@ -821,7 +823,11 @@ int ds4_gpu_matmul_q6_K_tensor(
+  * kernels), for qwen35's verify (Q4_K, Q6_K) and the DFlash drafter (Q4_0,
+  * in_dim a multiple of 32).  Its sums are not in the one-row kernels' order, but its
+  * tiling depends only on the weight shape, so row t of the output is bitwise
+- * the same for every n_tok and whatever the other rows hold. */
++ * the same for every n_tok and whatever the other rows hold.  Q4_K dequantizes
++ * a 16-weight piece from one 16-byte load, or from four 32-bit loads when the
++ * weights are not 16-byte aligned (DS4_GPU_TEST_Q4_K_MMA_WORD forces that);
++ * DS4_GPU_TEST_Q4_K_MMA_BYTEWISE runs moe.metal's per-byte dequantizer it had
++ * before, the reference both must match byte for byte. */
+ int ds4_gpu_matmul_mma_rows_tensor(
+         ds4_gpu_tensor       *out,
+         const void           *model_map,
+@@ -3611,6 +3617,23 @@ int ds4_gpu_qwen35_attn_verify_tensor(
+         ds4_gpu_tensor *table, uint64_t entry0, ds4_gpu_tensor *part,
+         uint32_t n_tokens, uint32_t n_head, uint32_t n_head_kv, uint32_t head_dim,
+         uint32_t pos0, float scale);
++/* qwen35 verify attention with shared K/V tiles (kernel_qwen35_attn_verify):
++ * rows 0..n_tokens-1 (1..8) at pos0 + t over one layer's f16 caches, each
++ * 16-key tile loaded once into threadgroup memory for every row and query
++ * head, scores and P V on 8x8 simdgroup MMAs.  Row t's keys split at
++ * multiples of ds4_gpu_qwen35_attn_verify_split_keys(pos0 + t + 1), the
++ * splits merged in order, so row t is bitwise the same for any n_tokens, any
++ * other rows, and a one-row call at pos0 + t.  Head dim 256 and six query
++ * heads per KV head only; part holds
++ * ds4_gpu_qwen4_attn_part_floats(n_tokens, ...) floats. */
++int ds4_gpu_qwen35_attn_verify_shared_tensor(
++        ds4_gpu_tensor *out, const ds4_gpu_tensor *q, const ds4_gpu_tensor *gate,
++        const ds4_gpu_tensor *k_cache, const ds4_gpu_tensor *v_cache, ds4_gpu_tensor *part,
++        uint32_t n_tokens, uint32_t n_head, uint32_t n_head_kv, uint32_t head_dim,
++        uint32_t pos0, float scale);
++/* The keys per split of a row with n_keys keys under the shared-tile verify
++ * attention: a multiple of 16, at least 32, for at most 8 splits. */
++uint32_t ds4_gpu_qwen35_attn_verify_split_keys(uint32_t n_keys);
+ /* Dense qwen35 prefill attention with llama.cpp's flash-attention tiling
+  * (kernel_flash_attn_ext: 8 queries of one head per threadgroup, 64 keys per
+  * step): causal over the f16 caches' rows 0..pos0+n_tokens-1, out =
+@@ -3825,7 +3848,9 @@ int ds4_gpu_dflash_conv_tensor(
+ /* Non-causal windowed attention of a block's rows (row t at pos0 + t) over
+  * the ring slots holding a committed position tp (0 <= tp < pos0, within
+  * window of the row) and over every block row; f16 ring K/V, f32 block K/V,
+- * int32 ring tags (negative for empty). */
++ * int32 ring tags (negative for empty).  The kernel has head_dim fixed at
++ * compile time; DS4_METAL_DFLASH_ATTN_RUNTIME_DIM=1 runs the runtime
++ * head_dim kernel instead, bitwise the same and slower. */
+ int ds4_gpu_dflash_attn_tensor(
+         ds4_gpu_tensor *out, const ds4_gpu_tensor *q,
+         const ds4_gpu_tensor *k_blk, const ds4_gpu_tensor *v_blk,
+diff --git a/ds4_metal.m b/ds4_metal.m
+index 9ad5b73..423788d 100644
+--- a/ds4_metal.m
++++ b/ds4_metal.m
+@@ -20288,7 +20288,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
+     while (nt > 1 && (uint64_t)nt > nt_limit) nt /= 2;
+ 
+     char fn_name[64];
+-    snprintf(fn_name, sizeof(fn_name), "kernel_qwen35_mma_%s_f32_nt%d", q4_0 ? "q4_0" : q6 ? "q6_K" : "q4_K", nt);
++    /* the 16-byte-load Q4_K dequantizer needs 16-byte-aligned blocks (a
++     * 144-byte block keeps a 16-byte-aligned start aligned); the 32-bit-load
++     * one gives the same floats from any 4-byte-aligned start */
++    const bool q4_K_aligned16 = (((uintptr_t)model_map + weight_offset) & 15u) == 0u;
++    const char *q4_K_name = (g_test_flags & DS4_GPU_TEST_Q4_K_MMA_BYTEWISE) != 0u ? "q4_K"
++                          : (g_test_flags & DS4_GPU_TEST_Q4_K_MMA_WORD) != 0u || !q4_K_aligned16 ? "q4_K_word"
++                                                                                                  : "q4_K_vec";
++    snprintf(fn_name, sizeof(fn_name), "kernel_qwen35_mma_%s_f32_nt%d", q4_0 ? "q4_0" : q6 ? "q6_K" : q4_K_name, nt);
+ 
+     @autoreleasepool {
+         id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
+@@ -48540,6 +48547,8 @@ enum {
+     QWEN4_K_QWEN35_GDN_HIST_COMMIT,
+     QWEN4_K_QWEN35_ATTN_FA,
+     QWEN4_K_QWEN35_ATTN_FA_PAD,
++    QWEN4_K_QWEN35_ATTN_VERIFY_G6,
++    QWEN4_K_QWEN35_ATTN_VERIFY_MERGE_G6,
+     QWEN4_K_COUNT,
+ };
+ 
+@@ -48649,6 +48658,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+     "kernel_qwen35_gdn_hist_commit",
+     "kernel_qwen35_attn_fa",
+     "kernel_qwen35_attn_fa_pad",
++    "kernel_qwen35_attn_verify_g6",
++    "kernel_qwen35_attn_verify_merge_g6",
+ };
+ 
+ typedef struct {
+@@ -50051,6 +50062,72 @@ int ds4_gpu_qwen35_attn_verify_tensor(
+                                                  n_head, n_head_kv, head_dim, 0u, scale);
+ }
+ 
++/* Keys per split of a row with n_keys keys: the smallest multiple of 16,
++ * at least 32, that gives at most QWEN35_VATTN_SPLITS splits.  Eight splits
++ * (32 threadgroups for 4 KV heads) measured fastest on the M4 Max among 4 to
++ * 64 at depths 2,600 to 14,000. */
++#define QWEN35_VATTN_SPLITS 8u
++uint32_t ds4_gpu_qwen35_attn_verify_split_keys(uint32_t n_keys) {
++    const uint32_t per = (n_keys + QWEN35_VATTN_SPLITS - 1u) / QWEN35_VATTN_SPLITS;
++    const uint32_t s = (per + 15u) & ~15u;
++    return s < 32u ? 32u : s;
++}
++
++int ds4_gpu_qwen35_attn_verify_shared_tensor(
++        ds4_gpu_tensor *out, const ds4_gpu_tensor *q, const ds4_gpu_tensor *gate,
++        const ds4_gpu_tensor *k_cache, const ds4_gpu_tensor *v_cache, ds4_gpu_tensor *part,
++        uint32_t n_tokens, uint32_t n_head, uint32_t n_head_kv, uint32_t head_dim,
++        uint32_t pos0, float scale) {
++    struct { uint32_t n_rows, row0, n_head, n_head_kv, pos0, split_keys, part_splits; float scale;
++             uint32_t row_splits[8]; } args;
++    const uint64_t q_bytes = (uint64_t)n_tokens * n_head * head_dim * sizeof(float);
++    const uint64_t cache_bytes = ((uint64_t)pos0 + n_tokens) * n_head_kv * head_dim * 2u;
++    const uint64_t part_bytes = ds4_gpu_qwen4_attn_part_floats(n_tokens, n_head, head_dim) * sizeof(float);
++    qwen4_bind b[6];
++    if (n_tokens == 0 || n_tokens > 8u || head_dim != 256u || n_head_kv == 0 || n_head != 6u * n_head_kv ||
++        !qwen4_bind_tensor(&b[0], q, q_bytes, "verify attn q") ||
++        !qwen4_bind_tensor(&b[1], gate, q_bytes, "verify attn gate") ||
++        !qwen4_bind_tensor(&b[2], k_cache, cache_bytes, "verify attn k cache") ||
++        !qwen4_bind_tensor(&b[3], v_cache, cache_bytes, "verify attn v cache") ||
++        !qwen4_bind_tensor(&b[4], out, q_bytes, "verify attn out") ||
++        !qwen4_bind_tensor(&b[5], part, part_bytes, "verify attn partials")) {
++        return 0;
++    }
++    memset(&args, 0, sizeof(args));
++    args.n_head = n_head;
++    args.n_head_kv = n_head_kv;
++    args.pos0 = pos0;
++    args.part_splits = QWEN4_ATTN_MAX_SPLITS;
++    args.scale = scale;
++    bool merge = false;
++    for (uint32_t t = 0; t < n_tokens; t++) {
++        const uint32_t n_keys = pos0 + t + 1u, s = ds4_gpu_qwen35_attn_verify_split_keys(n_keys);
++        args.row_splits[t] = (n_keys + s - 1u) / s;
++        if (args.row_splits[t] > QWEN4_ATTN_MAX_SPLITS) return 0;
++        merge = merge || args.row_splits[t] > 1u;
++    }
++    for (uint32_t r0 = 0; r0 < n_tokens;) {
++        const uint32_t s = ds4_gpu_qwen35_attn_verify_split_keys(pos0 + r0 + 1u);
++        uint32_t r1 = r0 + 1u;
++        while (r1 < n_tokens && ds4_gpu_qwen35_attn_verify_split_keys(pos0 + r1 + 1u) == s) r1++;
++        args.n_rows = r1 - r0;
++        args.row0 = r0;
++        args.split_keys = s;
++        if (!qwen4_dispatch(QWEN4_K_QWEN35_ATTN_VERIFY_G6, &args, sizeof(args), b, 6,
++                            MTLSizeMake((pos0 + r1 + s - 1u) / s, n_head_kv, 1),
++                            MTLSizeMake(6u * 4u * 32u, 1, 1), 0)) {
++            return 0;
++        }
++        r0 = r1;
++    }
++    if (!merge) return 1;
++    args.n_rows = n_tokens;
++    args.row0 = 0;
++    qwen4_bind mb[3] = { b[5], b[1], b[4] };
++    return qwen4_dispatch(QWEN4_K_QWEN35_ATTN_VERIFY_MERGE_G6, &args, sizeof(args), mb, 3,
++                          MTLSizeMake(n_head, n_tokens, 1), MTLSizeMake(head_dim, 1, 1), 0);
++}
++
+ int ds4_gpu_qwen4_moe_mid_tensor(
+         ds4_gpu_tensor *mid, const ds4_gpu_tensor *x, const ds4_gpu_tensor *selected,
+         const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset,
+@@ -51238,7 +51315,9 @@ int ds4_gpu_dflash_attn_tensor(
+         !qwen4_bind_tensor(&b[6], out, q_bytes, "dflash attention output")) {
+         return 0;
+     }
+-    return dflash_dispatch("kernel_dflash_attn", &args, sizeof(args), b, 7,
++    char kernel[32] = "kernel_dflash_attn";
++    if (!getenv("DS4_METAL_DFLASH_ATTN_RUNTIME_DIM")) snprintf(kernel, sizeof(kernel), "kernel_dflash_attn_np%u", head_dim / 32u);
++    return dflash_dispatch(kernel, &args, sizeof(args), b, 7,
+                            MTLSizeMake(n_head, n_rows, 1), MTLSizeMake(32, 4, 1));
+ }
+ 
+diff --git a/metal/dflash.metal b/metal/dflash.metal
+index d895350..602a5dc 100644
+--- a/metal/dflash.metal
++++ b/metal/dflash.metal
+@@ -268,6 +268,92 @@ kernel void kernel_dflash_attn(
+     for (uint k = 0; k < npt; k++) dst[tiisg + 32u * k] = o[k] * inv;
+ }
+ 
++/* kernel_dflash_attn with head_dim = 32 * NPT fixed when the shader is
++ * compiled, so its loops unroll and qv, acc and o take constant indices;
++ * above, npt is a runtime value.  At a full ring the draft's attention is
++ * about four times faster this way.  The dot product is an explicit fma
++ * chain, the rounding the kernel above has; the unrolled `dot += q * k`
++ * rounds differently.  The rest is the same code: one key at a time in the
++ * same order and the same merge, so the output is bitwise the same
++ * (test-dflash compares the two). */
++template <uint NPT>
++kernel void kernel_dflash_attn_np(
++        constant ds4_metal_args_dflash_attn & args,
++        device const float   *q,
++        device const float   *k_blk,
++        device const float   *v_blk,
++        device const half    *ring_k,
++        device const half    *ring_v,
++        device const int32_t *ring_pos,
++        device float         *out,
++        uint3 tgpig [[threadgroup_position_in_grid]],
++        ushort tiisg [[thread_index_in_simdgroup]],
++        ushort sgitg [[simdgroup_index_in_threadgroup]]) {
++    const uint h = tgpig.x, t = tgpig.y;
++    if (h >= args.n_head || t >= args.n_rows) return;
++    const uint D = 32u * NPT, Hkv = args.n_head_kv;
++    const uint kvh = h / (args.n_head / Hkv);
++    const int64_t qpos = (int64_t)args.pos0 + t;
++    device const float *qr = q + ((uint64_t)t * args.n_head + h) * D;
++    float qv[NPT], acc[NPT];
++    for (uint k = 0; k < NPT; k++) { qv[k] = qr[tiisg + 32u * k] * args.scale; acc[k] = 0.0f; }
++    float m = -1.0e30f, l = 0.0f;
++    const uint n_keys = args.ring_slots + args.n_rows;
++    for (uint key = sgitg; key < n_keys; key += DFLASH_ATTN_NSG) {
++        float kv[NPT], vv[NPT];
++        if (key < args.ring_slots) {
++            const int64_t tp = ring_pos[key];
++            if (tp < 0 || tp >= (int64_t)args.pos0 || qpos - tp >= (int64_t)args.window) continue;
++            device const half *kr = ring_k + ((uint64_t)key * Hkv + kvh) * D;
++            device const half *vr = ring_v + ((uint64_t)key * Hkv + kvh) * D;
++            for (uint k = 0; k < NPT; k++) { kv[k] = (float)kr[tiisg + 32u * k]; vv[k] = (float)vr[tiisg + 32u * k]; }
++        } else {
++            const uint j = key - args.ring_slots;
++            if (qpos - ((int64_t)args.pos0 + j) >= (int64_t)args.window) continue;
++            device const float *kr = k_blk + ((uint64_t)j * Hkv + kvh) * D;
++            device const float *vr = v_blk + ((uint64_t)j * Hkv + kvh) * D;
++            for (uint k = 0; k < NPT; k++) { kv[k] = kr[tiisg + 32u * k]; vv[k] = vr[tiisg + 32u * k]; }
++        }
++        float dot = 0.0f;
++        for (uint k = 0; k < NPT; k++) dot = fma(qv[k], kv[k], dot);
++        dot = simd_sum(dot);
++        const float m_new = max(m, dot);
++        const float corr = precise::exp(m - m_new), p = precise::exp(dot - m_new);
++        l = l * corr + p;
++        for (uint k = 0; k < NPT; k++) acc[k] = acc[k] * corr + p * vv[k];
++        m = m_new;
++    }
++    threadgroup float sg_m[DFLASH_ATTN_NSG], sg_l[DFLASH_ATTN_NSG];
++    threadgroup float sg_acc[DFLASH_ATTN_NSG][256];
++    if (tiisg == 0) { sg_m[sgitg] = m; sg_l[sgitg] = l; }
++    for (uint k = 0; k < NPT; k++) sg_acc[sgitg][tiisg + 32u * k] = acc[k];
++    threadgroup_barrier(mem_flags::mem_threadgroup);
++    if (sgitg != 0) return;
++    float mt = -1.0e30f;
++    for (uint s = 0; s < DFLASH_ATTN_NSG; s++) mt = max(mt, sg_m[s]);
++    float lt = 0.0f, o[NPT];
++    for (uint k = 0; k < NPT; k++) o[k] = 0.0f;
++    for (uint s = 0; s < DFLASH_ATTN_NSG; s++) {
++        if (sg_l[s] == 0.0f) continue;
++        const float f = precise::exp(sg_m[s] - mt);
++        lt += sg_l[s] * f;
++        for (uint k = 0; k < NPT; k++) o[k] += sg_acc[s][tiisg + 32u * k] * f;
++    }
++    device float *dst = out + ((uint64_t)t * args.n_head + h) * D;
++    const float inv = lt > 0.0f ? 1.0f / lt : 0.0f;
++    for (uint k = 0; k < NPT; k++) dst[tiisg + 32u * k] = o[k] * inv;
++}
++
++typedef decltype(kernel_dflash_attn_np<4>) kernel_dflash_attn_np_t;
++template [[host_name("kernel_dflash_attn_np1")]] kernel kernel_dflash_attn_np_t kernel_dflash_attn_np<1>;
++template [[host_name("kernel_dflash_attn_np2")]] kernel kernel_dflash_attn_np_t kernel_dflash_attn_np<2>;
++template [[host_name("kernel_dflash_attn_np3")]] kernel kernel_dflash_attn_np_t kernel_dflash_attn_np<3>;
++template [[host_name("kernel_dflash_attn_np4")]] kernel kernel_dflash_attn_np_t kernel_dflash_attn_np<4>;
++template [[host_name("kernel_dflash_attn_np5")]] kernel kernel_dflash_attn_np_t kernel_dflash_attn_np<5>;
++template [[host_name("kernel_dflash_attn_np6")]] kernel kernel_dflash_attn_np_t kernel_dflash_attn_np<6>;
++template [[host_name("kernel_dflash_attn_np7")]] kernel kernel_dflash_attn_np_t kernel_dflash_attn_np<7>;
++template [[host_name("kernel_dflash_attn_np8")]] kernel kernel_dflash_attn_np_t kernel_dflash_attn_np<8>;
++
+ /* --- the selector's lattice scores ---------------------------------------- */
+ 
+ struct ds4_metal_args_dflash_selector {
+diff --git a/metal/qwen35_mma.metal b/metal/qwen35_mma.metal
+index 13380d6..f40150a 100644
+--- a/metal/qwen35_mma.metal
++++ b/metal/qwen35_mma.metal
+@@ -5,9 +5,9 @@
+ // (ggml-org/llama.cpp #29869, at a46709b; MIT, the ggml authors):
+ // mul_mv_mma_tile_init, mul_mv_mma_src0_row, mul_mv_mma_src1_row,
+ // mul_mv_mma_store and kernel_mul_mv_mma_gen at one 8-row src1 tile (RT 1),
+-// with NT 1, 2 or 4 weight tiles, on moe.metal's dequantize_q4_K and a
+-// port of llama.cpp's dequantize_q6_K (below); and for Q4_0,
+-// mul_mv_mma_1024_plus, mul_mv_mma_q4_0, load_mma_blk_a, load_mma_blk_b and
++// with NT 1, 2 or 4 weight tiles, on moe.metal's dequantize_q4_K with
++// word loads and a port of llama.cpp's dequantize_q6_K (both below); and
++// for Q4_0, mul_mv_mma_1024_plus, mul_mv_mma_q4_0, load_mma_blk_a, load_mma_blk_b and
+ // kernel_mul_mv_mma_blk at RT 1 (the row length a kernel argument, not a
+ // function constant).
+ //
+@@ -218,12 +218,77 @@ void qwen35_mma_dequantize_q6_K(device const block_q6_K *xb, short il, thread ty
+     }
+ }
+ 
++// moe.metal's dequantize_q4_K from four 32-bit loads instead of sixteen
++// byte loads: the same 16 weights, each dl*q - ml on the same dl, ml and q,
++// so the same floats in the same order. A piece's 16 quant bytes start at
++// qs + 32*(il/4) + 16*(il&1), 4-byte aligned in a 144-byte block whose qs
++// starts at byte 16.
++template <typename type4x4>
++void qwen35_mma_dequantize_q4_K(device const block_q4_K *xb, short il, thread type4x4 & reg) {
++    device const uint32_t * q = (device const uint32_t *)(xb->qs + (il/4)*32 + 16*(il&1));
++
++    const short is = (il/4)*2;
++    il = il & 3;
++    const uchar2 sc = get_scale_min_k4_just2(is, il/2, xb->scales);
++    const float d = il < 2 ?
++        (float)xb->d :
++        (float)xb->d * (1.0f / 16.0f);
++    const float min = (float)xb->dmin;
++    const float dl = d * sc[0];
++    const float ml = min * sc[1];
++
++    const uint32_t mask = il < 2 ? 0x0F0F0F0F : 0xF0F0F0F0;
++    FOR_UNROLL (short i = 0; i < 4; ++i) {
++        const uint32_t w = q[i] & mask;
++        reg[i][0] = dl * (float)( w        & 0xFF) - ml;
++        reg[i][1] = dl * (float)((w >>  8) & 0xFF) - ml;
++        reg[i][2] = dl * (float)((w >> 16) & 0xFF) - ml;
++        reg[i][3] = dl * (float)( w >> 24        ) - ml;
++    }
++}
++
++// the same as qwen35_mma_dequantize_q4_K from one 16-byte load, the
++// default; a piece's bytes are 16-byte aligned when the block is, and the
++// host takes the 32-bit loads when the weights are not. At T = 8 the
++// per-byte loads cost 253.6 us at 5120->17408, 32-bit loads 236.2 and one
++// 16-byte load 209.0 (docs/superpowers/research/2026-10-07-mma-q4k-word.md
++// in the ds4-engine host repository).
++template <typename type4x4>
++void qwen35_mma_dequantize_q4_K_vec(device const block_q4_K *xb, short il, thread type4x4 & reg) {
++    const uint4 qv = *(device const uint4 *)(xb->qs + (il/4)*32 + 16*(il&1));
++
++    const short is = (il/4)*2;
++    il = il & 3;
++    const uchar2 sc = get_scale_min_k4_just2(is, il/2, xb->scales);
++    const float d = il < 2 ?
++        (float)xb->d :
++        (float)xb->d * (1.0f / 16.0f);
++    const float min = (float)xb->dmin;
++    const float dl = d * sc[0];
++    const float ml = min * sc[1];
++
++    const uint32_t mask = il < 2 ? 0x0F0F0F0F : 0xF0F0F0F0;
++    FOR_UNROLL (short i = 0; i < 4; ++i) {
++        const uint32_t w = qv[i] & mask;
++        reg[i][0] = dl * (float)( w        & 0xFF) - ml;
++        reg[i][1] = dl * (float)((w >>  8) & 0xFF) - ml;
++        reg[i][2] = dl * (float)((w >> 16) & 0xFF) - ml;
++        reg[i][3] = dl * (float)( w >> 24        ) - ml;
++    }
++}
++
+ // nl 16: a 256-weight super-block holds sixteen 16-weight pieces
+ typedef decltype(kernel_qwen35_mma_f32<1, block_q4_K, 16, dequantize_q4_K>) qwen35_mma_t;
+ 
+ template [[host_name("kernel_qwen35_mma_q4_K_f32_nt1")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<1, block_q4_K, 16, dequantize_q4_K>;
+ template [[host_name("kernel_qwen35_mma_q4_K_f32_nt2")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<2, block_q4_K, 16, dequantize_q4_K>;
+ template [[host_name("kernel_qwen35_mma_q4_K_f32_nt4")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<4, block_q4_K, 16, dequantize_q4_K>;
++template [[host_name("kernel_qwen35_mma_q4_K_word_f32_nt1")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<1, block_q4_K, 16, qwen35_mma_dequantize_q4_K>;
++template [[host_name("kernel_qwen35_mma_q4_K_word_f32_nt2")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<2, block_q4_K, 16, qwen35_mma_dequantize_q4_K>;
++template [[host_name("kernel_qwen35_mma_q4_K_word_f32_nt4")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<4, block_q4_K, 16, qwen35_mma_dequantize_q4_K>;
++template [[host_name("kernel_qwen35_mma_q4_K_vec_f32_nt1")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<1, block_q4_K, 16, qwen35_mma_dequantize_q4_K_vec>;
++template [[host_name("kernel_qwen35_mma_q4_K_vec_f32_nt2")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<2, block_q4_K, 16, qwen35_mma_dequantize_q4_K_vec>;
++template [[host_name("kernel_qwen35_mma_q4_K_vec_f32_nt4")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<4, block_q4_K, 16, qwen35_mma_dequantize_q4_K_vec>;
+ template [[host_name("kernel_qwen35_mma_q6_K_f32_nt1")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<1, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
+ template [[host_name("kernel_qwen35_mma_q6_K_f32_nt2")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<2, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
+ template [[host_name("kernel_qwen35_mma_q6_K_f32_nt4")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<4, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
+diff --git a/metal/qwen4.metal b/metal/qwen4.metal
+index 95b77dc..7364b64 100644
+--- a/metal/qwen4.metal
++++ b/metal/qwen4.metal
+@@ -3022,6 +3022,245 @@ kernel void kernel_qwen35_attn_fa(
+     }
+ }
+ 
++/* --- dense qwen35 verify attention, shared K/V tiles --------------------- */
++
++/* A DFlash verify of 1..8 rows over one layer's f16 caches.  A threadgroup
++ * takes one key split of one KV head for every row: each 16-key K/V tile is
++ * loaded once into threadgroup memory and used by all rows and all GROUP
++ * query heads.  The per-row decode kernels read the caches once per row and
++ * spend most of their time on a cross-lane sum and a softmax step per key
++ * and head; here the work is 8x8 simdgroup MMAs.
++ *
++ * Simdgroup (g, part) holds query head g of the KV head for every row: the
++ * batch rows are the rows of its 8x8 matrices (rows past n_rows zero), and
++ * it owns dims part*64..+63 of the queries and of the output.  Per 16 keys
++ * the four parts score their dims (8 MMAs each into two 8x8 tiles), add the
++ * four partial scores in order through threadgroup memory, run the same
++ * online-softmax step per row on the lanes that hold that row, and add P V
++ * for their dims (16 MMAs).  Keys past a row's position get probability 0.
++ *
++ * Exactness.  Row r (position p = pos0 + r) splits its keys 0..p at
++ * multiples of the host's split size for p + 1 keys (a multiple of 16, a
++ * function of p alone; the host dispatches rows of another split size apart,
++ * at most twice a batch), tiles and steps start at multiples of 16, and the
++ * merge combines the splits in order.  An output row of an MMA depends only
++ * on the same row of its first operand (as the verify matvecs rely on), so
++ * nothing in row r's arithmetic depends on the number of rows or on the
++ * other rows, except the sign of a zero: a masked key adds 0 * v, whose sign
++ * follows v.  That changes no nonzero sum, and outputs that are zero are
++ * written as +0.  So row r is bitwise the same in any batch and in a
++ * one-row pass at p.  D 256 and GROUP query heads per KV head. */
++
++#define QWEN35_VATTN_NSGR 4      /* simdgroups per query head, each 64 dims */
++#define QWEN35_VATTN_KT   16     /* keys per tile and per step */
++#define QWEN35_VATTN_DP   264    /* tile row stride in halves, padded */
++
++struct ds4_metal_args_qwen35_attn_verify {
++    uint32_t n_rows;         /* rows of this dispatch */
++    uint32_t row0;           /* its first row in the batch */
++    uint32_t n_head;
++    uint32_t n_head_kv;
++    uint32_t pos0;           /* batch row r sits at position pos0 + r */
++    uint32_t split_keys;     /* keys per split of every row of this dispatch */
++    uint32_t part_splits;    /* the partials' split stride */
++    float    scale;
++    uint32_t row_splits[8];  /* each batch row's split count */
++};
++
++/* the row and the first of the two columns lane l holds in an 8x8
++ * simdgroup matrix (thread_elements()[e] is column col + e) */
++static inline ushort qwen35_vattn_lane_row(ushort l) { return ((l / 4) & 4) + ((l / 2) % 4); }
++static inline ushort qwen35_vattn_lane_col(ushort l) { return ((l / 4) & 2) * 2 + (l % 2) * 2; }
++
++/* +0 for either zero, so a zero's sign cannot carry another row's values */
++static inline float qwen35_vattn_plus_zero(float x) {
++    return (as_type<uint>(x) & 0x7fffffffu) == 0u ? 0.0f : x;
++}
++
++template <uint GROUP>
++kernel void kernel_qwen35_attn_verify(
++        constant ds4_metal_args_qwen35_attn_verify & args,
++        device const float *q,        /* [R][H*D] */
++        device const float *gate,     /* [R][H*D] */
++        device const half  *k_cache,  /* [cap][Hkv*D] */
++        device const half  *v_cache,  /* [cap][Hkv*D] */
++        device float       *out,      /* [R][H*D] */
++        device float       *part,     /* [R][Hkv][part_splits][GROUP][2+D] */
++        uint3  tgpig [[threadgroup_position_in_grid]],
++        ushort tid   [[thread_index_in_threadgroup]],
++        ushort sgitg [[simdgroup_index_in_threadgroup]],
++        ushort tiisg [[thread_index_in_simdgroup]]) {
++    constexpr uint D = 256, NSGR = QWEN35_VATTN_NSGR, KT = QWEN35_VATTN_KT, DP = QWEN35_VATTN_DP;
++    constexpr uint DD = D / NSGR, NF = DD / 8, C8 = D / 8, NB = KT / 8;
++    constexpr uint n_threads = GROUP * NSGR * 32u;
++    const uint split = tgpig.x, kvh = tgpig.y;
++    const uint H = args.n_head, Hkv = args.n_head_kv;
++    const uint S = args.split_keys;
++    const uint k0 = split * S;
++    const uint k1 = min(k0 + S, args.pos0 + args.row0 + args.n_rows);
++    const uint g = sgitg / NSGR, dpart = sgitg % NSGR, d0 = dpart * DD;
++    const ushort fm = qwen35_vattn_lane_row(tiisg), fn = qwen35_vattn_lane_col(tiisg);
++    const bool live = fm < args.n_rows;
++    const uint r = args.row0 + (live ? fm : 0u);
++    const uint p = args.pos0 + r;
++    const uint h = kvh * GROUP + g;
++
++    threadgroup half Kt[KT * DP], Vt[KT * DP];
++    threadgroup float Sx[GROUP][NSGR][NB][64];
++
++    simdgroup_float8x8 Q[NF], O[NF];
++    device const float *qr = q + ((uint64_t)r * H + h) * D + d0 + fn;
++#pragma unroll
++    for (uint j = 0; j < NF; j++) {
++        Q[j].thread_elements()[0] = live ? qr[8u * j] * args.scale : 0.0f;
++        Q[j].thread_elements()[1] = live ? qr[8u * j + 1u] * args.scale : 0.0f;
++        O[j] = make_filled_simdgroup_matrix<float, 8>(0.0f);
++    }
++    float m = -3.0e38f, l = 0.0f;
++    threadgroup float *sx = &Sx[g][0][0][0];
++
++    for (uint t0 = k0; t0 < k1; t0 += KT) {
++        const uint nk = min(KT, k1 - t0);
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        for (uint i = tid; i < KT * C8; i += n_threads) {
++            const uint key = i / C8, c = i % C8;
++            uint4 kx = uint4(0u), vx = uint4(0u);
++            if (key < nk) {
++                const uint64_t at = ((uint64_t)(t0 + key) * Hkv + kvh) * C8 + c;
++                kx = ((device const uint4 *)k_cache)[at];
++                vx = ((device const uint4 *)v_cache)[at];
++            }
++            *(threadgroup uint4 *)(Kt + key * DP + c * 8u) = kx;
++            *(threadgroup uint4 *)(Vt + key * DP + c * 8u) = vx;
++        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++
++        simdgroup_float8x8 Sm[NB];
++#pragma unroll
++        for (uint b = 0; b < NB; b++) Sm[b] = make_filled_simdgroup_matrix<float, 8>(0.0f);
++#pragma unroll
++        for (uint j = 0; j < NF; j++) {
++#pragma unroll
++            for (uint b = 0; b < NB; b++) {
++                simdgroup_half8x8 Kj;
++                simdgroup_load(Kj, Kt + 8u * b * DP + d0 + 8u * j, DP, ulong2(0, 0), true);
++                simdgroup_multiply_accumulate(Sm[b], Q[j], Kj, Sm[b]);
++            }
++        }
++#pragma unroll
++        for (uint b = 0; b < NB; b++) {
++            sx[(dpart * NB + b) * 64u + tiisg * 2u] = Sm[b].thread_elements()[0];
++            sx[(dpart * NB + b) * 64u + tiisg * 2u + 1u] = Sm[b].thread_elements()[1];
++        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++
++        float sv[NB][2];
++        float bm = -3.0e38f;
++#pragma unroll
++        for (uint b = 0; b < NB; b++) {
++#pragma unroll
++            for (uint e = 0; e < 2; e++) {
++                float s = sx[b * 64u + tiisg * 2u + e];
++#pragma unroll
++                for (uint u = 1; u < NSGR; u++) s = s + sx[(u * NB + b) * 64u + tiisg * 2u + e];
++                sv[b][e] = t0 + 8u * b + fn + e <= p ? s : -3.0e38f;
++                bm = max(bm, sv[b][e]);
++            }
++        }
++        bm = max(bm, simd_shuffle_xor(bm, 1));
++        bm = max(bm, simd_shuffle_xor(bm, 8));
++        const float m_new = max(m, bm);
++        const float corr = exp(m - m_new);
++        float ps = 0.0f;
++        simdgroup_float8x8 P[NB];
++#pragma unroll
++        for (uint b = 0; b < NB; b++) {
++#pragma unroll
++            for (uint e = 0; e < 2; e++) {
++                const float pv = t0 + 8u * b + fn + e <= p ? exp(sv[b][e] - m_new) : 0.0f;
++                P[b].thread_elements()[e] = pv;
++                ps = ps + pv;
++            }
++        }
++        ps = ps + simd_shuffle_xor(ps, 1);
++        ps = ps + simd_shuffle_xor(ps, 8);
++        l = fma(l, corr, ps);
++        m = m_new;
++#pragma unroll
++        for (uint j = 0; j < NF; j++) {
++            O[j].thread_elements()[0] *= corr;
++            O[j].thread_elements()[1] *= corr;
++#pragma unroll
++            for (uint b = 0; b < NB; b++) {
++                simdgroup_half8x8 Vj;
++                simdgroup_load(Vj, Vt + 8u * b * DP + d0 + 8u * j, DP, ulong2(0, 0), false);
++                simdgroup_multiply_accumulate(O[j], P[b], Vj, O[j]);
++            }
++        }
++    }
++    if (!live || k0 > p) return;
++    if (args.row_splits[r] == 1u) {
++        device float *dst = out + ((uint64_t)r * H + h) * D + d0 + fn;
++        device const float *gt = gate + ((uint64_t)r * H + h) * D + d0 + fn;
++        const float inv = l > 0.0f ? 1.0f / l : 0.0f;
++#pragma unroll
++        for (uint j = 0; j < NF; j++) {
++#pragma unroll
++            for (uint e = 0; e < 2; e++)
++                dst[8u * j + e] = qwen35_vattn_plus_zero(O[j].thread_elements()[e] * inv * qwen4_sigmoid(gt[8u * j + e]));
++        }
++    } else {
++        device float *dst = part + ((((uint64_t)r * Hkv + kvh) * args.part_splits + split) * GROUP + g) * (2u + D);
++        if (dpart == 0 && fn == 0) { dst[0] = m; dst[1] = l; }
++#pragma unroll
++        for (uint j = 0; j < NF; j++) {
++            dst[2u + d0 + 8u * j + fn] = O[j].thread_elements()[0];
++            dst[2u + d0 + 8u * j + fn + 1u] = O[j].thread_elements()[1];
++        }
++    }
++}
++
++/* The merge of each row's splits in order, one thread per dim; rows with
++ * one split were written directly.  One dispatch for the whole batch. */
++template <uint GROUP>
++kernel void kernel_qwen35_attn_verify_merge(
++        constant ds4_metal_args_qwen35_attn_verify & args,
++        device const float *part,
++        device const float *gate,
++        device float       *out,
++        uint3  tgpig [[threadgroup_position_in_grid]],
++        ushort tid   [[thread_index_in_threadgroup]]) {
++    constexpr uint D = 256;
++    const uint h = tgpig.x;
++    if (h >= args.n_head || tgpig.y >= args.n_rows || tid >= D) return;
++    const uint r = args.row0 + tgpig.y;
++    const uint n_splits = args.row_splits[r];
++    if (n_splits == 1u) return;
++    const uint kvh = h / GROUP, g = h % GROUP;
++    const uint64_t stride = (uint64_t)GROUP * (2u + D);
++    device const float *base = part + (((uint64_t)r * args.n_head_kv + kvh) * args.part_splits * GROUP + g) * (2u + D);
++    float mm = -3.0e38f;
++    for (uint s = 0; s < n_splits; s++) mm = max(mm, base[s * stride]);
++    float ll = 0.0f, o = 0.0f;
++    for (uint s = 0; s < n_splits; s++) {
++        device const float *ps = base + s * stride;
++        const float c = ps[1] > 0.0f ? exp(ps[0] - mm) : 0.0f;
++        ll = fma(ps[1], c, ll);
++        o = fma(ps[2u + tid], c, o);
++    }
++    const float inv = ll > 0.0f ? 1.0f / ll : 0.0f;
++    const uint64_t at = ((uint64_t)r * args.n_head + h) * D + tid;
++    out[at] = qwen35_vattn_plus_zero(o * inv * qwen4_sigmoid(gate[at]));
++}
++
++template [[host_name("kernel_qwen35_attn_verify_g6")]]
++kernel void kernel_qwen35_attn_verify<6>(constant ds4_metal_args_qwen35_attn_verify &, device const float *,
++        device const float *, device const half *, device const half *, device float *, device float *,
++        uint3, ushort, ushort, ushort);
++template [[host_name("kernel_qwen35_attn_verify_merge_g6")]]
++kernel void kernel_qwen35_attn_verify_merge<6>(constant ds4_metal_args_qwen35_attn_verify &,
++        device const float *, device const float *, device float *, uint3, ushort);
++
+ /* --- routed experts ----------------------------------------------------- */
+ 
+ #define QWEN4_MOE_NSG 4
+diff --git a/tests/test_qwen4_kernels.c b/tests/test_qwen4_kernels.c
+index ee8fe56..2257c7a 100644
+--- a/tests/test_qwen4_kernels.c
++++ b/tests/test_qwen4_kernels.c
+@@ -4053,6 +4053,24 @@ static int qwen35_mma_q4_K(ds4_gpu_tensor *out, const void *map, uint64_t size,
+     return ds4_gpu_matmul_mma_rows_tensor(out, map, size, off, 12u, in_dim, out_dim, x, n_tok);
+ }
+ 
++/* the Q4_K MMA with the per-byte dequantizer it had before, and with the
++ * 32-bit-load one (the bench's A/B; the default is one 16-byte load) */
++static int qwen35_mma_q4_K_bytes(ds4_gpu_tensor *out, const void *map, uint64_t size, uint64_t off,
++                                 uint64_t in_dim, uint64_t out_dim, const ds4_gpu_tensor *x, uint64_t n_tok) {
++    ds4_gpu_test_set_flags(DS4_GPU_TEST_Q4_K_MMA_BYTEWISE);
++    const int ok = ds4_gpu_matmul_mma_rows_tensor(out, map, size, off, 12u, in_dim, out_dim, x, n_tok);
++    ds4_gpu_test_set_flags(0u);
++    return ok;
++}
++
++static int qwen35_mma_q4_K_word(ds4_gpu_tensor *out, const void *map, uint64_t size, uint64_t off,
++                                uint64_t in_dim, uint64_t out_dim, const ds4_gpu_tensor *x, uint64_t n_tok) {
++    ds4_gpu_test_set_flags(DS4_GPU_TEST_Q4_K_MMA_WORD);
++    const int ok = ds4_gpu_matmul_mma_rows_tensor(out, map, size, off, 12u, in_dim, out_dim, x, n_tok);
++    ds4_gpu_test_set_flags(0u);
++    return ok;
++}
++
+ static int qwen35_mma_q6_K(ds4_gpu_tensor *out, const void *map, uint64_t size, uint64_t off,
+                            uint64_t in_dim, uint64_t out_dim, const ds4_gpu_tensor *x, uint64_t n_tok) {
+     return ds4_gpu_matmul_mma_rows_tensor(out, map, size, off, 14u, in_dim, out_dim, x, n_tok);
+@@ -4183,8 +4201,8 @@ static void test_qwen35_verify(arena_t *a) {
+ typedef struct {
+     const char *type;
+     qwen35_mv_fn one;
+-    const char *rows_name[2];
+-    qwen35_mv_fn rows[2];
++    const char *rows_name[3];
++    qwen35_mv_fn rows[3];
+     const uint32_t (*shapes)[2];
+     uint32_t n_shapes;
+ } qwen35_bench_type;
+@@ -4227,25 +4245,33 @@ static double qwen35_median20(const double *samples) {
+  * multi-row variant, at the 27B's projection shapes and, for Q6_K, the
+  * output head (5120 -> 248320, about 1 GiB of the arena).
+  * DS4_TEST_QWEN35_VERIFY_BENCH=Q4_0: the DFlash drafter's Q4_0 shapes
+- * instead (FFN, q, k/v, wo, conv_proj, fc). No pass/fail. */
+-static void bench_qwen35_verify(arena_t *a, bool drafter) {
++ * instead (FFN, q, k/v, wo, conv_proj, fc).
++ * DS4_TEST_QWEN35_VERIFY_BENCH=Q4_K: Q4_K alone, its MMA with the per-byte,
++ * 32-bit-load and 16-byte-load dequantizers side by side. No pass/fail. */
++static void bench_qwen35_verify(arena_t *a, const char *mode) {
++    const bool drafter = !strcmp(mode, "Q4_0"), q4_K_ab = !strcmp(mode, "Q4_K");
+     static const uint32_t shapes[][2] = {{5120, 17408}, {17408, 5120}, {5120, 12288}, {5120, 248320}};
+     static const uint32_t drafter_shapes[][2] = {{5120, 17408}, {17408, 5120}, {5120, 4096}, {5120, 1024},
+                                                  {4096, 5120}, {5120, 1280}, {25600, 5120}};
+     const qwen35_bench_type target_types[] = {
+-        {"Q4_K", qwen35_q4_K_one_row, {"rows", "mma"}, {ds4_gpu_matmul_q4_K_rows_tensor, qwen35_mma_q4_K}, shapes, 3},
+-        {"Q6_K", ds4_gpu_matmul_q6_K_tensor, {"mma", NULL}, {qwen35_mma_q6_K, NULL}, shapes, 4},
++        {"Q4_K", qwen35_q4_K_one_row, {"rows", "mma", "mma-byte"},
++         {ds4_gpu_matmul_q4_K_rows_tensor, qwen35_mma_q4_K, qwen35_mma_q4_K_bytes}, shapes, 3},
++        {"Q6_K", ds4_gpu_matmul_q6_K_tensor, {"mma", NULL, NULL}, {qwen35_mma_q6_K, NULL, NULL}, shapes, 4},
+     };
+     const qwen35_bench_type drafter_types[] = {
+-        {"Q4_0", qwen35_q4_0_one_row, {"mma", NULL}, {qwen35_mma_q4_0, NULL}, drafter_shapes, 7},
++        {"Q4_0", qwen35_q4_0_one_row, {"mma", NULL, NULL}, {qwen35_mma_q4_0, NULL, NULL}, drafter_shapes, 7},
++    };
++    const qwen35_bench_type q4_K_types[] = {
++        {"Q4_K", qwen35_q4_K_one_row, {"mma-byte", "mma-word", "mma-vec"},
++         {qwen35_mma_q4_K_bytes, qwen35_mma_q4_K_word, qwen35_mma_q4_K}, shapes, 3},
+     };
+-    const qwen35_bench_type *types = drafter ? drafter_types : target_types;
+-    const uint32_t n_types = drafter ? 1u : 2u;
++    const qwen35_bench_type *types = drafter ? drafter_types : q4_K_ab ? q4_K_types : target_types;
++    const uint32_t n_types = drafter || q4_K_ab ? 1u : 2u;
+     printf("qwen35 verify bench: us/call, median of 20 batches of 10 calls\n");
+     for (uint32_t ti = 0; ti < n_types; ti++) {
+         const qwen35_bench_type *bt = &types[ti];
+         const bool q6 = bt->type[1] == '6';
+-        const uint32_t n_var = 2u + (bt->rows[0] != NULL) + (bt->rows[1] != NULL);
++        const uint32_t n_var = 2u + (bt->rows[0] != NULL) + (bt->rows[1] != NULL) + (bt->rows[2] != NULL);
+         for (uint32_t si = 0; si < bt->n_shapes; si++) {
+             const uint32_t in_dim = bt->shapes[si][0], out_dim = bt->shapes[si][1];
+             const uint64_t in_bytes = (uint64_t)in_dim * 4u, out_bytes = (uint64_t)out_dim * 4u;
+@@ -4264,7 +4290,7 @@ static void bench_qwen35_verify(arena_t *a, bool drafter) {
+                 require_ok(xs[t] && os[t], "qwen35 bench views");
+             }
+             for (uint32_t T = 1; T <= 8; T++) {
+-                double samples[4][20], med[4];
++                double samples[5][20], med[5];
+                 for (uint32_t v = 0; v < n_var; v++)
+                     (void)qwen35_bench_batch(a, bt, v, off, in_dim, out_dim, T, gx, gout, xs, os);
+                 for (uint32_t rep = 0; rep < 20; rep++)
+@@ -4456,6 +4482,21 @@ static void test_dflash_attn(uint32_t n_rows, uint32_t H, uint32_t Hkv, uint32_t
+     snprintf(name, sizeof(name), "dflash attn %u rows %u/%u x%u ring %u (%u holes, %u ring keys at row 0) window %u at %u",
+              n_rows, H, Hkv, D, slots, holes, admitted0, window, pos0);
+     check_tensor(name, tout, ref, q_n, 1e-3);
++    float *got = download(tout, q_n);
++    setenv("DS4_METAL_DFLASH_ATTN_RUNTIME_DIM", "1", 1);
++    require_ok(ds4_gpu_dflash_attn_tensor(tout, tq, tkb, tvb, trk, trv, ttag, n_rows, H, Hkv, D, slots, window,
++                                          pos0, scale), "dflash attention, runtime head_dim");
++    unsetenv("DS4_METAL_DFLASH_ATTN_RUNTIME_DIM");
++    float *runtime_dim = download(tout, q_n);
++    uint64_t differ = 0;
++    for (uint64_t i = 0; i < q_n; i++) differ += memcmp(&got[i], &runtime_dim[i], sizeof(float)) != 0;
++    if (differ) {
++        fprintf(stderr, "%s: %llu of %llu values differ from the runtime head_dim kernel's\n", name,
++                (unsigned long long)differ, (unsigned long long)q_n);
++        exit(1);
++    }
++    printf("  %-44s ok  byte-equal to the runtime head_dim kernel\n", name);
++    free(got); free(runtime_dim);
+     ds4_gpu_tensor_free(tq); ds4_gpu_tensor_free(tkb); ds4_gpu_tensor_free(tvb);
+     ds4_gpu_tensor_free(trk); ds4_gpu_tensor_free(trv); ds4_gpu_tensor_free(ttag); ds4_gpu_tensor_free(tout);
+     free(q); free(kb); free(vb); free(rk); free(rv); free(tags); free(ref); free(lg); free(seen);
+@@ -4898,6 +4939,99 @@ static void test_q6_K_mm(arena_t *a) {
+     g_rng = rng;
+ }
+ 
++/* q4_K rows of random bytes, so every scale/min pair, nibble and il path
++ * occurs; d and dmin are random-signed halves from 2^-18 to 2^-6.  The rows
++ * start skew bytes past a 64-byte boundary. */
++static uint64_t arena_q4_K_bytes(arena_t *a, uint64_t rows, uint64_t cols, uint32_t skew) {
++    const uint64_t n = rows * (cols / 256u);
++    const uint64_t off = arena_alloc(a, n * 144u + skew) + skew;
++    uint8_t *w = a->base + off;
++    for (uint64_t b = 0; b < n; b++) {
++        uint8_t *blk = w + b * 144u;
++        for (int i = 4; i < 144; i++) blk[i] = (uint8_t)(urand() >> 13);
++        for (int k = 0; k < 2; k++) {
++            const float mag = ldexpf(1.0f + 0.4999f * (frand() + 1.0f), -18 + (int)(urand() % 13u));
++            const uint16_t h = f32_to_f16((urand() & 1u) ? -mag : mag);
++            memcpy(blk + 2 * k, &h, 2);
++        }
++    }
++    return off;
++}
++
++static ds4_gpu_tensor *q4_K_mma(const arena_t *a, uint64_t off, uint32_t in_dim, uint32_t rows,
++                                const ds4_gpu_tensor *gx, uint32_t T, uint32_t flags, float fill) {
++    ds4_gpu_tensor *out = upload(NULL, (uint64_t)T * rows);
++    require_ok(ds4_gpu_tensor_fill_f32(out, fill, (uint64_t)T * rows), "Q4_K mma output fill");
++    ds4_gpu_test_set_flags(flags);
++    const int ok = ds4_gpu_matmul_mma_rows_tensor(out, a->base, a->size, off, 12u, in_dim, rows, gx, T);
++    ds4_gpu_test_set_flags(0u);
++    require_ok(ok, "Q4_K mma dispatch");
++    return out;
++}
++
++/* The few-row Q4_K MMA as dispatched (one 16-byte load per piece, or 32-bit
++ * loads when the weights are not 16-byte aligned) and with the 32-bit-load
++ * dequantizer forced, against the same kernel with moe.metal's per-byte
++ * dequantize_q4_K it replaced: every output float byte-equal, T = 1..8. */
++static void test_q4_K_mma_word_shape(arena_t *a, uint32_t in_dim, uint32_t rows, uint32_t skew) {
++    const uint64_t off = arena_q4_K_bytes(a, rows, in_dim, skew);
++    float *x = rand_vec(8ull * in_dim, 1.0f);
++    ds4_gpu_tensor *gx = upload(x, 8ull * in_dim);
++    static const uint32_t flags[] = {0u, DS4_GPU_TEST_Q4_K_MMA_WORD};
++    static const char *names[] = {"default", "word"};
++    uint64_t nonzero = 0, total = 0;
++    for (uint32_t T = 1; T <= 8; T++) {
++        const uint64_t n = (uint64_t)T * rows;
++        ds4_gpu_tensor *gold = q4_K_mma(a, off, in_dim, rows, gx, T, DS4_GPU_TEST_Q4_K_MMA_BYTEWISE, 1.0f);
++        float *old = download(gold, n);
++        for (uint64_t i = 0; i < n; i++) {
++            require_ok(isfinite(old[i]), "Q4_K mma bytewise output finite");
++            if (old[i] != 0.0f) nonzero++;
++        }
++        total += n;
++        for (uint32_t v = 0; v < 2; v++) {
++            ds4_gpu_tensor *gnew = q4_K_mma(a, off, in_dim, rows, gx, T, flags[v], 2.0f);
++            float *got = download(gnew, n);
++            for (uint64_t i = 0; i < n; i++) {
++                if (memcmp(&old[i], &got[i], sizeof(float)) != 0) {
++                    fprintf(stderr, "Q4_K mma %s %u->%u T=%u: first differing float at row %llu col %llu: "
++                                    "%s %.9g (0x%08x) bytewise %.9g (0x%08x)\n",
++                            names[v], in_dim, rows, T, (unsigned long long)(i / rows), (unsigned long long)(i % rows),
++                            names[v], got[i], *(uint32_t *)&got[i], old[i], *(uint32_t *)&old[i]);
++                    exit(1);
++                }
++            }
++            free(got);
++            ds4_gpu_tensor_free(gnew);
++        }
++        free(old);
++        ds4_gpu_tensor_free(gold);
++    }
++    require_ok(nonzero > total / 2, "Q4_K mma output mostly nonzero");
++    printf("  Q4_K mma default, word %u->%u skew %u T=1..8: %llu floats byte-equal to the bytewise dequantizer\n",
++           in_dim, rows, skew, (unsigned long long)total);
++    free(x);
++    ds4_gpu_tensor_free(gx);
++}
++
++/* every NSG (4, 8, 16) and NT (1, 2, 4) regime, odd row counts and the
++ * 27B's shapes, and two shapes 4 bytes off 16-byte alignment (where the
++ * default takes the 32-bit loads); on a saved random stream and a rewound
++ * arena, as test_q6_K_mm */
++static void test_q4_K_mma_word(arena_t *a) {
++    const uint32_t rng = g_rng;
++    const uint64_t used = a->used;
++    printf("qwen35 Q4_K mma dequantizer\n");
++    const uint32_t shapes[][2] = {{256, 7}, {256, 13}, {5120, 1031}, {17408, 517}, {2560, 517},
++                                  {5120, 2053}, {5120, 4099}, {5120, 17408}, {17408, 5120}, {5120, 12288}};
++    for (uint32_t s = 0; s < sizeof(shapes) / sizeof(shapes[0]); s++)
++        test_q4_K_mma_word_shape(a, shapes[s][0], shapes[s][1], 0u);
++    test_q4_K_mma_word_shape(a, 256, 13, 4u);
++    test_q4_K_mma_word_shape(a, 5120, 2053, 4u);
++    a->used = used;
++    g_rng = rng;
++}
++
+ /* causal gated attention of query row t, head h in double; q_half rounds the
+  * query to half (round to nearest even) as both GPU kernels stage it */
+ static void qwen35_attn_ref_row(const float *q, const float *gate, const _Float16 *kc, const _Float16 *vc,
+@@ -5038,6 +5172,237 @@ static void test_qwen35_attn_fa(void) {
+     test_qwen35_attn_fa_case(45, 1001);
+     g_rng = rng;
+ }
++
++static void qwen35_vattn_rows_equal(const char *what, const float *got, const float *want, uint32_t rows,
++                                    uint64_t row_floats) {
++    for (uint64_t i = 0; i < (uint64_t)rows * row_floats; i++) {
++        if (memcmp(&got[i], &want[i], sizeof(float)) != 0) {
++            fprintf(stderr, "qwen35 verify attention: %s: row %llu head %llu dim %llu differs (%.9g vs %.9g)\n",
++                    what, (unsigned long long)(i / row_floats), (unsigned long long)(i % row_floats / 256u),
++                    (unsigned long long)(i % 256u), got[i], want[i]);
++            exit(1);
++        }
++    }
++}
++
++static void qwen35_vattn_put_rows(ds4_gpu_tensor *t, uint64_t row0, uint64_t n_rows, uint64_t row_floats,
++                                  const void *src, uint32_t elem) {
++    require_ok(ds4_gpu_tensor_write(t, row0 * row_floats * elem, (const uint8_t *)src + row0 * row_floats * elem,
++                                    n_rows * row_floats * elem), "qwen35 verify attention: write rows");
++}
++
++/* The shared-tile verify attention on the 27B's shape (24 query heads over 4
++ * KV heads, D 256) with 8 rows at pos0:
++ * - row t is byte-equal across T = 1..8 rows, where cache rows and query
++ *   rows past the batch hold NaN, so a read beyond row t's keys shows;
++ * - row t is byte-equal when every other row's query and gate and the K/V
++ *   of every later position change;
++ * - row t is byte-equal to a one-row call at pos0 + t (the DFlash-mode
++ *   serial pass);
++ * - every output is within 1e-3 of the output scale of attention in double;
++ * - the largest difference from the per-row path, reported. */
++static void qwen35_attn_verify_shared_case(uint32_t pos0) {
++    const uint32_t R = 8, H = 24, Hkv = 4, D = 256, cap = pos0 + R + 16;
++    const float scale = 0.0625f;
++    const uint64_t qd = (uint64_t)H * D, kvd = (uint64_t)Hkv * D, qn = (uint64_t)R * qd, kvn = (uint64_t)cap * kvd;
++    const uint16_t nan_bits = 0x7e00u;
++    const uint32_t nan32 = 0x7fc00000u;
++    float *q = rand_vec(qn, 4.0f), *gate = rand_vec(qn, 2.0f), *nanq = malloc(qn * 4);
++    _Float16 *kc = malloc(kvn * 2), *vc = malloc(kvn * 2), *nankv = malloc(kvn * 2);
++    require_ok(kc && vc && nanq && nankv, "qwen35 verify attention: host buffers");
++    for (uint64_t i = 0; i < kvn; i++) {
++        memcpy(&nankv[i], &nan_bits, 2);
++        if (i >= (uint64_t)(pos0 + R) * kvd) {
++            memcpy(&kc[i], &nan_bits, 2);
++            memcpy(&vc[i], &nan_bits, 2);
++        } else {
++            kc[i] = (_Float16)(2.0f * frand());
++            vc[i] = (_Float16)frand();
++        }
++    }
++    for (uint64_t i = 0; i < qn; i++) memcpy(&nanq[i], &nan32, 4);
++    ds4_gpu_tensor *gq = upload(q, qn), *gg = upload(gate, qn), *gout = upload(NULL, qn);
++    ds4_gpu_tensor *gk = ds4_gpu_tensor_alloc(kvn * 2), *gv = ds4_gpu_tensor_alloc(kvn * 2);
++    ds4_gpu_tensor *part = upload(NULL, ds4_gpu_qwen4_attn_part_floats(R, H, D));
++    require_ok(gk && gv && ds4_gpu_tensor_write(gk, 0, kc, kvn * 2) && ds4_gpu_tensor_write(gv, 0, vc, kvn * 2),
++               "qwen35 verify attention: caches");
++    if (pos0 == 2045) {
++        require_ok(ds4_gpu_qwen35_attn_verify_split_keys(pos0 + 1) != ds4_gpu_qwen35_attn_verify_split_keys(pos0 + R),
++                   "qwen35 verify attention: pos0 2045 splits rows 0 and 7 differently");
++    }
++
++    require_ok(ds4_gpu_qwen35_attn_verify_shared_tensor(gout, gq, gg, gk, gv, part, R, H, Hkv, D, pos0, scale),
++               "qwen35 verify attention: 8 rows");
++    float *y8 = download(gout, qn);
++
++    double *scores = malloc((size_t)(pos0 + R) * sizeof(double)), ref[256];
++    double err = 0.0, ref_scale = 1e-8;
++    for (uint32_t t = 0; t < R; t++) {
++        for (uint32_t h = 0; h < H; h++) {
++            qwen35_attn_ref_row(q, gate, kc, vc, H, Hkv, pos0, t, h, false, scale, scores, ref);
++            for (uint32_t d = 0; d < D; d++) {
++                const float g = y8[((uint64_t)t * H + h) * D + d];
++                require_ok(f32_finite(g), "qwen35 verify attention: finite output");
++                err = fmax(err, fabs((double)g - ref[d]));
++                ref_scale = fmax(ref_scale, fabs(ref[d]));
++            }
++        }
++    }
++
++    for (uint32_t T = 1; T < R; T++) {
++        qwen35_vattn_put_rows(gk, pos0 + T, R - T, kvd, nankv, 2);
++        qwen35_vattn_put_rows(gv, pos0 + T, R - T, kvd, nankv, 2);
++        qwen35_vattn_put_rows(gq, T, R - T, qd, nanq, 4);
++        qwen35_vattn_put_rows(gg, T, R - T, qd, nanq, 4);
++        require_ok(ds4_gpu_tensor_fill_f32(gout, 7.0f, qn), "qwen35 verify attention: clear");
++        require_ok(ds4_gpu_qwen35_attn_verify_shared_tensor(gout, gq, gg, gk, gv, part, T, H, Hkv, D, pos0, scale),
++                   "qwen35 verify attention: T rows");
++        float *yt = download(gout, (uint64_t)T * qd);
++        char what[96];
++        snprintf(what, sizeof(what), "pos0 %u T=%u against T=8", pos0, T);
++        qwen35_vattn_rows_equal(what, yt, y8, T, qd);
++        free(yt);
++        qwen35_vattn_put_rows(gk, pos0 + T, R - T, kvd, kc, 2);
++        qwen35_vattn_put_rows(gv, pos0 + T, R - T, kvd, vc, 2);
++        qwen35_vattn_put_rows(gq, T, R - T, qd, q, 4);
++        qwen35_vattn_put_rows(gg, T, R - T, qd, gate, 4);
++    }
++
++    float *q2 = rand_vec(qn, 4.0f), *gate2 = rand_vec(qn, 2.0f);
++    _Float16 *k2 = malloc((uint64_t)R * kvd * 2), *v2 = malloc((uint64_t)R * kvd * 2);
++    for (uint64_t i = 0; i < (uint64_t)R * kvd; i++) { k2[i] = (_Float16)(2.0f * frand()); v2[i] = (_Float16)frand(); }
++    for (uint32_t t = 0; t < R; t++) {
++        float *qt = malloc(qn * 4), *gt = malloc(qn * 4);
++        memcpy(qt, q2, qn * 4);
++        memcpy(gt, gate2, qn * 4);
++        memcpy(qt + (uint64_t)t * qd, q + (uint64_t)t * qd, qd * 4);
++        memcpy(gt + (uint64_t)t * qd, gate + (uint64_t)t * qd, qd * 4);
++        require_ok(ds4_gpu_tensor_write(gq, 0, qt, qn * 4) && ds4_gpu_tensor_write(gg, 0, gt, qn * 4),
++                   "qwen35 verify attention: other rows");
++        if (t + 1 < R) {
++            const uint64_t at = (uint64_t)(pos0 + t + 1) * kvd * 2, n = (uint64_t)(R - t - 1) * kvd * 2;
++            require_ok(ds4_gpu_tensor_write(gk, at, k2 + (uint64_t)(t + 1) * kvd, n) &&
++                       ds4_gpu_tensor_write(gv, at, v2 + (uint64_t)(t + 1) * kvd, n),
++                       "qwen35 verify attention: later keys");
++        }
++        require_ok(ds4_gpu_qwen35_attn_verify_shared_tensor(gout, gq, gg, gk, gv, part, R, H, Hkv, D, pos0, scale),
++                   "qwen35 verify attention: other contents");
++        float *yo = download(gout, qn);
++        char what[96];
++        snprintf(what, sizeof(what), "pos0 %u row %u with other rows and later keys changed", pos0, t);
++        qwen35_vattn_rows_equal(what, yo + (uint64_t)t * qd, y8 + (uint64_t)t * qd, 1, qd);
++        free(yo); free(qt); free(gt);
++        qwen35_vattn_put_rows(gk, pos0, R, kvd, kc, 2);
++        qwen35_vattn_put_rows(gv, pos0, R, kvd, vc, 2);
++    }
++    require_ok(ds4_gpu_tensor_write(gq, 0, q, qn * 4) && ds4_gpu_tensor_write(gg, 0, gate, qn * 4),
++               "qwen35 verify attention: restore rows");
++
++    for (uint32_t t = 0; t < R; t++) {
++        ds4_gpu_tensor *vq = graph_row(gq, t, qd), *vg = graph_row(gg, t, qd), *vo = graph_row(gout, 0, qd);
++        require_ok(ds4_gpu_qwen35_attn_verify_shared_tensor(vo, vq, vg, gk, gv, part, 1, H, Hkv, D, pos0 + t, scale),
++                   "qwen35 verify attention: one row");
++        float *y1 = download(gout, qd);
++        char what[96];
++        snprintf(what, sizeof(what), "pos0 %u row %u against one row at %u", pos0, t, pos0 + t);
++        qwen35_vattn_rows_equal(what, y1, y8 + (uint64_t)t * qd, 1, qd);
++        free(y1);
++        ds4_gpu_tensor_free(vo); ds4_gpu_tensor_free(vg); ds4_gpu_tensor_free(vq);
++    }
++
++    const char *saved = getenv("DS4_QWEN4_ATTN_SPLIT_KEYS");
++    char *restore = saved ? strdup(saved) : NULL;
++    setenv("DS4_QWEN4_ATTN_SPLIT_KEYS", "32", 1);
++    ds4_gpu_tensor *pos3 = upload(NULL, (uint64_t)cap * 4);
++    ds4_gpu_tensor *table = ds4_gpu_tensor_alloc((uint64_t)R * DS4_GPU_QWEN4_ATTN_ROW_BYTES);
++    ds4_gpu_tensor *gold = upload(NULL, qn);
++    require_ok(table != NULL, "qwen35 verify attention: rows table");
++    require_ok(ds4_gpu_qwen35_attn_verify_tensor(gold, gq, gg, gk, gv, pos3, table, 0, part, R, H, Hkv, D, pos0, scale),
++               "qwen35 verify attention: per-row path");
++    struct timespec t0;
++    clock_gettime(CLOCK_MONOTONIC, &t0);
++    require_ok(ds4_gpu_qwen35_attn_verify_tensor(gold, gq, gg, gk, gv, pos3, table, 0, part, R, H, Hkv, D, pos0, scale),
++               "qwen35 verify attention: per-row path again");
++    const double old_s = seconds_since(&t0);
++    clock_gettime(CLOCK_MONOTONIC, &t0);
++    require_ok(ds4_gpu_qwen35_attn_verify_shared_tensor(gout, gq, gg, gk, gv, part, R, H, Hkv, D, pos0, scale),
++               "qwen35 verify attention: 8 rows again");
++    const double new_s = seconds_since(&t0);
++    if (restore) { setenv("DS4_QWEN4_ATTN_SPLIT_KEYS", restore, 1); free(restore); }
++    else unsetenv("DS4_QWEN4_ATTN_SPLIT_KEYS");
++    float *yold = download(gold, qn), *yagain = download(gout, qn);
++    qwen35_vattn_rows_equal("8 rows run again", yagain, y8, R, qd);
++    double vs_old = 0.0;
++    for (uint64_t i = 0; i < qn; i++) vs_old = fmax(vs_old, fabs((double)y8[i] - yold[i]));
++
++    printf("  qwen35 verify attention pos0=%u: rows byte-equal over T=1..8, other rows, one-row calls; "
++           "vs double max|d|=%.2e (rel %.2e, scale %.2e); vs per-row path max|d|=%.2e; "
++           "shared %.2f ms, per-row %.2f ms\n",
++           pos0, err, err / ref_scale, ref_scale, vs_old, new_s * 1e3, old_s * 1e3);
++    require_ok(err <= 1e-3 * ref_scale, "qwen35 verify attention against double, 1e-3 of scale");
++
++    free(yold); free(yagain); free(scores); free(y8); free(q2); free(gate2); free(k2); free(v2);
++    free(q); free(gate); free(nanq); free(kc); free(vc); free(nankv);
++    ds4_gpu_tensor_free(gold); ds4_gpu_tensor_free(table); ds4_gpu_tensor_free(pos3);
++    ds4_gpu_tensor_free(part); ds4_gpu_tensor_free(gk); ds4_gpu_tensor_free(gv);
++    ds4_gpu_tensor_free(gout); ds4_gpu_tensor_free(gg); ds4_gpu_tensor_free(gq);
++}
++
++/* us per call of the verify attention, median of 20 batches of 10 calls,
++ * shared tiles against the per-row path, at T = 1 and 8 */
++static void bench_qwen35_attn_verify(void) {
++    const uint32_t R = 8, H = 24, Hkv = 4, D = 256;
++    const uint32_t depths[] = {100, 2600, 9700, 14000};
++    const uint64_t qn = (uint64_t)R * H * D;
++    setenv("DS4_QWEN4_ATTN_SPLIT_KEYS", "32", 1);
++    printf("qwen35 verify attention bench: us/call, median of 20 batches of 10 calls\n");
++    for (uint32_t di = 0; di < sizeof(depths) / sizeof(depths[0]); di++) {
++        const uint32_t pos0 = depths[di], cap = pos0 + R;
++        const uint64_t kvn = (uint64_t)cap * Hkv * D;
++        float *q = rand_vec(qn, 4.0f), *gate = rand_vec(qn, 2.0f);
++        _Float16 *kc = malloc(kvn * 2), *vc = malloc(kvn * 2);
++        for (uint64_t i = 0; i < kvn; i++) { kc[i] = (_Float16)(2.0f * frand()); vc[i] = (_Float16)frand(); }
++        ds4_gpu_tensor *gq = upload(q, qn), *gg = upload(gate, qn), *gout = upload(NULL, qn);
++        ds4_gpu_tensor *gk = ds4_gpu_tensor_alloc(kvn * 2), *gv = ds4_gpu_tensor_alloc(kvn * 2);
++        ds4_gpu_tensor *part = upload(NULL, ds4_gpu_qwen4_attn_part_floats(R, H, D));
++        ds4_gpu_tensor *pos3 = upload(NULL, (uint64_t)cap * 4);
++        ds4_gpu_tensor *table = ds4_gpu_tensor_alloc((uint64_t)R * DS4_GPU_QWEN4_ATTN_ROW_BYTES);
++        require_ok(gk && gv && table && ds4_gpu_tensor_write(gk, 0, kc, kvn * 2) &&
++                   ds4_gpu_tensor_write(gv, 0, vc, kvn * 2), "qwen35 verify attention bench setup");
++        const uint32_t Ts[] = {1, 8};
++        for (uint32_t ti = 0; ti < 2; ti++) {
++            const uint32_t T = Ts[ti];
++            double samples[2][20];
++            for (uint32_t rep = 0; rep < 21; rep++) {
++                for (uint32_t v = 0; v < 2; v++) {
++                    const double t0 = bench_now();
++                    require_ok(ds4_gpu_begin_commands(), "bench begin");
++                    for (uint32_t c = 0; c < 10; c++) {
++                        require_ok(v == 0
++                            ? ds4_gpu_qwen35_attn_verify_shared_tensor(gout, gq, gg, gk, gv, part, T, H, Hkv, D, pos0, 0.0625f)
++                            : ds4_gpu_qwen35_attn_verify_tensor(gout, gq, gg, gk, gv, pos3, table, 0, part, T, H, Hkv, D,
++                                                                pos0, 0.0625f), "bench call");
++                    }
++                    require_ok(ds4_gpu_end_commands(), "bench end");
++                    if (rep) samples[v][rep - 1] = 1e6 * (bench_now() - t0) / 10.0;
++                }
++            }
++            printf("  depth %5u T=%u: shared %8.1f us, per-row %8.1f us\n", pos0, T,
++                   qwen35_median20(samples[0]), qwen35_median20(samples[1]));
++        }
++        free(q); free(gate); free(kc); free(vc);
++        ds4_gpu_tensor_free(gq); ds4_gpu_tensor_free(gg); ds4_gpu_tensor_free(gout); ds4_gpu_tensor_free(gk);
++        ds4_gpu_tensor_free(gv); ds4_gpu_tensor_free(part); ds4_gpu_tensor_free(pos3); ds4_gpu_tensor_free(table);
++    }
++}
++
++static void test_qwen35_attn_verify_shared(void) {
++    const uint32_t rng = g_rng;
++    const uint32_t depths[] = {27, 100, 2045, 2600, 9701, 14000};
++    printf("qwen35 verify attention, shared K/V tiles\n");
++    for (uint32_t i = 0; i < sizeof(depths) / sizeof(depths[0]); i++) qwen35_attn_verify_shared_case(depths[i]);
++    g_rng = rng;
++}
+ #endif
+ 
+ int main(void) {
+@@ -5073,6 +5438,7 @@ int main(void) {
+     const char *qwen35_graph_only = getenv("DS4_TEST_QWEN35_GRAPH_ONLY");
+     if (qwen35_graph_only && qwen35_graph_only[0] && strcmp(qwen35_graph_only, "0") != 0) {
+         test_qwen35_graph(&arena);
++        test_qwen35_attn_verify_shared();
+         printf("all qwen35 verify rows tests passed\n");
+         return 0;
+     }
+@@ -5080,7 +5446,14 @@ int main(void) {
+     if (getenv("DS4_TEST_QWEN4_DECODE_FUSIONS")) { test_decode_fusions(&arena); return 0; }
+ #ifdef __APPLE__
+     if (getenv("DS4_TEST_QWEN4_Q6K_MM_ONLY")) { test_q6_K_mm(&arena); printf("all qwen4 Q6_K mm tests passed\n"); return 0; }
++    if (getenv("DS4_TEST_QWEN35_Q4K_MMA_ONLY")) { test_q4_K_mma_word(&arena); printf("all qwen35 Q4_K mma tests passed\n"); return 0; }
+     if (getenv("DS4_TEST_QWEN35_ATTN_FA_ONLY")) { test_qwen35_attn_fa(); printf("all qwen35 attn fa tests passed\n"); return 0; }
++    if (getenv("DS4_TEST_QWEN35_VERIFY_ATTN_BENCH")) { bench_qwen35_attn_verify(); return 0; }
++    if (getenv("DS4_TEST_QWEN35_VERIFY_ATTN_ONLY")) {
++        test_qwen35_attn_verify_shared();
++        printf("all qwen35 verify attention tests passed\n");
++        return 0;
++    }
+ #endif
+     if (getenv("DS4_TEST_QWEN4_MV_EXACT")) {
+         test_moe_types(&arena, 8, 6, 2560, 640, 1, 16u, 10u);
+@@ -5097,11 +5470,12 @@ int main(void) {
+ #ifdef __APPLE__
+     if (getenv("DS4_TEST_QWEN35_VERIFY_ONLY")) {
+         test_qwen35_verify(&arena);
++        test_q4_K_mma_word(&arena);
+         printf("all qwen35 verify tests passed\n");
+         return 0;
+     }
+     if (getenv("DS4_TEST_QWEN35_VERIFY_BENCH")) {
+-        bench_qwen35_verify(&arena, !strcmp(getenv("DS4_TEST_QWEN35_VERIFY_BENCH"), "Q4_0"));
++        bench_qwen35_verify(&arena, getenv("DS4_TEST_QWEN35_VERIFY_BENCH"));
+         return 0;
+     }
+     if (getenv("DS4_TEST_DFLASH_ONLY") && !strcmp(getenv("DS4_TEST_DFLASH_ONLY"), "ring")) {
+@@ -5254,6 +5628,7 @@ int main(void) {
+ #ifdef __APPLE__
+     test_q6_K_mm(&arena);
+     test_qwen35_attn_fa();
++    test_qwen35_attn_verify_shared();
+ #endif
+     printf("multi gemv\n");
+     test_multi_gemv(&arena, 2560, 2);
+@@ -5265,6 +5640,7 @@ int main(void) {
+     test_gdn_prefill_dispatch();
+ #ifdef __APPLE__
+     test_qwen35_verify(&arena);
++    test_q4_K_mma_word(&arena);
+     test_dflash_drafter(&arena);
+ #endif
+     printf("all qwen4 kernel tests passed\n");
+-- 
+2.49.0
+

@@ -1,0 +1,115 @@
+From 8f400d8390ff41ca10bf082ed629d0251acb0c8c Mon Sep 17 00:00:00 2001
+From: Koudai Aono <koxudaxi@gmail.com>
+Date: Fri, 2 Oct 2026 12:46:09 +0900
+Subject: [PATCH 02/9] qwen: chat special tokens and the documented
+ thinking-mode sampling
+
+Renders <tool_response> and a system message's <tool_call> as the special tokens the template uses, and samples the Qwen family at the documented thinking-mode values (0.6, 0.95, 20, 0) in ds4-agent and ds4.
+
+Upstream: offer upstream, after narrowing the system-message change so tool text stays plain
+Retire-when: upstream renders these tokens and samples Qwen as documented
+Carried-commits: 480df32 14212a9
+---
+ ds4.c       | 14 +++++++++++---
+ ds4_agent.c | 21 ++++++++++++++++-----
+ ds4_cli.c   | 21 ++++++++++++++++-----
+ 3 files changed, 43 insertions(+), 13 deletions(-)
+
+diff --git a/ds4.c b/ds4.c
+index 46c5f10..2767594 100644
+--- a/ds4.c
++++ b/ds4.c
+@@ -44992,15 +44992,23 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
+ 
+     if (ds4_model_is_qwen4()) {
+         if (!strcmp(role, "tool") || !strcmp(role, "function")) {
++            /* The template's <tool_response> and </tool_response> are the
++             * vocabulary's own special tokens, as the model saw them in
++             * training; rendering them as plain BPE pieces showed the model
++             * text it never learned as a tool result. The result itself stays
++             * untrusted text that cannot spell a control token. */
+             qwen4_chat_open(vocab, "user", tokens);
+-            bpe_tokenize_text(vocab, "<tool_response>\n", tokens);
++            tokenize_rendered_chat_vocab(vocab, "<tool_response>\n", tokens);
+             bpe_tokenize_tool_response_text(vocab, content, tokens);
+-            bpe_tokenize_text(vocab, "\n</tool_response>", tokens);
++            tokenize_rendered_chat_vocab(vocab, "\n</tool_response>", tokens);
+         } else {
+             const char *name = (!strcmp(role, "system") || !strcmp(role, "developer")) ? "system" :
+                                !strcmp(role, "assistant") ? "assistant" : "user";
+             qwen4_chat_open(vocab, name, tokens);
+-            if (!strcmp(name, "assistant")) {
++            /* The system message is the host's own trusted text: its
++             * <tool_call> and the like are the special tokens the model
++             * emits, as the template renders them. */
++            if (!strcmp(name, "assistant") || !strcmp(name, "system")) {
+                 tokenize_rendered_chat_vocab(vocab, content, tokens);
+             } else {
+                 bpe_tokenize_text(vocab, content, tokens);
+diff --git a/ds4_agent.c b/ds4_agent.c
+index deadc45..3ff34ba 100644
+--- a/ds4_agent.c
++++ b/ds4_agent.c
+@@ -1006,11 +1006,22 @@ static agent_config parse_options(int argc, char **argv) {
+ static void agent_apply_model_sampling_defaults(
+         ds4_engine               *engine,
+         agent_generation_options *gen) {
+-    if (!engine || !gen || !ds4_engine_is_glm_dsa(engine)) return;
+-
+-    if (!gen->temperature_set) gen->temperature = 1.0f;
+-    if (!gen->top_p_set) gen->top_p = 0.95f;
+-    if (!gen->min_p_set) gen->min_p = 0.0f;
++    if (!engine || !gen) return;
++
++    if (ds4_engine_is_glm_dsa(engine)) {
++        if (!gen->temperature_set) gen->temperature = 1.0f;
++        if (!gen->top_p_set) gen->top_p = 0.95f;
++        if (!gen->min_p_set) gen->min_p = 0.0f;
++    } else if (ds4_engine_is_qwen4(engine)) {
++        /* Qwen's documented thinking-mode sampling (the Qwen3 model cards'
++         * "Best Practices": temperature 0.6, top_p 0.95, top_k 20, min_p 0).
++         * Before this the family fell through to the generic defaults
++         * (temperature 1.0, top_p 1.0, min_p 0.05).  This front end has no
++         * top_k option, so top_k stays unset. */
++        if (!gen->temperature_set) gen->temperature = 0.6f;
++        if (!gen->top_p_set) gen->top_p = 0.95f;
++        if (!gen->min_p_set) gen->min_p = 0.0f;
++    }
+ }
+ 
+ static ds4_think_mode effective_think_mode(const agent_config *cfg) {
+diff --git a/ds4_cli.c b/ds4_cli.c
+index af4e2b6..c5c955f 100644
+--- a/ds4_cli.c
++++ b/ds4_cli.c
+@@ -529,11 +529,22 @@ static void build_prompt(ds4_engine *engine, const cli_generation_options *gen,
+ static void cli_apply_model_sampling_defaults(
+         ds4_engine             *engine,
+         cli_generation_options *gen) {
+-    if (!engine || !gen || !ds4_engine_is_glm_dsa(engine)) return;
+-
+-    if (!gen->temperature_set) gen->temperature = 1.0f;
+-    if (!gen->top_p_set) gen->top_p = 0.95f;
+-    if (!gen->min_p_set) gen->min_p = 0.0f;
++    if (!engine || !gen) return;
++
++    if (ds4_engine_is_glm_dsa(engine)) {
++        if (!gen->temperature_set) gen->temperature = 1.0f;
++        if (!gen->top_p_set) gen->top_p = 0.95f;
++        if (!gen->min_p_set) gen->min_p = 0.0f;
++    } else if (ds4_engine_is_qwen4(engine)) {
++        /* Qwen's documented thinking-mode sampling (the Qwen3 model cards'
++         * "Best Practices": temperature 0.6, top_p 0.95, top_k 20, min_p 0).
++         * Before this the family fell through to the generic defaults
++         * (temperature 1.0, top_p 1.0, min_p 0.05).  This front end has no
++         * top_k option, so top_k stays unset. */
++        if (!gen->temperature_set) gen->temperature = 0.6f;
++        if (!gen->top_p_set) gen->top_p = 0.95f;
++        if (!gen->min_p_set) gen->min_p = 0.0f;
++    }
+ }
+ 
+ static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, const ds4_tokens *prompt) {
+-- 
+2.49.0
+
