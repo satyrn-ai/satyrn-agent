@@ -119,6 +119,43 @@ satyrn-agent/
 
 ## 6. The workflow
 
+### Patch layout and model selection
+
+The series is split into a reusable common base and one series per model:
+
+```
+patches/
+├── common/    # the current 0002, 0004, 0009 and 0010, reworked as below
+├── qwen35/    # the current dense-qwen35 patches
+└── mellum/    # added later from Paul's ds4-mellum commits
+```
+
+Every target has the topology `pin → common → model`. The common series must
+apply on its own to the pinned upstream tree. A model series starts at the
+common tip; it need not apply directly to the pin. Within each directory,
+numbered `format-patch` filenames define order, with common applied before the
+selected model. Numbering restarts in each directory, and the `[PATCH n/m]`
+text in subjects is not authoritative. No series file is needed because common
+and model patches are never interleaved.
+
+The chosen alternative is a real reusable base, not an ownership-only split of
+an interleaved series. An interleaved split would need a manifest and could
+leave common dependent on qwen35; independent pin-based common and model series
+would still need a separate integration step when combined. The reusable base
+makes common available to every model and keeps sync, check and export on the
+same topology.
+
+A materialized tree contains either common alone or common plus **one** model.
+The tooling rejects a request for a second model rather than guessing an order
+or conflict policy. Multi-model composition is a future design covering order,
+conflicts, verification and export ownership; it is not an accidental extension
+of this layout. Use separate trees for separate models.
+
+Paul's Mellum commits are rebased onto the then-current common tip, not onto
+common + qwen35, and exported to `patches/mellum/`. Changes already in common
+are not duplicated. Common + Mellum gets its own pristine apply/build checks;
+no tree-identity relationship with qwen35 is implied.
+
 ### Day one: how the initial series was made
 
 1. The 39 carried commits were cherry-picked onto `5379c1c` in topological
@@ -156,7 +193,36 @@ merge's text fixed it. And taking hunks from a branch merge where upstream also
 changed the lines drops upstream's lines silently; trying the `3e61e09`
 ordering first, and the byte comparison at the end, guard against that.
 
-### Checks, with results
+### Migrating the flat series to common + qwen35
+
+This migration is a rebase and re-export of real commits, not a move of patch
+files. Apply experiments against a pristine pin show that the current 0002 and
+the ordered pair 0009 → 0010 can move to the front without changing the tree.
+The current 0004 cannot: its `ds4.c` definitions use context introduced by
+qwen35 0001 and 0003, while qwen35 0006 in turn depends on 0004. Its independent
+`ds4.h` declarations alone are not enough to make the host-extension change
+reusable.
+
+1. Materialize today's flat ten-patch series and retain its Git tree ID and a
+   full filesystem comparison baseline (excluding only `.git` metadata).
+2. In the scratch history, rework 0004 so the complete host-extension change
+   applies after common without qwen35 context. Rebase the qwen35 commits onto
+   that new common tip, preserving their final content; keep 0009 before 0010.
+3. Export `pin..common-tip` to `patches/common/` and `common-tip..HEAD` to
+   `patches/qwen35/`, then remove the old flat files only after the new layout
+   verifies. Do not hand-edit patches to force the new topology.
+4. Verify common alone and common + qwen35 from separate pristine clones. The
+   new common + qwen35 Git tree ID must equal the flat-series baseline, and a
+   full filesystem diff excluding `.git` must be empty. Patch bytes, filenames,
+   commit IDs and patch numbers may change; file contents may not.
+
+The byte-identity comparison is the migration acceptance gate, not a frozen
+baseline that prevents later intentional qwen35 changes.
+
+### Initial flat-series checks, with results
+
+These are the historical results for the flat series. The migration above must
+re-run the applicable checks for common alone and for common + qwen35.
 
 | Check | Result |
 | --- | --- |
@@ -172,36 +238,61 @@ Not run: the verify and DFlash live tests (`test_qwen35_verify_live`,
 
 ### Daily work
 
-- `ds4-sync` — refresh `.ds4/tree`: fetch upstream into the cache clone,
-  check out the pin, `git am` the series. Refuses to destroy uncommitted work
-  or unexported commits unless `--force`.
-- Edit and commit normally in `.ds4/tree`.
-- `ds4-export` — require a clean tree, then regenerate `patches/` from
-  `pin..HEAD` (renumbered). Refuses to overwrite a dirty `patches/` unless
+- `ds4-sync [--model <name>]` — refresh `.ds4/tree`: fetch upstream into the
+  cache clone, check out the pin, `git am patches/common/*.patch`, then apply
+  the selected model's patches in filename order. With no model, materialize
+  common alone. Record the common-tip commit and selected model in the scratch
+  clone. Accept at most one model, and refuse to destroy uncommitted work or
+  unexported commits unless `--force`.
+- Edit and commit normally in `.ds4/tree`, keeping history linear and
+  merge-free. For common-only work, the common-tip branch is checked out so it
+  advances with every commit and always equals `HEAD`. For model work, model
+  commits follow the common tip. When changing common with a model selected,
+  rewrite the common range, advance the common-tip ref to its new tip, and
+  rebase the model onto it; rebase and revalidate other model series as needed
+  rather than leaving them tied to an old common base.
+- `ds4-export` — require a clean tree, then regenerate `patches/common/` from
+  `pin..common-tip` and, when a model is selected, its directory from
+  `common-tip..HEAD`, renumbering each series. For common-only work require
+  `common-tip == HEAD`; for model work require the ancestry
+  `pin → common-tip → HEAD`, so every commit belongs to exactly one range.
+  Reject merge commits. After export, reapply each changed target from pristine
+  clones and require the reconstructed common and final Git tree IDs to equal
+  the source common tip and `HEAD` respectively. Never delete or renumber
+  another model's directory. Refuse to overwrite a dirty `patches/` unless
   `--force`.
-- `ds4-check` — prove the committed series stands alone: from the cache,
-  pristine clone at the pin, apply `patches/` in order. With `--build`, also
-  run the build. This is the pre-commit gate.
-- `ds4-build [cpu|metal|cuda]` — build `libds4` (and, when wanted, the tree's
-  own binaries) in `.ds4/tree`.
+- `ds4-check [--model <name>]` — prove the committed directories stand alone:
+  with no model, check common and every `common + model` target in separate
+  pristine clones at the pin; with a model, check that selected target. Apply
+  common first and the model second with plain `git am`. For the target
+  represented by `.ds4/tree`, also compare the reconstructed common and final
+  Git tree IDs with the scratch common tip and `HEAD`, catching stale or lossy
+  exports. With `--build`, also build each checked tree. This is the pre-commit
+  gate.
+- Build the selected real source tree with `ds4py build --src .ds4/tree`.
+  satyrn-agent owns materialization, not a second copy of the build logic; a
+  `ds4-build` convenience wrapper only passes options through to ds4-py.
 
-Until these exist, the same steps run by hand: clone upstream at the pin,
-`git am patches/*.patch`, commit the change, and
-`git format-patch -1 --start-number <next> -o patches`, as #4 did for the
-macOS 15 fix.
+Until these exist, the same steps run by hand: clone upstream at the pin, `git
+am patches/common/*.patch` and then one model directory, commit the change, and
+use `git format-patch` with the common tip as the model export boundary.
 
 ### Implementation notes for the tooling
 
 - `.ds4/cache` is a bare mirror of upstream used by both `ds4-sync` and
   `ds4-check`, so both work offline after the first fetch.
 - `.ds4/tree` is a full clone of the cache with `upstream` added as a second
-  remote, so a future rebase onto a newer upstream is an ordinary rebase in
-  the scratch tree followed by `ds4-export`.
-- `Makefile.lib` follows ds4-py spec §19: it includes the tree's own Makefile
-  and links the tree's `$(CORE_OBJS)` (or `$(CPU_CORE_OBJS)`) plus
-  `ds4_kvstore.o` into `libds4.so` with `-shared`; objects are compiled with
-  `-fPIC`. Objects build in-tree (the spec leaves this to the builder), which
-  also lets the same objects link the tree's own binaries.
+  remote. A local common-tip branch records the export boundary: it is the
+  checked-out branch for common-only work and the base of the checked-out model
+  branch for model work. The selected model is recorded with the scratch tree.
+  A future rebase onto a newer upstream rebuilds both ranges and exports them
+  separately.
+- The common tip is metadata for export, not a replacement for verification:
+  `ds4-check` always reconstructs the boundary by applying the committed common
+  directory to the pin.
+- `ds4py build --src` accepts any assembled ds4 tree, so common-only and every
+  model target use the same build path. Metal still finds its kernels relative
+  to the real checkout.
 - `devenv.nix` mirrors ds4-py (`languages.c`, `languages.python` + uv with
   `UV_PYTHON`/`UV_PYTHON_DOWNLOADS` pinned to Nix's Python) and adds the
   script entry points as devenv scripts so the commands work both inside and
