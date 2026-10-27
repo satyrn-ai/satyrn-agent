@@ -28,9 +28,11 @@ grouped by topic:
 - Source: the 39 non-merge commits in `0aaea5a..cfb2faf`, less the three Q5_K
   commits for the 9B and 4B (`14c3c7e`, `946a0ad`, `cfb2faf`). That is the
   same set of commits as `ds4-engine` main's gitlink `ebdcb0f`.
-- Result: nine patches, 16 files, +8,306/−61 against `5379c1c`.
-- Held back: the Q5_K commits, as a ready tenth patch, until Paul decides
-  whether the 9B and 4B stay.
+- Result: ten patches on disk: the nine migrated patches below (16 files,
+  +8,306/−61 against `5379c1c`) plus 0010, the macOS 15 Metal fix from #4
+  (+9/−2).
+- Held back: the Q5_K commits, as a ready follow-up that would be 0011, until
+  Paul decides whether the 9B and 4B stay.
 - Left out of every patch: the llama.cpp parity scripts and notes
   (`tests/qwen35_parity/`, `docs/QWEN35_DENSE.md`, 394 lines). They compare
   against llama.cpp and are not engine code.
@@ -65,9 +67,10 @@ Each patch's message carries `Upstream:`, `Retire-when:` and
    into `patches/`; one command verifies the series from a pristine upstream
    clone; one command builds `libds4` from the patched tree.
 4. devenv supplies every tool the workflow needs; conventions mirror ds4-py.
-5. The migration is verified: the series, with the held-back tenth patch,
-   gives a tree byte-identical to the fork's `3e61e09`, apart from the
-   left-out parity scripts and notes.
+5. The original migration is verified: the nine migrated patches, with the
+   held-back Q5_K patch (then the tenth), give a tree byte-identical to the
+   fork's `3e61e09`, apart from the left-out parity scripts and notes. The
+   later 0010 macOS 15 fix is outside that fork-equivalence comparison.
 
 ### Non-goals
 
@@ -206,14 +209,16 @@ reusable.
 1. Materialize today's flat ten-patch series and retain its Git tree ID and a
    full filesystem comparison baseline (excluding only `.git` metadata).
 2. In the scratch history, rework 0004 so the complete host-extension change
-   applies after common without qwen35 context. Rebase the qwen35 commits onto
-   that new common tip, preserving their final content; keep 0009 before 0010.
+   applies within the common series, before any model and without qwen35
+   context. Rebase the qwen35 commits onto that new common tip, preserving
+   their final content; keep 0009 before 0010.
 3. Export `pin..common-tip` to `patches/common/` and `common-tip..HEAD` to
    `patches/qwen35/`, then remove the old flat files only after the new layout
    verifies. Do not hand-edit patches to force the new topology.
 4. Verify common alone and common + qwen35 from separate pristine clones. The
-   new common + qwen35 Git tree ID must equal the flat-series baseline, and a
-   full filesystem diff excluding `.git` must be empty. Patch bytes, filenames,
+   common-only Git tree ID must equal the source common tip. The new common +
+   qwen35 Git tree ID must equal the flat-series baseline, and a full
+   filesystem diff excluding `.git` must be empty. Patch bytes, filenames,
    commit IDs and patch numbers may change; file contents may not.
 
 The byte-identity comparison is the migration acceptance gate, not a frozen
@@ -221,12 +226,14 @@ baseline that prevents later intentional qwen35 changes.
 
 ### Initial flat-series checks, with results
 
-These are the historical results for the flat series. The migration above must
-re-run the applicable checks for common alone and for common + qwen35.
+These are the historical results for the original flat migration and predate
+#4. Here "ten patches" means the nine migrated patches plus the held-back Q5_K
+patch, not the current 0001–0010. The migration above must re-run the
+applicable checks for common alone and for common + qwen35.
 
 | Check | Result |
 | --- | --- |
-| The ten patches on a pristine `5379c1c` equal `3e61e09` (`diff -r`, left-out files excluded) | pass |
+| The original nine migrated patches plus the held-back Q5_K patch on a pristine `5379c1c` equal `3e61e09` (`diff -r`, left-out files excluded) | pass |
 | `git am` of the nine patches on a pristine `5379c1c` gives the same tree as `git apply` | pass |
 | After every patch, `ds4py build` for CPU and for Metal, with the ABI checks from ds4-py #3 | 20 of 20 pass |
 | After every patch, `ds4-agent` and the engine's test programs compile | 10 of 10 pass |
@@ -301,10 +308,10 @@ use `git format-patch` with the common tip as the model export boundary.
 ## 7. What happens next (not this design)
 
 - The tooling in §6.
-- The held-back tenth patch: Paul decides whether the 9B and 4B stay.
+- The held-back Q5_K patch (which would be 0011): Paul decides whether the 9B
+  and 4B stay.
 - A home for the parity scripts and notes left out of the series.
-- New patches: the macOS 15 Metal language version fix (#4), and narrowing
-  0002 so a tool's own text stays plain.
+- New patches: narrowing 0002 so a tool's own text stays plain.
 - Moving the pin past `5379c1c`, as its own verified step.
 - ds4-py lands; `ds4py build --src .ds4/tree` takes over the build and
   `Makefile.lib` moves there (spec §19).
@@ -318,10 +325,11 @@ use `git format-patch` with the common tip as the model export boundary.
 - **Base `5379c1c`, not `0aaea5a`.** The rebase past upstream's 30 newer
   commits was done during the migration, verified against the fork's own merge
   `3e61e09`, and the pin now matches ds4-py's.
-- **Nine topical patches, not one per commit.** Keep, drop and offer-upstream
-  decisions are made per topic, and a topic is what goes upstream. Each patch
-  lists its carried commits, so per-commit provenance is kept. One patch per
-  commit on `5379c1c` can be produced the same way if it is ever needed.
+- **Nine topical migrated patches, not one per commit.** Keep, drop and
+  offer-upstream decisions are made per topic, and a topic is what goes
+  upstream. Each patch lists its carried commits, so per-commit provenance is
+  kept. One patch per commit on `5379c1c` can be produced the same way if it is
+  ever needed. The standalone 0010 macOS 15 fix arrived later in #4.
 - **Patch mechanics:** numbered `format-patch` files applied in filename
   order; no `series` file (redundant with numbered names).
 - **The Q5_K commits are held back** rather than dropped, so Paul can decide.
