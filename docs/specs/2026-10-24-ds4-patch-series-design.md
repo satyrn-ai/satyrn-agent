@@ -59,13 +59,13 @@ Each patch's message carries `Upstream:`, `Retire-when:` and
 ### Goals
 
 1. `patches/` holds common and per-model series as numbered `git format-patch`
-   files. Each target applies common and then at most one model in filename
-   order to the pinned upstream commit with plain `git am` — no fork object
-   store required.
+   files. Each target applies common and then a deterministic prefix of the
+   model directories to the pinned upstream commit with plain `git am` — no
+   fork object store required. The full prefix includes every supported model.
 2. `upstream.pin` records the upstream URL and commit.
-3. One command materializes common-only or common plus a selected model in a
-   gitignored working tree for day-to-day editing; one command exports its
-   commits back to the correct directories; one command verifies each target
+3. One command materializes common-only, a model prefix, or the full multi-model
+   tree in a gitignored working tree for day-to-day editing; one command exports
+   its commits back to the correct directory; one command verifies each target
    from a pristine upstream clone; ds4-py builds `libds4` from the real tree.
 4. devenv supplies every tool the workflow needs; conventions mirror ds4-py.
 5. The original migration is verified: the nine migrated patches, with the
@@ -115,7 +115,7 @@ satyrn-agent/
 │   ├── qwen35/             # Qwen policy and dense-qwen35 implementation
 │   └── mellum/             # added later
 ├── tools/                  # not written yet
-│   ├── ds4-sync.bash       # materialize common-only or common + one model
+│   ├── ds4-sync.bash       # materialize common-only, a prefix, or all models
 │   ├── ds4-export.bash     # transactionally regenerate the owned directories
 │   ├── ds4-check.bash      # pristine-clone verification (the gate)
 │   └── ds4-build.bash      # optional pass-through to ds4py build --src
@@ -144,13 +144,14 @@ defaults and report only payload capabilities present in that tree; they do not
 install dense-qwen35 behavior. The qwen35 series adds the Qwen policy and the
 rest of its implementation.
 
-Every target has the topology `pin → common → model`. The common series must
-apply on its own to the pinned upstream tree. A model series starts at the
-common tip; it need not apply directly to the pin. Within each directory,
-numbered `format-patch` filenames define order, with common applied before the
-selected model. Numbering restarts in each directory, and the `[PATCH n/m]`
-text in subjects is not authoritative. No series file is needed because common
-and model patches are never interleaved.
+Every target has the topology `pin → common → ordered model prefix`. The
+common series must apply on its own to the pinned upstream tree. Model
+directories apply in directory-name order, and each model series starts at the
+previous model's tip; it need not apply directly to the pin or to common.
+Numbered `format-patch` filenames define order within each directory, and
+numbering restarts in each directory. The `[PATCH n/m]` text in subjects is not
+authoritative. No series file is needed because directory order and filename
+order are deterministic and patches are never interleaved.
 
 The chosen alternative is a real reusable base, not an ownership-only split of
 an interleaved series. An interleaved split would need a manifest and could
@@ -159,16 +160,21 @@ would still need a separate integration step when combined. The reusable base
 makes common available to every model and keeps sync, check and export on the
 same topology.
 
-A materialized tree contains either common alone or common plus **one** model.
-The tooling rejects a request for a second model rather than guessing an order
-or conflict policy. Multi-model composition is a future design covering order,
-conflicts, verification and export ownership; it is not an accidental extension
-of this layout. Use separate trees for separate models.
+The default materialized tree contains common and **all** model directories, so
+the ds4 engine used by the coding agent includes every supported model. A
+`--model <name>` checkout stops after that model in the fixed order, making the
+selected model the editable tip. These are prefixes, not arbitrary combinations:
+adding, removing or reordering a model requires rebasing every later model
+series and resolving both textual and semantic conflicts before the full tree
+can be verified.
 
-Paul's Mellum commits are rebased onto the then-current common tip, not onto
-common + qwen35, and exported to `patches/mellum/`. Changes already in common
-are not duplicated. Common + Mellum gets its own pristine apply/build checks;
-no tree-identity relationship with qwen35 is implied.
+Once Mellum lands, the full order is `pin → common → mellum → qwen35`. Paul's
+Mellum commits are first rebased onto the then-current common tip and exported
+to `patches/mellum/`, without duplicating common changes. The qwen35 series is
+then rebased onto the Mellum tip. Common + Mellum, the qwen35-inclusive prefix,
+and every intermediate boundary get pristine apply/build checks. After Mellum
+lands, the combined tree intentionally differs from the earlier qwen35-only
+byte-identity baseline.
 
 ### Day one: how the initial series was made
 
@@ -259,62 +265,66 @@ Not run: the verify and DFlash live tests (`test_qwen35_verify_live`,
 
 ### Daily work
 
-- `ds4-sync [--model <name>]` — refresh `.ds4/tree`: fetch upstream into the
-  cache clone, check out the pin, `git am patches/common/*.patch`, then apply
-  the selected model's patches in filename order. With no model, materialize
-  common alone. Record the common-tip commit and selected model in the scratch
-  clone. Accept at most one model, and refuse to destroy uncommitted work or
-  unexported commits unless `--force`.
+- `ds4-sync [--common-only | --model <name>]` — refresh `.ds4/tree`: fetch
+  upstream into the cache clone, check out the pin, `git am
+  patches/common/*.patch`, then apply model directories in directory-name
+  order. With no option, materialize all models. `--common-only` stops after
+  common; `--model <name>` stops after that model, making it the editable tip.
+  Record the common tip, every applied model tip and the selected target in the
+  scratch clone. Refuse to destroy uncommitted work or unexported commits
+  unless `--force`.
 - Keep history linear and merge-free. Change common only in a common-only
   checkout, where the common-tip branch is checked out and advances with every
-  commit so it always equals `HEAD`. In a model checkout, only append model
-  commits after the common tip; never rewrite the common range there. After
-  exporting a common change, `ds4-sync --model <name>` materializes each model
-  on the new common base. Repair and revalidate a model series separately if
+  commit so it always equals `HEAD`. In a model-prefix checkout, only append
+  commits for the selected final model after its previous-model or common base;
+  never rewrite an earlier range there. After exporting a change, sync later
+  prefixes onto the new base. Repair and revalidate every later model series if
   its patches no longer apply or its behavior changes.
-- `ds4-export` — require a clean tree and generate a complete candidate under
-  `.ds4/`: common from `pin..common-tip` and, when a model is selected, that
-  model from `common-tip..HEAD`, renumbering each series. For common-only work
-  require `common-tip == HEAD`; for model work require the ancestry
-  `pin → common-tip → HEAD`, so every commit belongs to exactly one range.
-  Reject merge commits. Reapply each candidate target from pristine clones and
-  require the reconstructed common and final Git tree IDs to equal the source
-  common tip and `HEAD` respectively. Only after all checks pass, replace the
-  owned directories in `patches/`; a failed export leaves the existing patch
-  set untouched. Never delete or renumber another model's directory. Refuse to
-  overwrite a dirty `patches/` unless `--force`.
-- `ds4-check [--model <name>]` — prove the committed directories stand alone:
-  with no model, check common and every `common + model` target in separate
-  pristine clones at the pin; with a model, check that selected target. Apply
-  common first and the model second with plain `git am`. For the target
-  represented by `.ds4/tree`, also compare the reconstructed common and final
-  Git tree IDs with the scratch common tip and `HEAD`, catching stale or lossy
-  exports. With `--build`, also build each checked tree. This is the pre-commit
-  gate.
+- `ds4-export` — require a clean tree and generate a candidate under `.ds4/`
+  for the editable range: common from `pin..HEAD` in a common-only checkout, or
+  the selected model from `previous-tip..HEAD` in a model-prefix checkout,
+  where `previous-tip` is the common tip or the preceding model tip. Require
+  the recorded linear ancestry so every commit belongs to exactly one range,
+  and reject merge commits. Reconstruct the target from pristine clones using
+  the committed preceding directories plus the candidate, and require each
+  boundary and final Git tree ID to equal its corresponding source tree. Only
+  after all checks pass, replace the owned directory in `patches/`; a failed
+  export leaves the existing patch set untouched. Never delete or renumber
+  another directory. Refuse to overwrite a dirty `patches/` unless `--force`.
+- `ds4-check [--common-only | --model <name>]` — prove the committed
+  directories stand together: with no option, check common and every model
+  prefix in separate pristine clones at the pin, ending with the full
+  multi-model tree. With an option, check only that target. Apply common and
+  then model directories in their fixed order with plain `git am`. For the
+  target represented by `.ds4/tree`, also compare every reconstructed boundary
+  and final Git tree ID with the scratch refs and `HEAD`, catching stale or
+  lossy exports. With `--build`, also build each checked tree. This is the
+  pre-commit gate.
 - Build the selected real source tree with `ds4py build --src .ds4/tree`.
   satyrn-agent owns materialization, not a second copy of the build logic; a
   `ds4-build` convenience wrapper only passes options through to ds4-py.
 
 Until these exist, the same steps run by hand: clone upstream at the pin, `git
-am patches/common/*.patch` and then one model directory, commit the change, and
-use `git format-patch` with the common tip as the model export boundary.
+am patches/common/*.patch` and then model directories in order through the
+selected prefix, commit the change, and use `git format-patch` with the common
+or previous-model tip as the export boundary.
 
 ### Implementation notes for the tooling
 
 - `.ds4/cache` is a bare mirror of upstream used by both `ds4-sync` and
   `ds4-check`, so both work offline after the first fetch.
 - `.ds4/tree` is a full clone of the cache with `upstream` added as a second
-  remote. A local common-tip branch records the export boundary: it is the
-  checked-out branch for common-only work and the uneditable base of the
-  checked-out model branch for model work. The selected model is recorded with
-  the scratch tree. A future rebase onto a newer upstream rebuilds both ranges
-  and exports them separately.
-- The common tip is metadata for export, not a replacement for verification:
-  `ds4-check` always reconstructs the boundary by applying the committed common
-  directory to the pin.
-- `ds4py build --src` accepts any assembled ds4 tree, so common-only and every
-  model target use the same build path. Metal still finds its kernels relative
-  to the real checkout.
+  remote. Local common-tip and per-model-tip refs record every export boundary.
+  The common-tip branch is checked out for common-only work; a model branch
+  starts at its previous-model or common tip and accepts only that model's
+  commits. The selected prefix is recorded with the scratch tree. A future
+  rebase onto a newer upstream rebuilds every range and exports each separately.
+- Boundary refs are metadata for export, not a replacement for verification:
+  `ds4-check` always reconstructs them by applying the committed directories in
+  order to the pin.
+- `ds4py build --src` accepts any assembled ds4 tree, so common-only, every
+  prefix and the full multi-model target use the same build path. Metal still
+  finds its kernels relative to the real checkout.
 - `devenv.nix` mirrors ds4-py (`languages.c`, `languages.python` + uv with
   `UV_PYTHON`/`UV_PYTHON_DOWNLOADS` pinned to Nix's Python) and adds the
   script entry points as devenv scripts so the commands work both inside and
@@ -345,9 +355,10 @@ use `git format-patch` with the common tip as the model export boundary.
   upstream. Each patch lists its carried commits, so per-commit provenance is
   kept. One patch per commit on `5379c1c` can be produced the same way if it is
   ever needed. The standalone 0010 macOS 15 fix arrived later in #4.
-- **Patch mechanics:** numbered `format-patch` files applied in filename
-  order within each directory, with common before one selected model; no
-  `series` file (redundant with numbered names).
+- **Patch mechanics:** numbered `format-patch` files applied in filename order
+  within each directory, with model directories in directory-name order after
+  common. Targets are common or a model prefix, and the default target includes
+  all models; no `series` file is needed.
 - **Common is model-independent.** Qwen chat, sampling policy and implementation
   belong to qwen35, not to the shared base, even when they apply independently
   or are inert in another model's build.
