@@ -3,6 +3,13 @@
 {
   languages.c.enable = true;
 
+  # The pinned ds4 source uses macOS 15 Metal APIs; the Metal build needs the
+  # matching SDK (the default clang SDK is older and lacks them).
+  apple.sdk =
+    if pkgs.stdenv.hostPlatform.isDarwin
+    then pkgs.apple-sdk_15
+    else null;
+
   languages.python = {
     enable = true;
     package = pkgs.python3;
@@ -17,6 +24,12 @@
     gnumake
     unzip
   ];
+
+  enterShell = ''
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      export MACOSX_DEPLOYMENT_TARGET=15.0
+    fi
+  '';
 
   env.UV_PYTHON = "${config.languages.python.package}/bin/python3";
   env.UV_PYTHON_DOWNLOADS = "never";
