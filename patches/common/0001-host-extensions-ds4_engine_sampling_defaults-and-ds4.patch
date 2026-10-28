@@ -1,0 +1,71 @@
+From f51c623c62b6b1ae11ae4ca41b93eb51fb820dc1 Mon Sep 17 00:00:00 2001
+From: Koudai Aono <koxudaxi@gmail.com>
+Date: Tue, 6 Oct 2026 15:10:05 +0900
+Subject: [PATCH 1/3] host extensions: ds4_engine_sampling_defaults and
+ ds4_session_supports_payload
+
+---
+ ds4.c | 17 +++++++++++++++++
+ ds4.h |  7 +++++++
+ 2 files changed, 24 insertions(+)
+
+diff --git a/ds4.c b/ds4.c
+index aafcb44b..a79ffce4 100644
+--- a/ds4.c
++++ b/ds4.c
+@@ -63508,6 +63508,10 @@ static int ds41_load_payload(ds4_session *s, FILE *fp, const uint32_t *h,
+ static uint64_t qwen4_payload_tensor_bytes(uint32_t rows, uint32_t mtp_rows);
+ #endif
+ 
++bool ds4_session_supports_payload(ds4_session *s) {
++    return s != NULL && !s->distributed && ds4_session_is_qwen4(s);
++}
++
+ uint64_t ds4_session_payload_bytes(ds4_session *s) {
+     if (s && !s->distributed && ds4_session_is_qwen4(s)) {
+ #ifndef DS4_HAS_QWEN4_GPU
+@@ -73213,6 +73217,19 @@ bool ds4_engine_is_qwen4(ds4_engine *e) {
+     return ds4_model_is_qwen4();
+ }
+ 
++void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
++                                  int *top_k, float *top_p, float *min_p) {
++    if (!temperature || !top_k || !top_p || !min_p) return;
++    *temperature = DS4_DEFAULT_TEMPERATURE;
++    *top_k = 0;
++    *top_p = DS4_DEFAULT_TOP_P;
++    *min_p = DS4_DEFAULT_MIN_P;
++    if (ds4_engine_is_glm_dsa(e)) {
++        *top_p = 0.95f;
++        *min_p = 0.0f;
++    }
++}
++
+ /* The official template's default effort is xhigh; medium adds no text. */
+ const char *ds4_qwen4_reasoning_effort_text(ds4_think_mode mode) {
+     switch (mode) {
+diff --git a/ds4.h b/ds4.h
+index 7fd00119..04eb3658 100644
+--- a/ds4.h
++++ b/ds4.h
+@@ -308,6 +308,11 @@ int ds4_engine_model_id(ds4_engine *e);
+ bool ds4_engine_is_glm_dsa(ds4_engine *e);
+ bool ds4_engine_is_glm53(ds4_engine *e);
+ bool ds4_engine_is_qwen4(ds4_engine *e);
++/* The sampler defaults for the loaded model: the generic DS4_DEFAULT_*
++ * values, overridden per family as the CLI does. For hosts that sample
++ * themselves. */
++void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
++                                  int *top_k, float *top_p, float *min_p);
+ /* Qwen3.8 reasoning-effort system instruction for a think mode (NULL when none) */
+ const char *ds4_qwen4_reasoning_effort_text(ds4_think_mode mode);
+ const char *ds4_backend_name(ds4_backend backend);
+@@ -648,6 +653,8 @@ int ds4_session_eval_output_head_from_hc(ds4_session *s,
+ #define DS4_SESSION_LAYER_PAYLOAD_VERSION UINT32_C(1)
+ #define DS4_SESSION_LAYER_PAYLOAD_U32_FIELDS 14u
+ 
++/* Whether this session's state can be saved and loaded as a payload. */
++bool ds4_session_supports_payload(ds4_session *s);
+ uint64_t ds4_session_payload_bytes(ds4_session *s);
+ int ds4_session_stage_payload(ds4_session *s, ds4_session_payload_file *out,
+                               char *err, size_t errlen);
