@@ -205,6 +205,149 @@ test_apply_target_builds_common_and_ordered_prefix() {
         "final HEAD tree"
 }
 
+# --- stop-model selection tests ------------------------------------------------
+
+# Return success when REF resolves in TREE, failure when it is absent.
+_ref_exists() {
+    local tree="$1" ref="$2"
+    git -C "$tree" rev-parse --verify --quiet "$ref" >/dev/null 2>&1
+}
+
+# Shared setup for the apply-target stop tests: an upstream, a common/alpha/
+# zebra patch series, a warmed cache, and a scratch clone at the pin.
+_apply_target_stop_fixture() {
+    local upstream="$1" patches="$2" cache="$3" tree="$4"
+    mkdir -p "$upstream"
+    git -C "$upstream" init -q
+    printf 'line1\n' > "$upstream/notes.txt"
+    git -C "$upstream" add notes.txt
+    git -C "$upstream" commit -qm "base"
+    UPSTREAM_COMMIT="$(git -C "$upstream" rev-parse HEAD)"
+
+    mkdir -p "$patches"
+    _build_series "$patches"
+
+    DS4_PATCHES_DIR="$patches"
+    DS4_CACHE_DIR="$cache"
+    UPSTREAM_URL="$upstream"
+
+    ds4_ensure_cache
+    ds4_clone_at_pin "$tree"
+}
+
+test_apply_target_stops_at_common() {
+    _apply_target_stop_fixture \
+        "$TMP_ROOT/stop-common-upstream" \
+        "$TMP_ROOT/stop-common-patches" \
+        "$TMP_ROOT/stop-common-cache" \
+        "$TMP_ROOT/stop-common-tree"
+
+    ds4_apply_target "$TMP_ROOT/stop-common-tree" common
+
+    assert_file_eq $'line1\ncommon\n' \
+        "$TMP_ROOT/stop-common-tree/notes.txt" "common-only notes.txt bytes"
+
+    local want_tree
+    want_tree="$(_tree_id "$TMP_ROOT/stop-common-tree" $'line1\ncommon\n')"
+    assert_eq "$want_tree" \
+        "$(git -C "$TMP_ROOT/stop-common-tree" rev-parse refs/ds4/common^{tree})" \
+        "common boundary tree"
+    assert_eq "$want_tree" \
+        "$(git -C "$TMP_ROOT/stop-common-tree" rev-parse 'HEAD^{tree}')" \
+        "common HEAD tree"
+
+    if _ref_exists "$TMP_ROOT/stop-common-tree" refs/ds4/model/alpha; then
+        printf '  FAIL: refs/ds4/model/alpha should be absent after common stop\n' >&2
+        return 1
+    fi
+    if _ref_exists "$TMP_ROOT/stop-common-tree" refs/ds4/model/zebra; then
+        printf '  FAIL: refs/ds4/model/zebra should be absent after common stop\n' >&2
+        return 1
+    fi
+}
+
+test_apply_target_stops_at_model() {
+    _apply_target_stop_fixture \
+        "$TMP_ROOT/stop-model-upstream" \
+        "$TMP_ROOT/stop-model-patches" \
+        "$TMP_ROOT/stop-model-cache" \
+        "$TMP_ROOT/stop-model-tree"
+
+    ds4_apply_target "$TMP_ROOT/stop-model-tree" alpha
+
+    assert_file_eq $'line1\ncommon\nalpha\n' \
+        "$TMP_ROOT/stop-model-tree/notes.txt" "alpha-prefix notes.txt bytes"
+
+    local want_common want_alpha
+    want_common="$(_tree_id "$TMP_ROOT/stop-model-tree" $'line1\ncommon\n')"
+    assert_eq "$want_common" \
+        "$(git -C "$TMP_ROOT/stop-model-tree" rev-parse refs/ds4/common^{tree})" \
+        "common boundary tree"
+    want_alpha="$(_tree_id "$TMP_ROOT/stop-model-tree" $'line1\ncommon\nalpha\n')"
+    assert_eq "$want_alpha" \
+        "$(git -C "$TMP_ROOT/stop-model-tree" rev-parse refs/ds4/model/alpha^{tree})" \
+        "alpha boundary tree"
+    assert_eq "$want_alpha" \
+        "$(git -C "$TMP_ROOT/stop-model-tree" rev-parse 'HEAD^{tree}')" \
+        "alpha HEAD tree"
+
+    if _ref_exists "$TMP_ROOT/stop-model-tree" refs/ds4/model/zebra; then
+        printf '  FAIL: refs/ds4/model/zebra should be absent after alpha stop\n' >&2
+        return 1
+    fi
+}
+
+test_apply_target_uses_global_stop_model() {
+    _apply_target_stop_fixture \
+        "$TMP_ROOT/global-stop-upstream" \
+        "$TMP_ROOT/global-stop-patches" \
+        "$TMP_ROOT/global-stop-cache" \
+        "$TMP_ROOT/global-stop-tree"
+
+    ds4_model_names
+    ds4_target_stop_model alpha
+    assert_eq "alpha" "$DS4_STOP_MODEL" "recorded stop model"
+
+    # No positional STOP_MODEL: ds4_apply_target must consume DS4_STOP_MODEL.
+    ds4_apply_target "$TMP_ROOT/global-stop-tree"
+
+    assert_file_eq $'line1\ncommon\nalpha\n' \
+        "$TMP_ROOT/global-stop-tree/notes.txt" \
+        "global stop model notes.txt bytes"
+
+    local want_alpha
+    want_alpha="$(_tree_id "$TMP_ROOT/global-stop-tree" $'line1\ncommon\nalpha\n')"
+    assert_eq "$want_alpha" \
+        "$(git -C "$TMP_ROOT/global-stop-tree" rev-parse refs/ds4/model/alpha^{tree})" \
+        "global stop alpha boundary tree"
+
+    if _ref_exists "$TMP_ROOT/global-stop-tree" refs/ds4/model/zebra; then
+        printf '  FAIL: trailing ref should be absent when global stop model is set\n' >&2
+        return 1
+    fi
+}
+
+test_target_stop_model_valid_empty_common_unknown() {
+    local patches="$TMP_ROOT/stop-model-cases-patches"
+    mkdir -p "$patches/common" "$patches/alpha" "$patches/zebra"
+    DS4_PATCHES_DIR="$patches"
+    ds4_model_names
+
+    ds4_target_stop_model alpha
+    assert_eq "alpha" "$DS4_STOP_MODEL" "valid model stop"
+
+    ds4_target_stop_model common
+    assert_eq "common" "$DS4_STOP_MODEL" "common stop"
+
+    ds4_target_stop_model
+    assert_eq "" "$DS4_STOP_MODEL" "empty stop"
+
+    if ( ds4_target_stop_model nope ) 2>/dev/null; then
+        printf '  FAIL: expected unknown stop model to be rejected\n' >&2
+        return 1
+    fi
+}
+
 # --- offline cache and state tests ----------------------------------------------
 
 test_cached_pin_works_when_remote_is_unreachable() {
@@ -282,6 +425,10 @@ ALL_TESTS=(
     test_model_names_use_c_locale_order
     test_empty_common_or_model_directory_fails
     test_apply_target_builds_common_and_ordered_prefix
+    test_apply_target_stops_at_common
+    test_apply_target_stops_at_model
+    test_apply_target_uses_global_stop_model
+    test_target_stop_model_valid_empty_common_unknown
     test_cached_pin_works_when_remote_is_unreachable
     test_missing_cached_pin_fails
     test_state_round_trip_does_not_execute_values

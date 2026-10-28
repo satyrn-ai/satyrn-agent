@@ -34,8 +34,10 @@
 #   ds4_apply_target TREE [STOP_MODEL]
 #       Apply DS4_PATCHES_DIR/common then model directories in DS4_MODEL_NAMES
 #       order with git am. STOP_MODEL is "" (apply every model), "common"
-#       (common only), or a known model name to stop after. After each applied
-#       range, records refs/ds4/common and refs/ds4/model/<name> in TREE.
+#       (common only), or a known model name to stop after. When STOP_MODEL is
+#       omitted, DS4_STOP_MODEL (set by ds4_target_stop_model) is used. After
+#       each applied range, records refs/ds4/common and refs/ds4/model/<name>
+#       in TREE.
 #   ds4_state_write TREE TARGET MODEL PREVIOUS_TIP SYNC_HEAD
 #       Write TREE/.git/ds4-state with TARGET, MODEL, PREVIOUS_TIP, SYNC_HEAD,
 #       and EXPORTED_HEAD (initialized to SYNC_HEAD).
@@ -214,7 +216,7 @@ _ds4_git_am() {
 }
 
 ds4_apply_target() {
-    local tree="$1" stop="${2:-}"
+    local tree="$1" stop="${2:-${DS4_STOP_MODEL:-}}"
     [[ -d "$tree/.git" ]] || ds4_die "not a git tree: $tree"
 
     ds4_model_names
