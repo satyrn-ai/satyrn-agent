@@ -81,10 +81,12 @@ using the Metal backend on macOS and the CPU backend elsewhere.
 ### Model-backed end-to-end gate
 
 `tests/ds4_e2e_test.bash` is the local release gate that exercises the
-migrated implementation against a real dense qwen35 model. It materializes the
-full tree, runs pristine checks, builds the library through ds4-py, checks its
-ABI/load, verifies live sync plans and restore, and compares deterministic raw
-generation (temp 0, seed 1, fixed token limit) between `ds4py raw` and
+migrated implementation against a real dense qwen35 model. It first reads the
+GGUF metadata and requires `general.architecture=qwen35`, then materializes
+the full tree into an isolated `.ds4/e2e` scratch area (never the developer's
+`.ds4/tree`), runs pristine checks, builds the library through ds4-py, checks
+its ABI/load, verifies live sync plans and restore, and compares deterministic
+raw generation (temp 0, seed 1, fixed token limit) between `ds4py raw` and
 `ds4-agent --raw`. It is read-only with respect to the tracked patches.
 
 ```
@@ -96,7 +98,8 @@ devenv shell -- bash tests/ds4_e2e_test.bash
 `DS4PY_PROJECT` selects an external ds4-py checkout; the script puts
 `$DS4PY_PROJECT/.venv/bin` on `PATH` (install it with `devenv shell -- env -u
 UV_PROJECT_ENVIRONMENT uv sync --project "$DS4PY_PROJECT"` as described under
-*Build*). `DS4_TEST_MODEL` must point at a
-dense qwen35 GGUF. Ubuntu CI continues to run only the no-model shell suite and
-CPU builds; this model-backed gate is run explicitly on a machine with the
-model available.
+*Build*). `DS4_TEST_MODEL` may be absolute or relative; the script canonicalizes
+it before any materialization. It must point at a dense qwen35 GGUF whose
+`general.architecture` metadata is exactly `qwen35`. Ubuntu CI continues to run
+only the no-model shell suite and CPU builds; this model-backed gate is run
+explicitly on a machine with the model available.

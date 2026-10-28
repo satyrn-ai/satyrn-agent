@@ -265,16 +265,20 @@ main() {
     _export_assert_tree_eq "$check" 'HEAD^{tree}' \
         "$DS4_TREE_DIR" 'HEAD^{tree}' "final HEAD tree"
 
-    # Replace only the owned directory, keeping a backup for rollback.
+    # Replace only the owned directory, keeping a backup for rollback. The
+    # replaced state is recorded *before* the candidate move so that a failure
+    # or signal after the original is backed up always restores the original
+    # bytes (including when the move already landed but the shell exits before
+    # the next statement).
     _DS4_EXPORT_OWNED="$owned_dir"
     local backup="$work/backup"
     if [[ -e "$owned_dir" ]]; then
         mv "$owned_dir" "$backup" ||
             ds4_die "cannot move existing patch directory aside"
     fi
+    _DS4_EXPORT_REPLACED=1
     mv "$candidate" "$owned_dir" ||
         ds4_die "cannot move candidate into place"
-    _DS4_EXPORT_REPLACED=1
 
     # Record the successful export so a later sync knows HEAD is exported.
     _ds4_export_write_state "$DS4_TREE_DIR" "$DS4_STATE_TARGET" \

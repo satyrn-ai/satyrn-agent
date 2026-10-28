@@ -1,4 +1,4 @@
-From ad433208c017bdbfb2dbeaf33d4cbd4efd60585f Mon Sep 17 00:00:00 2001
+From 1e19559e0b098eeb0341b80cefb3b5028018ab01 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 13:24:13 +0900
 Subject: [PATCH 7/8] qwen35: flash attention for prompt batches

@@ -1172,6 +1172,49 @@ test_export_round_trip_failure_leaves_all_patch_bytes_untouched() {
         "all patch bytes untouched after round-trip failure"
 }
 
+test_export_replacement_interruption_restores_original() {
+    _export_fixture "$TMP_ROOT/exp-int-upstream" "$TMP_ROOT/exp-int-patches" \
+        "$TMP_ROOT/exp-int-cache" "$TMP_ROOT/exp-int-tree" \
+        "$TMP_ROOT/exp-int-exportdir"
+
+    _run_sync
+
+    printf 'zebra-a\n' >> "$DS4_TREE_DIR/notes.txt"
+    git -C "$DS4_TREE_DIR" add notes.txt
+    git -C "$DS4_TREE_DIR" commit -qm "zebra edit"
+
+    _snapshot_dir "$DS4_PATCHES_DIR" "$TMP_ROOT/exp-int-before"
+
+    # Shim mv so the candidate->owned replacement reports failure *after* it
+    # has already moved the candidate into place. That is the interruption
+    # window after the original is backed up but before the replaced state is
+    # observed; cleanup must still restore the original bytes.
+    local bindir="$TMP_ROOT/exp-int-bin" real_mv
+    real_mv="$(command -v mv)"
+    mkdir -p "$bindir"
+    cat > "$bindir/mv" <<EOF
+#!/usr/bin/env bash
+if [[ "\$2" == "$DS4_PATCHES_DIR/zebra" && "\$1" == */candidate ]]; then
+    "$real_mv" "\$1" "\$2"
+    exit 1
+fi
+exec "$real_mv" "\$@"
+EOF
+    chmod +x "$bindir/mv"
+
+    local err="$TMP_ROOT/exp-int.err"
+    if PATH="$bindir:$PATH" _run_export 2>"$err"; then
+        printf '  FAIL: expected interrupted replacement to fail\n' >&2
+        return 1
+    fi
+    grep -q 'candidate' "$err" || {
+        printf '  FAIL: error did not mention candidate move failure\n' >&2
+        return 1
+    }
+    _assert_dirs_identical "$TMP_ROOT/exp-int-before" "$DS4_PATCHES_DIR" \
+        "all patch bytes untouched after replacement interruption"
+}
+
 test_export_help_prints_usage_without_changes() {
     _export_fixture "$TMP_ROOT/exp-help-upstream" "$TMP_ROOT/exp-help-patches" \
         "$TMP_ROOT/exp-help-cache" "$TMP_ROOT/exp-help-tree" \
@@ -1415,6 +1458,30 @@ test_check_detects_stale_scratch_tree() {
     }
 }
 
+test_check_detects_corrupt_selected_boundary_ref() {
+    _check_fixture "$TMP_ROOT/check-boundary-upstream" \
+        "$TMP_ROOT/check-boundary-patches" \
+        "$TMP_ROOT/check-boundary-cache" \
+        "$TMP_ROOT/check-boundary-tree" \
+        "$TMP_ROOT/check-boundary-checkdir"
+    _run_sync --model alpha
+
+    # Corrupt only the selected model's boundary ref, leaving the preceding
+    # common boundary and final HEAD intact. A stale refs/ds4/model/alpha must
+    # still fail even when HEAD^{tree} still matches.
+    git -C "$DS4_TREE_DIR" update-ref refs/ds4/model/alpha refs/ds4/common
+
+    local err="$TMP_ROOT/check-boundary.err"
+    if _run_check --model alpha >/dev/null 2>"$err"; then
+        printf '  FAIL: expected corrupt selected boundary ref to fail\n' >&2
+        return 1
+    fi
+    grep -q 'alpha boundary tree' "$err" || {
+        printf '  FAIL: error did not mention alpha boundary mismatch\n' >&2
+        return 1
+    }
+}
+
 test_check_help_prints_usage_without_changes() {
     _check_fixture "$TMP_ROOT/check-help-upstream" "$TMP_ROOT/check-help-patches" \
         "$TMP_ROOT/check-help-cache" "$TMP_ROOT/check-help-tree" \
@@ -1539,6 +1606,36 @@ test_devenv_entry_points_show_help() {
 
 # --- model-backed E2E preflight tests -----------------------------------------
 
+# Write a minimal, tensor-free GGUF whose general.architecture is ARCH. This
+# exercises the E2E metadata preflight without generating a real model.
+_write_gguf_fixture() {
+    local file="$1" arch="$2"
+    python3 - "$file" "$arch" <<'PY'
+import struct, sys
+path, arch = sys.argv[1], sys.argv[2]
+def string(data):
+    return struct.pack("<Q", len(data)) + data
+kv = string(b"general.architecture") + struct.pack("<I", 8) + string(arch.encode())
+header = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", 1)
+with open(path, "wb") as fp:
+    fp.write(header + kv)
+PY
+}
+
+# Copy the E2E script and the tools it runs into a standalone repo root so a
+# test can exercise the gate hermetically (its .ds4/tree is a disposable
+# "normal" tree).
+_e2e_scratch_repo() {
+    local dest="$1"
+    mkdir -p "$dest/tools" "$dest/tests"
+    cp "$REPO_ROOT/tools/ds4-lib.bash" \
+        "$REPO_ROOT/tools/ds4-sync.bash" \
+        "$REPO_ROOT/tools/ds4-check.bash" \
+        "$REPO_ROOT/tools/ds4-export.bash" \
+        "$REPO_ROOT/tools/ds4-gguf-arch.py" "$dest/tools/"
+    cp "$REPO_ROOT/tests/ds4_e2e_test.bash" "$dest/tests/"
+}
+
 # Run the model-backed E2E script in a controlled environment and capture its
 # stderr. These tests exercise only the script's input validation: a missing
 # DS4PY_PROJECT or DS4_TEST_MODEL must produce a clear nonzero usage error
@@ -1580,6 +1677,108 @@ test_e2e_requires_dense_qwen35_model() {
     fi
 }
 
+test_e2e_rejects_wrong_architecture_model() {
+    local venv="$TMP_ROOT/e2e-wrong-venv"
+    mkdir -p "$venv/.venv/bin"
+    ln -s "$(command -v python3)" "$venv/.venv/bin/python3"
+
+    local model="$TMP_ROOT/e2e-wrong.gguf"
+    _write_gguf_fixture "$model" qwen4exp
+
+    local err="$TMP_ROOT/e2e-wrong.err"
+    if ( DS4PY_PROJECT="$venv" DS4_TEST_MODEL="$model" \
+         bash "$REPO_ROOT/tests/ds4_e2e_test.bash" ) 2>"$err"; then
+        printf '  FAIL: expected wrong-architecture model to be rejected\n' >&2
+        return 1
+    fi
+    grep -q 'qwen35' "$err" || {
+        printf '  FAIL: error did not mention the required qwen35 architecture\n' >&2
+        return 1
+    }
+    grep -q 'qwen4exp' "$err" || {
+        printf '  FAIL: error did not report the observed architecture\n' >&2
+        return 1
+    }
+}
+
+test_e2e_uses_isolated_tree_and_preserves_normal_tree() {
+    local repo="$TMP_ROOT/e2e-repo"
+    _e2e_scratch_repo "$repo"
+
+    local upstream="$TMP_ROOT/e2e-upstream"
+    mkdir -p "$upstream"
+    git -C "$upstream" init -q
+    printf 'line1\n' > "$upstream/notes.txt"
+    git -C "$upstream" add notes.txt
+    git -C "$upstream" commit -qm base
+    local pin
+    pin="$(git -C "$upstream" rev-parse HEAD)"
+
+    local patches="$TMP_ROOT/e2e-patches"
+    mkdir -p "$patches"
+    _build_series "$patches"
+
+    # A disposable "normal" .ds4/tree that the gate must leave alone.
+    local normal_tree="$repo/.ds4/tree"
+    mkdir -p "$normal_tree"
+    git -C "$normal_tree" init -q
+    printf 'keep\n' > "$normal_tree/normal-marker"
+    git -C "$normal_tree" add normal-marker
+    git -C "$normal_tree" commit -qm normal
+    local normal_head
+    normal_head="$(git -C "$normal_tree" rev-parse HEAD)"
+
+    # Fake ds4-py venv: the pinned Python runs the metadata probe, and a stub
+    # ds4py fails at the build step so the gate stops there deterministically.
+    local venv="$TMP_ROOT/e2e-venv"
+    mkdir -p "$venv/.venv/bin"
+    ln -s "$(command -v python3)" "$venv/.venv/bin/python3"
+    cat > "$venv/.venv/bin/ds4py" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+    chmod +x "$venv/.venv/bin/ds4py"
+
+    # Correct-architecture fixture, referenced by a RELATIVE path to exercise
+    # canonicalization as well.
+    local model="$TMP_ROOT/e2e-model.gguf"
+    _write_gguf_fixture "$model" qwen35
+
+    local out="$TMP_ROOT/e2e-isolated.out"
+    local err="$TMP_ROOT/e2e-isolated.err"
+    if ( cd "$TMP_ROOT" &&
+         DS4PY_PROJECT="$venv" \
+         DS4_TEST_MODEL="e2e-model.gguf" \
+         DS4_PATCHES_DIR="$patches" \
+         DS4_CACHE_DIR="$TMP_ROOT/e2e-cache" \
+         UPSTREAM_URL="$upstream" \
+         UPSTREAM_COMMIT="$pin" \
+         bash "$repo/tests/ds4_e2e_test.bash" ) >"$out" 2>"$err"; then
+        printf '  FAIL: expected e2e to stop at the ds4py build step\n' >&2
+        return 1
+    fi
+    grep -q 'ds4py build failed' "$err" || {
+        cat "$err" >&2
+        printf '  FAIL: expected e2e to reach the ds4py build step\n' >&2
+        return 1
+    }
+
+    assert_eq "$normal_head" "$(git -C "$normal_tree" rev-parse HEAD)" \
+        "normal .ds4/tree HEAD survives e2e"
+    assert_file_eq $'keep\n' "$normal_tree/normal-marker" \
+        "normal .ds4/tree marker survives e2e"
+    assert_file_eq $'line1\ncommon\nalpha\nzebra\n' \
+        "$repo/.ds4/e2e/tree/notes.txt" "isolated e2e tree materialized"
+
+    local canonical_model
+    canonical_model="$(cd "$TMP_ROOT" && pwd)/e2e-model.gguf"
+    grep -q "model  $canonical_model" "$out" || {
+        cat "$out" >&2
+        printf '  FAIL: e2e did not canonicalize the relative model path\n' >&2
+        return 1
+    }
+}
+
 # --- runner -------------------------------------------------------------------
 
 ALL_TESTS=(
@@ -1611,17 +1810,21 @@ ALL_TESTS=(
     test_export_rejects_empty_range
     test_export_rejects_dirty_patches_without_force
     test_export_round_trip_failure_leaves_all_patch_bytes_untouched
+    test_export_replacement_interruption_restores_original
     test_export_help_prints_usage_without_changes
     test_check_default_covers_common_every_prefix_and_full_tree
     test_check_selected_target
     test_check_rejects_corrupt_patch_series
     test_check_build_passes_real_source_path_to_ds4py
     test_check_detects_stale_scratch_tree
+    test_check_detects_corrupt_selected_boundary_ref
     test_check_help_prints_usage_without_changes
     test_check_rejects_invalid_arguments
     test_devenv_entry_points_show_help
     test_e2e_requires_external_ds4py
     test_e2e_requires_dense_qwen35_model
+    test_e2e_rejects_wrong_architecture_model
+    test_e2e_uses_isolated_tree_and_preserves_normal_tree
 )
 
 PASSED=0

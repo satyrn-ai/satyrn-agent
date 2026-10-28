@@ -1,4 +1,4 @@
-From 86a9aacabcbf7ff0fe1f4c469b4244c00b96c028 Mon Sep 17 00:00:00 2001
+From d5fb252d805496625144b97fc8b7a8a66d40c7cc Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 21:25:08 +0900
 Subject: [PATCH 8/8] qwen35: kernel follow-ups for the drafter and verify

@@ -21,6 +21,8 @@ REPO_ROOT="$(cd "$E2E_DIR/.." && pwd)"
 
 source "$REPO_ROOT/tools/ds4-lib.bash"
 
+# The gate materializes and builds inside an isolated scratch root so it can
+# never clobber the developer's normal .ds4/tree.
 E2E_SCRATCH="$REPO_ROOT/.ds4/e2e"
 
 usage() {
@@ -29,10 +31,11 @@ Usage: ds4_e2e_test [--help]
 
 Required environment:
   DS4PY_PROJECT   path to an external ds4-py checkout (its .venv/bin is used)
-  DS4_TEST_MODEL  path to a dense qwen35 GGUF
+  DS4_TEST_MODEL  path to a dense qwen35 GGUF (general.architecture=qwen35)
 
-Runs: pristine checks, ds4-py build + ABI/load, live sync-plan/restore, and
-deterministic raw-generation parity against ds4-agent.
+Runs: dense-qwen35 metadata preflight, pristine checks, ds4-py build +
+ABI/load, live sync-plan/restore, and deterministic raw-generation parity
+against ds4-agent. All materialization happens under .ds4/e2e, never .ds4/tree.
 EOF
 }
 
@@ -64,9 +67,9 @@ main() {
 
     # Prefer the checkout's venv (documented), then fall back to PATH.
     export PATH="$DS4PY_PROJECT/.venv/bin:$PATH"
-    local ds4py
-    ds4py="$(command -v ds4py)" ||
-        die "ds4py not found on PATH (run 'uv sync --project $DS4PY_PROJECT')"
+    local python3
+    python3="$(command -v python3 || command -v python)" ||
+        die "python3 not found on PATH (install the DS4PY_PROJECT environment)"
 
     # The model must be a readable GGUF; check the magic without loading it.
     [[ -f "$DS4_TEST_MODEL" ]] ||
@@ -78,12 +81,36 @@ main() {
     [[ "$magic" == "GGUF" ]] ||
         die "DS4_TEST_MODEL is not a GGUF file: $DS4_TEST_MODEL"
 
+    # Canonicalize the already-validated path so later steps (including the
+    # agent, which chdirs into the materialized tree) cannot lose a relative
+    # model path.
+    DS4_TEST_MODEL="$(cd "$(dirname "$DS4_TEST_MODEL")" && pwd)/$(basename "$DS4_TEST_MODEL")"
+
+    # Require the exact dense qwen35 architecture before sync or build, using
+    # the pinned ds4-py Python for the GGUF metadata probe.
+    local arch
+    arch="$("$python3" "$REPO_ROOT/tools/ds4-gguf-arch.py" "$DS4_TEST_MODEL")" ||
+        die "cannot read GGUF architecture from $DS4_TEST_MODEL"
+    [[ "$arch" == "qwen35" ]] ||
+        die "DS4_TEST_MODEL is a $arch GGUF, not dense qwen35: $DS4_TEST_MODEL"
+
+    local ds4py
+    ds4py="$(command -v ds4py)" ||
+        die "ds4py not found on PATH (run 'uv sync --project $DS4PY_PROJECT')"
+
     printf 'ds4-e2e: repo   %s\n' "$REPO_ROOT"
     printf 'ds4-e2e: ds4py  %s\n' "$ds4py"
     printf 'ds4-e2e: model  %s\n' "$DS4_TEST_MODEL"
 
     rm -rf "$E2E_SCRATCH"
     mkdir -p "$E2E_SCRATCH" || die "cannot create $E2E_SCRATCH"
+
+    # Isolated scratch dirs for the tools, so this gate never touches the
+    # developer's normal .ds4/tree or .ds4/check.
+    local tree_dir="$E2E_SCRATCH/tree"
+    local check_dir="$E2E_SCRATCH/check"
+    export DS4_TREE_DIR="$tree_dir"
+    export DS4_CHECK_DIR="$check_dir"
 
     local backend
     case "$(uname -s)" in
@@ -93,7 +120,7 @@ main() {
 
     # 1. Materialize the full real tree and run pristine checks.
     printf '\n== ds4-sync (materialize full tree) ==\n'
-    bash "$REPO_ROOT/tools/ds4-sync.bash" --force
+    bash "$REPO_ROOT/tools/ds4-sync.bash"
 
     printf '\n== ds4-check (pristine checks) ==\n'
     bash "$REPO_ROOT/tools/ds4-check.bash"
@@ -102,7 +129,7 @@ main() {
     local lib_out="$E2E_SCRATCH/lib"
     printf '\n== ds4py build (backend=%s) ==\n' "$backend"
     local lib_path
-    lib_path="$("$ds4py" build --src "$REPO_ROOT/.ds4/tree" \
+    lib_path="$("$ds4py" build --src "$tree_dir" \
         --backend "$backend" --out "$lib_out")" ||
         die "ds4py build failed"
     [[ -n "$lib_path" && -f "$lib_path" ]] ||
@@ -129,11 +156,11 @@ main() {
 
     # 5. Build ds4-agent from the same tree.
     printf '\n== make ds4-agent ==\n'
-    local agent_bin="$REPO_ROOT/.ds4/tree/ds4-agent"
+    local agent_bin="$tree_dir/ds4-agent"
     if [[ "$backend" == "metal" ]]; then
-        make -C "$REPO_ROOT/.ds4/tree" ds4-agent
+        make -C "$tree_dir" ds4-agent
     else
-        make -C "$REPO_ROOT/.ds4/tree" cpu
+        make -C "$tree_dir" cpu
     fi
     [[ -x "$agent_bin" ]] || die "ds4-agent binary not found: $agent_bin"
 
@@ -153,7 +180,7 @@ main() {
 
     # Run the agent from the source tree so its relative metal/*.metal sources
     # resolve; the model path is absolute.
-    ( cd "$REPO_ROOT/.ds4/tree" &&
+    ( cd "$tree_dir" &&
         "$agent_bin" --non-interactive --raw -p "$prompt" \
             -m "$DS4_TEST_MODEL" -c "$ctx" -n "$tokens" \
             --temp 0 --seed 1 --"$backend" ) > "$agent_raw" ||

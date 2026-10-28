@@ -186,7 +186,10 @@ main() {
         # When .ds4/tree represents this same target, the committed patches
         # must reproduce every preceding boundary ref and the editable HEAD.
         if [[ -n "$scratch_check_target" && "$target" == "$scratch_check_target" ]]; then
-            if [[ "$target" != "common" ]]; then
+            if [[ "$target" == "common" ]]; then
+                _check_assert_tree_eq "$clone" 'refs/ds4/common^{tree}' \
+                    "$DS4_TREE_DIR" 'refs/ds4/common^{tree}' "common boundary tree"
+            else
                 _check_assert_tree_eq "$clone" 'refs/ds4/common^{tree}' \
                     "$DS4_TREE_DIR" 'refs/ds4/common^{tree}' "common boundary tree"
                 for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
@@ -195,6 +198,9 @@ main() {
                         "$DS4_TREE_DIR" "refs/ds4/model/$m^{tree}" \
                         "$m boundary tree"
                 done
+                _check_assert_tree_eq "$clone" "refs/ds4/model/$target^{tree}" \
+                    "$DS4_TREE_DIR" "refs/ds4/model/$target^{tree}" \
+                    "$target boundary tree"
             fi
             _check_assert_tree_eq "$clone" 'HEAD^{tree}' \
                 "$DS4_TREE_DIR" 'HEAD^{tree}' "final tree"

@@ -1,4 +1,4 @@
-From ccbd48995c06163b3041b1ecfffc23c830a5f042 Mon Sep 17 00:00:00 2001
+From cb7c13fe5abfe03427ea2ae01809f5192c5cce23 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Sun, 4 Oct 2026 10:40:13 +0900
 Subject: [PATCH 3/8] qwen35: in-memory and file payloads for the dense path
