@@ -1,10 +1,16 @@
 # satyrn-agent
 
+🚧 *This repo is under active development.*
+
 The downstream agent from the ds4-py design: a customisation of ds4-py that
-runs against a patched ds4 engine (dense qwen35 on Metal, DFlash speculative
+runs against a patched [ds4](https://dwarfstar.sh/) engine (dense qwen35 on Metal, DFlash speculative
 decode).
 
-Status: repo bootstrap. The ds4 patch series and its tooling land next; the
+## Development status
+
+Current status: repo bootstrap.
+
+The ds4 patch series and its tooling land next; the
 governing design is `docs/specs/2026-10-24-ds4-patch-series-design.md` on
 branch `docs/ds4-patch-series` until that slice merges.
 
