@@ -686,6 +686,35 @@ test_sync_rejects_invalid_arguments() {
     }
 }
 
+test_sync_rejects_common_and_empty_model() {
+    _sync_fixture "$TMP_ROOT/sync-model-args-upstream" \
+        "$TMP_ROOT/sync-model-args-patches" \
+        "$TMP_ROOT/sync-model-args-cache" "$TMP_ROOT/sync-model-args-tree"
+    local err="$TMP_ROOT/sync-model-args.err"
+
+    if _run_sync --model common 2>"$err"; then
+        printf '  FAIL: expected --model common to fail\n' >&2
+        return 1
+    fi
+    grep -q -- '--common-only' "$err" || {
+        printf '  FAIL: --model common error did not suggest --common-only\n' >&2
+        return 1
+    }
+
+    if _run_sync --model "" 2>"$err"; then
+        printf '  FAIL: expected empty --model to fail\n' >&2
+        return 1
+    fi
+    grep -q -- 'non-empty' "$err" || {
+        printf '  FAIL: empty --model error did not mention non-empty\n' >&2
+        return 1
+    }
+    [[ ! -e "$DS4_TREE_DIR" ]] || {
+        printf '  FAIL: empty --model must not materialize a tree\n' >&2
+        return 1
+    }
+}
+
 test_sync_help_prints_usage_without_tree() {
     _sync_fixture "$TMP_ROOT/sync-help-upstream" "$TMP_ROOT/sync-help-patches" \
         "$TMP_ROOT/sync-help-cache" "$TMP_ROOT/sync-help-tree"
@@ -1570,6 +1599,7 @@ ALL_TESTS=(
     test_sync_common_only
     test_sync_model_stops_at_editable_prefix
     test_sync_rejects_invalid_arguments
+    test_sync_rejects_common_and_empty_model
     test_sync_help_prints_usage_without_tree
     test_sync_refuses_dirty_tree_without_force
     test_sync_refuses_unexported_commit_without_force

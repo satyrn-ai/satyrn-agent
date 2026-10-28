@@ -70,6 +70,10 @@ main() {
             --model)
                 [[ $# -ge 2 ]] || ds4_die "--model requires a model name"
                 model="$2"
+                [[ -n "$model" ]] ||
+                    ds4_die "--model requires a non-empty model name"
+                [[ "$model" != "common" ]] ||
+                    ds4_die "--model common is not a model; use --common-only"
                 shift 2
                 ;;
             --force)

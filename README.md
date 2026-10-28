@@ -69,8 +69,8 @@ its `ds4py` command:
 
 ```
 export DS4PY_PROJECT=/path/to/ds4-py
+devenv shell -- env -u UV_PROJECT_ENVIRONMENT uv sync --project "$DS4PY_PROJECT"
 devenv shell
-uv sync --project "$DS4PY_PROJECT"
 export PATH="$DS4PY_PROJECT/.venv/bin:$PATH"
 ds4-check --build
 ```
@@ -94,8 +94,9 @@ devenv shell -- bash tests/ds4_e2e_test.bash
 ```
 
 `DS4PY_PROJECT` selects an external ds4-py checkout; the script puts
-`$DS4PY_PROJECT/.venv/bin` on `PATH` (install it with `uv sync --project
-"$DS4PY_PROJECT"` as described under *Build*). `DS4_TEST_MODEL` must point at a
+`$DS4PY_PROJECT/.venv/bin` on `PATH` (install it with `devenv shell -- env -u
+UV_PROJECT_ENVIRONMENT uv sync --project "$DS4PY_PROJECT"` as described under
+*Build*). `DS4_TEST_MODEL` must point at a
 dense qwen35 GGUF. Ubuntu CI continues to run only the no-model shell suite and
 CPU builds; this model-backed gate is run explicitly on a machine with the
 model available.

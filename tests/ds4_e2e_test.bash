@@ -159,16 +159,27 @@ main() {
             --temp 0 --seed 1 --"$backend" ) > "$agent_raw" ||
         die "ds4-agent raw generation failed"
 
+    # Both sides must have produced bytes: cmp alone would otherwise report
+    # parity when both raw files are empty.
+    local py_bytes agent_bytes
+    py_bytes="$(wc -c < "$py_raw" | tr -d '[:space:]')"
+    agent_bytes="$(wc -c < "$agent_raw" | tr -d '[:space:]')"
+    if [[ "$py_bytes" -eq 0 ]]; then
+        die "ds4py raw generation produced empty output"
+    fi
+    if [[ "$agent_bytes" -eq 0 ]]; then
+        die "ds4-agent raw generation produced empty output"
+    fi
+
     if cmp -s "$py_raw" "$agent_raw"; then
-        printf 'ds4-e2e: raw parity OK (%s bytes)\n' \
-            "$(wc -c < "$py_raw" | tr -d ' ')"
+        printf 'ds4-e2e: raw parity OK (%s bytes)\n' "$py_bytes"
     else
         printf 'ds4-e2e: raw parity MISMATCH\n' >&2
         printf 'ds4-e2e: ds4py     bytes=%s hash=%s\n' \
-            "$(wc -c < "$py_raw" | tr -d ' ')" \
+            "$py_bytes" \
             "$(git hash-object "$py_raw")" >&2
         printf 'ds4-e2e: ds4-agent bytes=%s hash=%s\n' \
-            "$(wc -c < "$agent_raw" | tr -d ' ')" \
+            "$agent_bytes" \
             "$(git hash-object "$agent_raw")" >&2
         die "raw generation parity failed (see hashes above)"
     fi
