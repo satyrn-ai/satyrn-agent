@@ -916,7 +916,7 @@ test_export_rejects_merge_commit() {
     printf 'side\n' > "$DS4_TREE_DIR/side.txt"
     git -C "$DS4_TREE_DIR" add side.txt
     git -C "$DS4_TREE_DIR" commit -qm "side change"
-    git -C "$DS4_TREE_DIR" checkout -q ds4/common
+    git -C "$DS4_TREE_DIR" checkout -q refs/heads/ds4/common
     printf 'main\n' > "$DS4_TREE_DIR/main.txt"
     git -C "$DS4_TREE_DIR" add main.txt
     git -C "$DS4_TREE_DIR" commit -qm "main change"
