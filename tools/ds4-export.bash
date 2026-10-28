@@ -66,7 +66,7 @@ trap _export_cleanup EXIT
 
 _export_is_model() {
     local name="$1" m
-    for m in "${DS4_MODEL_NAMES[@]}"; do
+    for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
         [[ "$m" == "$name" ]] && return 0
     done
     return 1
@@ -241,7 +241,7 @@ main() {
     if [[ "$owned_name" != "common" ]]; then
         prev_dirs+=("common")
         local m
-        for m in "${DS4_MODEL_NAMES[@]}"; do
+        for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
             [[ "$m" == "$owned_name" ]] && break
             prev_dirs+=("$m")
         done

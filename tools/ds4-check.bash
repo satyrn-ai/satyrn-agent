@@ -43,7 +43,7 @@ EOF
 
 _check_is_model() {
     local name="$1" m
-    for m in "${DS4_MODEL_NAMES[@]}"; do
+    for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
         [[ "$m" == "$name" ]] && return 0
     done
     return 1
@@ -133,7 +133,7 @@ main() {
         targets=("$model")
     else
         targets=("common")
-        for target in "${DS4_MODEL_NAMES[@]}"; do
+        for target in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
             targets+=("$target")
         done
     fi
@@ -189,7 +189,7 @@ main() {
             if [[ "$target" != "common" ]]; then
                 _check_assert_tree_eq "$clone" 'refs/ds4/common^{tree}' \
                     "$DS4_TREE_DIR" 'refs/ds4/common^{tree}' "common boundary tree"
-                for m in "${DS4_MODEL_NAMES[@]}"; do
+                for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
                     [[ "$m" == "$target" ]] && break
                     _check_assert_tree_eq "$clone" "refs/ds4/model/$m^{tree}" \
                         "$DS4_TREE_DIR" "refs/ds4/model/$m^{tree}" \

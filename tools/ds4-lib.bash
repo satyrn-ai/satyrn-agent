@@ -100,7 +100,7 @@ ds4_load_pin() {
 
 _ds4_is_model() {
     local name="$1" m
-    for m in "${DS4_MODEL_NAMES[@]}"; do
+    for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
         [[ "$m" == "$name" ]] && return 0
     done
     return 1
@@ -240,7 +240,7 @@ ds4_apply_target() {
     [[ "$stop" == "common" ]] && return 0
 
     local model
-    for model in "${DS4_MODEL_NAMES[@]}"; do
+    for model in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
         ds4_patch_files "$DS4_PATCHES_DIR/$model"
         _ds4_git_am "$tree" "${DS4_PATCH_FILES[@]}"
         git -C "$tree" update-ref "refs/ds4/model/$model" HEAD ||

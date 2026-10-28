@@ -79,6 +79,25 @@ _build_series() {
     done
 }
 
+# Build a common-only patch series (no model directories) so the empty
+# model-list paths are exercised.
+_build_common_only_series() {
+    local patches_dir="$1"
+    local src="$TMP_ROOT/common-only-src"
+    rm -rf "$src"
+    mkdir -p "$src"
+    git -C "$src" init -q
+    printf 'line1\n' > "$src/notes.txt"
+    git -C "$src" add notes.txt
+    git -C "$src" commit -qm "base"
+    printf 'common\n' >> "$src/notes.txt"
+    git -C "$src" add notes.txt
+    git -C "$src" commit -qm "add common"
+    mkdir -p "$patches_dir/common"
+    git -C "$src" format-patch -1 --stdout --no-signature \
+        > "$patches_dir/common/0001-add-common.patch"
+}
+
 # Print the Git tree id of a tree containing a single notes.txt blob.
 _tree_id() {
     local tree="$1" content="$2"
@@ -158,6 +177,52 @@ test_empty_common_or_model_directory_fails() {
     fi
     if ( ds4_patch_files "$patches/missing" ) 2>/dev/null; then
         printf '  FAIL: expected missing patch directory to fail\n' >&2
+        return 1
+    fi
+}
+
+test_empty_model_list_helpers_do_not_crash() {
+    local upstream="$TMP_ROOT/empty-models-upstream"
+    mkdir -p "$upstream"
+    git -C "$upstream" init -q
+    printf 'line1\n' > "$upstream/notes.txt"
+    git -C "$upstream" add notes.txt
+    git -C "$upstream" commit -qm "base"
+    local pin
+    pin="$(git -C "$upstream" rev-parse HEAD)"
+
+    local patches="$TMP_ROOT/empty-models-patches"
+    mkdir -p "$patches"
+    _build_common_only_series "$patches"
+
+    DS4_PATCHES_DIR="$patches"
+    DS4_CACHE_DIR="$TMP_ROOT/empty-models-cache"
+    UPSTREAM_URL="$upstream"
+    UPSTREAM_COMMIT="$pin"
+
+    ds4_model_names
+    assert_eq "0" "${#DS4_MODEL_NAMES[@]}" "empty model count"
+
+    # Empty model lists must reject a model cleanly, not crash on the
+    # bash-3.2 empty-array + set -u expansion.
+    if ( _ds4_is_model alpha ); then
+        printf '  FAIL: expected empty model list to reject alpha\n' >&2
+        return 1
+    fi
+    if ( ds4_target_stop_model alpha ) 2>/dev/null; then
+        printf '  FAIL: expected unknown model to be rejected\n' >&2
+        return 1
+    fi
+
+    ds4_ensure_cache
+    local tree="$TMP_ROOT/empty-models-tree"
+    ds4_clone_at_pin "$tree"
+    ds4_apply_target "$tree"
+
+    assert_file_eq $'line1\ncommon\n' "$tree/notes.txt" \
+        "common-only notes.txt with empty model list"
+    if _ref_exists "$tree" refs/ds4/model/alpha; then
+        printf '  FAIL: empty model list should not create model refs\n' >&2
         return 1
     fi
 }
@@ -840,6 +905,55 @@ test_export_common_renumbers_real_range() {
     _run_sync --common-only
 }
 
+test_export_empty_model_list_fails_cleanly() {
+    local upstream="$TMP_ROOT/exp-empty-models-upstream"
+    local patches="$TMP_ROOT/exp-empty-models-patches"
+    local cache="$TMP_ROOT/exp-empty-models-cache"
+    local tree="$TMP_ROOT/exp-empty-models-tree"
+    local exportdir="$TMP_ROOT/exp-empty-models-exportdir"
+
+    mkdir -p "$upstream"
+    git -C "$upstream" init -q
+    printf 'line1\n' > "$upstream/notes.txt"
+    git -C "$upstream" add notes.txt
+    git -C "$upstream" commit -qm "base"
+    local pin
+    pin="$(git -C "$upstream" rev-parse HEAD)"
+
+    mkdir -p "$patches"
+    _build_common_only_series "$patches"
+
+    export DS4_PATCHES_DIR="$patches"
+    export DS4_CACHE_DIR="$cache"
+    export DS4_TREE_DIR="$tree"
+    export DS4_EXPORT_DIR="$exportdir"
+    export UPSTREAM_URL="$upstream"
+    export UPSTREAM_COMMIT="$pin"
+    unset DS4_STOP_MODEL 2>/dev/null || true
+
+    _run_sync --common-only
+
+    # Forge the model-target state a migration bootstrap writes before its
+    # first model export. With no model directories yet, export must reject
+    # the unknown model cleanly instead of crashing on the empty array.
+    ds4_state_write "$DS4_TREE_DIR" alpha alpha \
+        "$UPSTREAM_COMMIT" "$(git -C "$DS4_TREE_DIR" rev-parse HEAD)"
+
+    local err="$TMP_ROOT/exp-empty-models.err"
+    if _run_export 2>"$err"; then
+        printf '  FAIL: expected unknown model export to be rejected\n' >&2
+        return 1
+    fi
+    grep -q 'unrecognized' "$err" || {
+        printf '  FAIL: error did not mention unrecognized target\n' >&2
+        return 1
+    }
+    if grep -q 'unbound variable' "$err"; then
+        printf '  FAIL: empty model list crashed with unbound variable\n' >&2
+        return 1
+    fi
+}
+
 test_export_model_uses_previous_model_tip() {
     _export_fixture "$TMP_ROOT/exp-model-upstream" "$TMP_ROOT/exp-model-patches" \
         "$TMP_ROOT/exp-model-cache" "$TMP_ROOT/exp-model-tree" \
@@ -1400,6 +1514,7 @@ ALL_TESTS=(
     test_load_pin_requires_exact_url_and_commit
     test_model_names_use_c_locale_order
     test_empty_common_or_model_directory_fails
+    test_empty_model_list_helpers_do_not_crash
     test_apply_target_builds_common_and_ordered_prefix
     test_apply_target_stops_at_common
     test_apply_target_stops_at_model
@@ -1417,6 +1532,7 @@ ALL_TESTS=(
     test_sync_refuses_unexported_commit_without_force
     test_sync_force_replaces_only_scratch_tree
     test_export_common_renumbers_real_range
+    test_export_empty_model_list_fails_cleanly
     test_export_model_uses_previous_model_tip
     test_export_rejects_merge_commit
     test_export_rejects_empty_range

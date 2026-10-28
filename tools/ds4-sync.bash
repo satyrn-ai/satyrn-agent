@@ -49,7 +49,7 @@ trap _sync_cleanup EXIT
 # an empty string when NAME is the first model.
 _prev_model_name() {
     local name="$1" prev="" m
-    for m in "${DS4_MODEL_NAMES[@]}"; do
+    for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
         if [[ "$m" == "$name" ]]; then
             printf '%s\n' "$prev"
             return 0
