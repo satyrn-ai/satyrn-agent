@@ -31,7 +31,7 @@ grouped by topic:
 - Result: ten patches on disk: the nine migrated patches below (16 files,
   +8,306/−61 against `5379c1c`) plus 0010, the macOS 15 Metal fix from #4
   (+9/−2).
-- Held back: the Q5_K commits, as a ready follow-up that would be 0011, until
+- Held back: the Q5_K commits as a ready model-local qwen35 follow-up, until
   Paul decides whether the 9B and 4B stay.
 - Left out of every patch: the llama.cpp parity scripts and notes
   (`tests/qwen35_parity/`, `docs/QWEN35_DENSE.md`, 394 lines). They compare
@@ -58,14 +58,15 @@ Each patch's message carries `Upstream:`, `Retire-when:` and
 
 ### Goals
 
-1. `patches/` holds the whole series as numbered `git format-patch` files that
-   apply in filename order to the pinned upstream commit with plain `git am`
-   — no fork object store required.
+1. `patches/` holds common and per-model series as numbered `git format-patch`
+   files. Each target applies common and then at most one model in filename
+   order to the pinned upstream commit with plain `git am` — no fork object
+   store required.
 2. `upstream.pin` records the upstream URL and commit.
-3. One command materializes a patched working tree inside this repo
-   (gitignored) for day-to-day editing; one command exports its commits back
-   into `patches/`; one command verifies the series from a pristine upstream
-   clone; one command builds `libds4` from the patched tree.
+3. One command materializes common-only or common plus a selected model in a
+   gitignored working tree for day-to-day editing; one command exports its
+   commits back to the correct directories; one command verifies each target
+   from a pristine upstream clone; ds4-py builds `libds4` from the real tree.
 4. devenv supplies every tool the workflow needs; conventions mirror ds4-py.
 5. The original migration is verified: the nine migrated patches, with the
    held-back Q5_K patch (then the tenth), give a tree byte-identical to the
@@ -87,8 +88,9 @@ Each patch's message carries `Upstream:`, `Retire-when:` and
   from real commits in the scratch tree.
 - Patches that only apply with the fork's objects present (no `git am -3`
   dependency).
-- A second copy of build logic once ds4-py exists: `Makefile.lib` here follows
-  ds4-py spec §19 so ds4-py can absorb it unchanged.
+- A second copy of build logic: ds4-py owns `Makefile.lib` and build behavior;
+  satyrn-agent only materializes the source tree and optionally passes build
+  options through to ds4-py.
 
 ## 4. Constraints
 
@@ -109,13 +111,14 @@ satyrn-agent/
 ├── README.md               # the three-command workflow
 ├── upstream.pin            # UPSTREAM_URL=…, UPSTREAM_COMMIT=…
 ├── patches/
-│   └── 0001-… .patch … 0009-… .patch
+│   ├── common/             # model-independent numbered format-patch files
+│   ├── qwen35/             # Qwen policy and dense-qwen35 implementation
+│   └── mellum/             # added later
 ├── tools/                  # not written yet
-│   ├── ds4-sync.bash       # materialize/refresh .ds4/tree from pin + patches
-│   ├── ds4-export.bash     # format-patch the tree's commits back into patches/
+│   ├── ds4-sync.bash       # materialize common-only or common + one model
+│   ├── ds4-export.bash     # transactionally regenerate the owned directories
 │   ├── ds4-check.bash      # pristine-clone verification (the gate)
-│   ├── ds4-build.bash      # build libds4 from .ds4/tree
-│   └── Makefile.lib        # shared-lib target reusing the tree's own object lists
+│   └── ds4-build.bash      # optional pass-through to ds4py build --src
 └── docs/
     └── specs/2026-10-24-ds4-patch-series-design.md  (this file)
 ```
@@ -128,10 +131,18 @@ The series is split into a reusable common base and one series per model:
 
 ```
 patches/
-├── common/    # the current 0002, 0004, 0009 and 0010, reworked as below
-├── qwen35/    # the current dense-qwen35 patches
+├── common/    # model-independent 0004 host support, 0009 and 0010
+├── qwen35/    # 0002, Qwen policy from 0004, and dense-qwen35 patches
 └── mellum/    # added later from Paul's ds4-mellum commits
 ```
+
+Ownership is semantic, not merely an application dependency. `common` contains
+only model-independent host and engine support. Qwen chat, sampling policy and
+implementation stay in `qwen35` even when a hunk could apply to upstream alone.
+In a common-only tree, the host APIs preserve upstream's existing sampling
+defaults and report only payload capabilities present in that tree; they do not
+install dense-qwen35 behavior. The qwen35 series adds the Qwen policy and the
+rest of its implementation.
 
 Every target has the topology `pin → common → model`. The common series must
 apply on its own to the pinned upstream tree. A model series starts at the
@@ -199,19 +210,22 @@ ordering first, and the byte comparison at the end, guard against that.
 ### Migrating the flat series to common + qwen35
 
 This migration is a rebase and re-export of real commits, not a move of patch
-files. Apply experiments against a pristine pin show that the current 0002 and
-the ordered pair 0009 → 0010 can move to the front without changing the tree.
-The current 0004 cannot: its `ds4.c` definitions use context introduced by
-qwen35 0001 and 0003, while qwen35 0006 in turn depends on 0004. Its independent
-`ds4.h` declarations alone are not enough to make the host-extension change
-reusable.
+files. Apply experiments against a pristine pin show that the current 0002
+applies independently, but ownership still puts its Qwen policy in qwen35. The
+ordered pair 0009 → 0010 can move to the common front without changing the
+tree. The current 0004 cannot move as-is: its `ds4.c` definitions use context
+introduced by qwen35 0001 and 0003, while qwen35 0006 in turn depends on 0004.
+Its independent `ds4.h` declarations alone are not enough to make the complete
+host-extension change reusable.
 
 1. Materialize today's flat ten-patch series and retain its Git tree ID and a
    full filesystem comparison baseline (excluding only `.git` metadata).
-2. In the scratch history, rework 0004 so the complete host-extension change
-   applies within the common series, before any model and without qwen35
-   context. Rebase the qwen35 commits onto that new common tip, preserving
-   their final content; keep 0009 before 0010.
+2. Split 0004 by ownership: model-independent host API support goes into
+   common, while Qwen-specific sampling policy joins 0002 in qwen35. Rework the
+   common host support to apply before any model without qwen35 context and to
+   preserve upstream defaults and capabilities in a common-only tree. Rebase
+   the qwen35 commits onto that new common tip, preserving the final combined
+   content; keep 0009 before 0010.
 3. Export `pin..common-tip` to `patches/common/` and `common-tip..HEAD` to
    `patches/qwen35/`, then remove the old flat files only after the new layout
    verifies. Do not hand-edit patches to force the new topology.
@@ -251,23 +265,24 @@ Not run: the verify and DFlash live tests (`test_qwen35_verify_live`,
   common alone. Record the common-tip commit and selected model in the scratch
   clone. Accept at most one model, and refuse to destroy uncommitted work or
   unexported commits unless `--force`.
-- Edit and commit normally in `.ds4/tree`, keeping history linear and
-  merge-free. For common-only work, the common-tip branch is checked out so it
-  advances with every commit and always equals `HEAD`. For model work, model
-  commits follow the common tip. When changing common with a model selected,
-  rewrite the common range, advance the common-tip ref to its new tip, and
-  rebase the model onto it; rebase and revalidate other model series as needed
-  rather than leaving them tied to an old common base.
-- `ds4-export` — require a clean tree, then regenerate `patches/common/` from
-  `pin..common-tip` and, when a model is selected, its directory from
-  `common-tip..HEAD`, renumbering each series. For common-only work require
-  `common-tip == HEAD`; for model work require the ancestry
+- Keep history linear and merge-free. Change common only in a common-only
+  checkout, where the common-tip branch is checked out and advances with every
+  commit so it always equals `HEAD`. In a model checkout, only append model
+  commits after the common tip; never rewrite the common range there. After
+  exporting a common change, `ds4-sync --model <name>` materializes each model
+  on the new common base. Repair and revalidate a model series separately if
+  its patches no longer apply or its behavior changes.
+- `ds4-export` — require a clean tree and generate a complete candidate under
+  `.ds4/`: common from `pin..common-tip` and, when a model is selected, that
+  model from `common-tip..HEAD`, renumbering each series. For common-only work
+  require `common-tip == HEAD`; for model work require the ancestry
   `pin → common-tip → HEAD`, so every commit belongs to exactly one range.
-  Reject merge commits. After export, reapply each changed target from pristine
-  clones and require the reconstructed common and final Git tree IDs to equal
-  the source common tip and `HEAD` respectively. Never delete or renumber
-  another model's directory. Refuse to overwrite a dirty `patches/` unless
-  `--force`.
+  Reject merge commits. Reapply each candidate target from pristine clones and
+  require the reconstructed common and final Git tree IDs to equal the source
+  common tip and `HEAD` respectively. Only after all checks pass, replace the
+  owned directories in `patches/`; a failed export leaves the existing patch
+  set untouched. Never delete or renumber another model's directory. Refuse to
+  overwrite a dirty `patches/` unless `--force`.
 - `ds4-check [--model <name>]` — prove the committed directories stand alone:
   with no model, check common and every `common + model` target in separate
   pristine clones at the pin; with a model, check that selected target. Apply
@@ -290,10 +305,10 @@ use `git format-patch` with the common tip as the model export boundary.
   `ds4-check`, so both work offline after the first fetch.
 - `.ds4/tree` is a full clone of the cache with `upstream` added as a second
   remote. A local common-tip branch records the export boundary: it is the
-  checked-out branch for common-only work and the base of the checked-out model
-  branch for model work. The selected model is recorded with the scratch tree.
-  A future rebase onto a newer upstream rebuilds both ranges and exports them
-  separately.
+  checked-out branch for common-only work and the uneditable base of the
+  checked-out model branch for model work. The selected model is recorded with
+  the scratch tree. A future rebase onto a newer upstream rebuilds both ranges
+  and exports them separately.
 - The common tip is metadata for export, not a replacement for verification:
   `ds4-check` always reconstructs the boundary by applying the committed common
   directory to the pin.
@@ -308,13 +323,13 @@ use `git format-patch` with the common tip as the model export boundary.
 ## 7. What happens next (not this design)
 
 - The tooling in §6.
-- The held-back Q5_K patch (which would be 0011): Paul decides whether the 9B
-  and 4B stay.
+- The held-back Q5_K patch as a future model-local qwen35 patch: Paul decides
+  whether the 9B and 4B stay.
 - A home for the parity scripts and notes left out of the series.
 - New patches: narrowing 0002 so a tool's own text stays plain.
 - Moving the pin past `5379c1c`, as its own verified step.
-- ds4-py lands; `ds4py build --src .ds4/tree` takes over the build and
-  `Makefile.lib` moves there (spec §19).
+- Wiring the optional `ds4-build` wrapper to `ds4py build --src`; ds4-py already
+  owns `Makefile.lib` and the build behavior (spec §19).
 - The downstream agent package (bindings via the `ds4py.bindings` entry
   point, the DFlash decode step, capabilities) is scaffolded in this repo.
 - ds4-engine decides whether to keep its submodule or consume this repo's
@@ -331,7 +346,11 @@ use `git format-patch` with the common tip as the model export boundary.
   kept. One patch per commit on `5379c1c` can be produced the same way if it is
   ever needed. The standalone 0010 macOS 15 fix arrived later in #4.
 - **Patch mechanics:** numbered `format-patch` files applied in filename
-  order; no `series` file (redundant with numbered names).
+  order within each directory, with common before one selected model; no
+  `series` file (redundant with numbered names).
+- **Common is model-independent.** Qwen chat, sampling policy and implementation
+  belong to qwen35, not to the shared base, even when they apply independently
+  or are inert in another model's build.
 - **The Q5_K commits are held back** rather than dropped, so Paul can decide.
 - **Parity scripts and notes are left out** of the engine patches.
 - **Scratch tree lives at `.ds4/`** (gitignored), not in `external/`, and the
