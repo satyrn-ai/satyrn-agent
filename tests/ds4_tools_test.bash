@@ -1508,6 +1508,49 @@ test_devenv_entry_points_show_help() {
     }
 }
 
+# --- model-backed E2E preflight tests -----------------------------------------
+
+# Run the model-backed E2E script in a controlled environment and capture its
+# stderr. These tests exercise only the script's input validation: a missing
+# DS4PY_PROJECT or DS4_TEST_MODEL must produce a clear nonzero usage error
+# before the script reads a model, resolves ds4py, or builds anything.
+test_e2e_requires_external_ds4py() {
+    local err="$TMP_ROOT/e2e-no-ds4py.err"
+    if ( unset DS4PY_PROJECT DS4_TEST_MODEL 2>/dev/null || true
+         bash "$REPO_ROOT/tests/ds4_e2e_test.bash" ) 2>"$err"; then
+        printf '  FAIL: expected missing DS4PY_PROJECT to fail\n' >&2
+        return 1
+    fi
+    grep -q 'DS4PY_PROJECT' "$err" || {
+        printf '  FAIL: error did not mention DS4PY_PROJECT\n' >&2
+        return 1
+    }
+    if grep -q 'DS4_TEST_MODEL' "$err"; then
+        printf '  FAIL: DS4PY_PROJECT must be validated before the model\n' >&2
+        return 1
+    fi
+}
+
+test_e2e_requires_dense_qwen35_model() {
+    # Point DS4PY_PROJECT at a path that does not exist: a correct preflight
+    # must report the missing model before it ever touches that checkout.
+    local err="$TMP_ROOT/e2e-no-model.err"
+    if ( unset DS4_TEST_MODEL 2>/dev/null || true
+         DS4PY_PROJECT="$TMP_ROOT/absent-ds4py" \
+         bash "$REPO_ROOT/tests/ds4_e2e_test.bash" ) 2>"$err"; then
+        printf '  FAIL: expected missing DS4_TEST_MODEL to fail\n' >&2
+        return 1
+    fi
+    grep -q 'DS4_TEST_MODEL' "$err" || {
+        printf '  FAIL: error did not mention DS4_TEST_MODEL\n' >&2
+        return 1
+    }
+    if grep -q 'not found' "$err"; then
+        printf '  FAIL: model check must not resolve the ds4-py checkout\n' >&2
+        return 1
+    fi
+}
+
 # --- runner -------------------------------------------------------------------
 
 ALL_TESTS=(
@@ -1547,6 +1590,8 @@ ALL_TESTS=(
     test_check_help_prints_usage_without_changes
     test_check_rejects_invalid_arguments
     test_devenv_entry_points_show_help
+    test_e2e_requires_external_ds4py
+    test_e2e_requires_dense_qwen35_model
 )
 
 PASSED=0
