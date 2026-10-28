@@ -1332,6 +1332,68 @@ test_check_rejects_invalid_arguments() {
     }
 }
 
+# --- devenv entry-point tests -------------------------------------------------
+
+test_devenv_entry_points_show_help() {
+    # The suite also runs on ubuntu-latest where devenv/Nix is not installed;
+    # entry-point registration is exercised here whenever devenv is present
+    # and via `devenv shell -- ds4-<tool> --help` in the developer workflow.
+    if ! command -v devenv >/dev/null 2>&1; then
+        printf '  SKIP: devenv is not available on PATH\n' >&2
+        return 0
+    fi
+
+    local out err
+
+    out="$TMP_ROOT/ds4-entry-sync.out"
+    err="$TMP_ROOT/ds4-entry-sync.err"
+    if ! devenv shell -- ds4-sync --help >"$out" 2>"$err"; then
+        cat "$err" >&2
+        printf '  FAIL: devenv shell -- ds4-sync --help failed\n' >&2
+        return 1
+    fi
+    grep -q -- '--common-only' "$out" || {
+        printf '  FAIL: ds4-sync help did not mention --common-only\n' >&2
+        return 1
+    }
+    grep -q -- '--model' "$out" || {
+        printf '  FAIL: ds4-sync help did not mention --model\n' >&2
+        return 1
+    }
+
+    out="$TMP_ROOT/ds4-entry-export.out"
+    err="$TMP_ROOT/ds4-entry-export.err"
+    if ! devenv shell -- ds4-export --help >"$out" 2>"$err"; then
+        cat "$err" >&2
+        printf '  FAIL: devenv shell -- ds4-export --help failed\n' >&2
+        return 1
+    fi
+    grep -q -- '--force' "$out" || {
+        printf '  FAIL: ds4-export help did not mention --force\n' >&2
+        return 1
+    }
+
+    out="$TMP_ROOT/ds4-entry-check.out"
+    err="$TMP_ROOT/ds4-entry-check.err"
+    if ! devenv shell -- ds4-check --help >"$out" 2>"$err"; then
+        cat "$err" >&2
+        printf '  FAIL: devenv shell -- ds4-check --help failed\n' >&2
+        return 1
+    fi
+    grep -q -- '--common-only' "$out" || {
+        printf '  FAIL: ds4-check help did not mention --common-only\n' >&2
+        return 1
+    }
+    grep -q -- '--model' "$out" || {
+        printf '  FAIL: ds4-check help did not mention --model\n' >&2
+        return 1
+    }
+    grep -q -- '--build' "$out" || {
+        printf '  FAIL: ds4-check help did not mention --build\n' >&2
+        return 1
+    }
+}
+
 # --- runner -------------------------------------------------------------------
 
 ALL_TESTS=(
@@ -1368,6 +1430,7 @@ ALL_TESTS=(
     test_check_detects_stale_scratch_tree
     test_check_help_prints_usage_without_changes
     test_check_rejects_invalid_arguments
+    test_devenv_entry_points_show_help
 )
 
 PASSED=0

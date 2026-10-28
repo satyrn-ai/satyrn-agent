@@ -1,0 +1,46 @@
+name: ds4 tools
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out satyrn-agent
+        uses: actions/checkout@v4
+
+      - name: Install uv and Python 3.14
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+
+      - name: Bash syntax checks
+        run: |
+          for file in tools/*.bash tests/ds4_tools_test.bash; do
+            bash -n "$file"
+          done
+
+      - name: Run shell suite
+        run: bash tests/ds4_tools_test.bash
+
+      - name: Check out ds4-py at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: rochecompaan/ds4-py
+          ref: f0e2118629c315e835435c82c973638e6f9e49bc
+          path: .ds4/ds4-py
+
+      - name: Install ds4-py environment
+        run: uv sync --project .ds4/ds4-py --python 3.14
+
+      - name: Build each checked tree with ds4-py (CPU backend)
+        run: |
+          export PATH="$PWD/.ds4/ds4-py/.venv/bin:$PATH"
+          bash tools/ds4-check.bash --build
