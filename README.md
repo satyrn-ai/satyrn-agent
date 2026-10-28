@@ -5,16 +5,19 @@ runs against a patched ds4 engine (dense qwen35 on Metal, DFlash speculative
 decode).
 
 Status: patch-series tooling. `ds4-sync`, `ds4-export`, and `ds4-check` are
-registered as devenv commands and also run standalone from `tools/`. The patch
-series is still the flat ten-patch bootstrap series in `patches/*.patch`; the
-migration to the `common/` + per-model layout has not landed yet, so the tools
-are not yet exercised against the repo's own series outside the test suite.
+registered as devenv commands and also run standalone from `tools/`. The
+patch series is now the per-model layout: `patches/common/` (model-independent
+host extensions and Metal language-version pins) plus `patches/qwen35/` (the
+dense qwen35 policy and implementation). The migrated series reconstructs the
+same Git tree and filesystem bytes as the former flat ten-patch bootstrap
+series, and the tools are exercised against the repo's own series in addition
+to the test suite.
 
 ## Layout
 
 - `patches/` — the ds4 patch series against `antirez/ds4` at the commit in
-  `upstream.pin`. Still flat (ten numbered patches); the `common/` +
-  per-model split lands in a later slice.
+  `upstream.pin`. Split into `common/` plus one directory per model; apply
+  `common/` first, then model directories in name order.
 - `tools/` — the Bash patch-series tools (`ds4-sync`, `ds4-export`,
   `ds4-check`) and their shared library.
 - `docs/specs/2026-10-24-ds4-patch-series-design.md` — the governing design,
