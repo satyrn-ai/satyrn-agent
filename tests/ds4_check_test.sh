@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# tests/ds4_check_test.bash
+# tests/ds4_check_test.sh
 #
-# Tests for tools/ds4-check.bash.
+# Tests for tools/ds4-check.sh.
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$TEST_DIR/ds4_test_helpers.bash"
+source "$TEST_DIR/ds4_test_helpers.sh"
 
 # --- check tests --------------------------------------------------------------
 

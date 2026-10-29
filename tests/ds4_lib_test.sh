@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# tests/ds4_lib_test.bash
+# tests/ds4_lib_test.sh
 #
-# Tests for tools/ds4-lib.bash: pin parsing, model discovery, apply-target
+# Tests for tools/ds4-lib.sh: pin parsing, model discovery, apply-target
 # boundaries and stop-model selection, plus offline cache and state helpers.
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$TEST_DIR/ds4_test_helpers.bash"
+source "$TEST_DIR/ds4_test_helpers.sh"
 
 # --- discovery and pin tests --------------------------------------------------
 

@@ -36,13 +36,13 @@
 
   scripts = {
     ds4-sync.exec = ''
-      exec bash "${config.devenv.root}/tools/ds4-sync.bash" "$@"
+      exec bash "${config.devenv.root}/tools/ds4-sync.sh" "$@"
     '';
     ds4-export.exec = ''
-      exec bash "${config.devenv.root}/tools/ds4-export.bash" "$@"
+      exec bash "${config.devenv.root}/tools/ds4-export.sh" "$@"
     '';
     ds4-check.exec = ''
-      exec bash "${config.devenv.root}/tools/ds4-check.bash" "$@"
+      exec bash "${config.devenv.root}/tools/ds4-check.sh" "$@"
     '';
   };
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# tools/ds4-check.bash
+# tools/ds4-check.sh
 #
 # Verify that the committed patch directories reconstruct each selected target
 # from a pristine clone of the pinned upstream, and optionally build each
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 _DS4_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$_DS4_LIB_DIR/ds4-lib.bash"
+source "$_DS4_LIB_DIR/ds4-lib.sh"
 
 DS4_TREE_DIR="${DS4_TREE_DIR:-$DS4_REPO_ROOT/.ds4/tree}"
 DS4_CHECK_DIR="${DS4_CHECK_DIR:-$DS4_REPO_ROOT/.ds4/check}"

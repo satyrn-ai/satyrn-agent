@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# tests/ds4_e2e_test.bash
+# tests/ds4_e2e_test.sh
 #
 # Model-backed end-to-end gate for the migrated ds4 patch series. Run it inside
 # the devenv shell with an external ds4-py checkout and a dense qwen35 GGUF:
 #
 #   export DS4PY_PROJECT=/path/to/ds4-py
 #   export DS4_TEST_MODEL=/path/to/dense-qwen35.gguf
-#   devenv shell -- bash tests/ds4_e2e_test.bash
+#   devenv shell -- bash tests/ds4_e2e_test.sh
 #
 # The script is read-only with respect to the tracked patches: it materializes
 # and builds scratch trees, but never exports, edits, or commits patch files.
@@ -19,7 +19,7 @@ set -euo pipefail
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$E2E_DIR/.." && pwd)"
 
-source "$REPO_ROOT/tools/ds4-lib.bash"
+source "$REPO_ROOT/tools/ds4-lib.sh"
 
 # The gate materializes and builds inside an isolated scratch root so it can
 # never clobber the developer's normal .ds4/tree.
@@ -120,10 +120,10 @@ main() {
 
     # 1. Materialize the full real tree and run pristine checks.
     printf '\n== ds4-sync (materialize full tree) ==\n'
-    bash "$REPO_ROOT/tools/ds4-sync.bash"
+    bash "$REPO_ROOT/tools/ds4-sync.sh"
 
     printf '\n== ds4-check (pristine checks) ==\n'
-    bash "$REPO_ROOT/tools/ds4-check.bash"
+    bash "$REPO_ROOT/tools/ds4-check.sh"
 
     # 2. Build the checked tree through ds4-py and capture the library path.
     local lib_out="$E2E_SCRATCH/lib"

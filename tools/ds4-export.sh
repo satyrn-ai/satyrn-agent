@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# tools/ds4-export.bash
+# tools/ds4-export.sh
 #
 # Transactionally regenerate the owned patch directory from the editable
 # scratch range recorded in .ds4/tree.
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 _DS4_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$_DS4_LIB_DIR/ds4-lib.bash"
+source "$_DS4_LIB_DIR/ds4-lib.sh"
 
 DS4_TREE_DIR="${DS4_TREE_DIR:-$DS4_REPO_ROOT/.ds4/tree}"
 DS4_EXPORT_DIR="${DS4_EXPORT_DIR:-$DS4_REPO_ROOT/.ds4/export}"

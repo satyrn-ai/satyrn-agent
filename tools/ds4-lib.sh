@@ -1,4 +1,4 @@
-# tools/ds4-lib.bash
+# tools/ds4-lib.sh
 #
 # Shared primitives for the ds4 patch-series tools (ds4-sync, ds4-export,
 # ds4-check). Bash 3.2-compatible: no associative arrays, mapfile/readarray,

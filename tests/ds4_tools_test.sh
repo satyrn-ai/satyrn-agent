@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# tests/ds4_tools_test.bash
+# tests/ds4_tools_test.sh
 #
 # Thin entry point for the ds4 shell test modules. Each module runs in its own
 # bash process so module order cannot hide state leakage. With no arguments the
@@ -37,8 +37,9 @@ run_module() {
     local module="$1"
     shift
     local counts_file="$ENTRY_TMP/counts" status=0 p f
+    rm -f "$counts_file"
     DS4_MODULE_SUMMARY=0 DS4_COUNTS_FILE="$counts_file" \
-        bash "$TEST_DIR/$module.bash" "$@" || status=$?
+        bash "$TEST_DIR/$module.sh" "$@" || status=$?
     if [[ -f "$counts_file" ]]; then
         read -r p f < "$counts_file"
         PASSED=$((PASSED + p))
@@ -55,7 +56,7 @@ main() {
 
     local module list t
     for module in "${DS4_MODULES[@]}"; do
-        list="$(bash "$TEST_DIR/$module.bash" --list-tests)"
+        list="$(bash "$TEST_DIR/$module.sh" --list-tests)"
         while IFS= read -r t || [[ -n "$t" ]]; do
             ALL_TESTS+=("$t")
             TEST_MODULES+=("$module")

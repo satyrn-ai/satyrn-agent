@@ -80,7 +80,7 @@ using the Metal backend on macOS and the CPU backend elsewhere.
 
 ### Model-backed end-to-end gate
 
-`tests/ds4_e2e_test.bash` is the local release gate that exercises the
+`tests/ds4_e2e_test.sh` is the local release gate that exercises the
 migrated implementation against a real dense qwen35 model. It first reads the
 GGUF metadata and requires `general.architecture=qwen35`, then materializes
 the full tree into an isolated `.ds4/e2e` scratch area (never the developer's
@@ -92,7 +92,7 @@ raw generation (temp 0, seed 1, fixed token limit) between `ds4py raw` and
 ```
 export DS4PY_PROJECT=/path/to/ds4-py
 export DS4_TEST_MODEL=/path/to/dense-qwen35.gguf
-devenv shell -- bash tests/ds4_e2e_test.bash
+devenv shell -- bash tests/ds4_e2e_test.sh
 ```
 
 `DS4PY_PROJECT` selects an external ds4-py checkout; the script puts

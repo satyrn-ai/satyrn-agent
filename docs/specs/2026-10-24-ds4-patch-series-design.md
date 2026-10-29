@@ -115,10 +115,10 @@ satyrn-agent/
 │   ├── qwen35/             # Qwen policy and dense-qwen35 implementation
 │   └── mellum/             # added later
 ├── tools/                  # not written yet
-│   ├── ds4-sync.bash       # materialize common-only, a prefix, or all models
-│   ├── ds4-export.bash     # transactionally regenerate the owned directories
-│   ├── ds4-check.bash      # pristine-clone verification (the gate)
-│   └── ds4-build.bash      # optional pass-through to ds4py build --src
+│   ├── ds4-sync.sh        # materialize common-only, a prefix, or all models
+│   ├── ds4-export.sh      # transactionally regenerate the owned directories
+│   ├── ds4-check.sh       # pristine-clone verification (the gate)
+│   └── ds4-build.sh       # optional pass-through to ds4py build --src
 └── docs/
     └── specs/2026-10-24-ds4-patch-series-design.md  (this file)
 ```

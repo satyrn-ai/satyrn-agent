@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# tests/ds4_e2e_preflight_test.bash
+# tests/ds4_e2e_preflight_test.sh
 #
 # Devenv entry-point checks and model-backed E2E preflight tests. The preflight
-# tests exercise only the input validation of tests/ds4_e2e_test.bash; they do
+# tests exercise only the input validation of tests/ds4_e2e_test.sh; they do
 # not require a real model or a ds4-py checkout.
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$TEST_DIR/ds4_test_helpers.bash"
+source "$TEST_DIR/ds4_test_helpers.sh"
 
 # --- devenv entry-point tests -------------------------------------------------
 
@@ -95,12 +95,12 @@ PY
 _e2e_scratch_repo() {
     local dest="$1"
     mkdir -p "$dest/tools" "$dest/tests"
-    cp "$REPO_ROOT/tools/ds4-lib.bash" \
-        "$REPO_ROOT/tools/ds4-sync.bash" \
-        "$REPO_ROOT/tools/ds4-check.bash" \
-        "$REPO_ROOT/tools/ds4-export.bash" \
+    cp "$REPO_ROOT/tools/ds4-lib.sh" \
+        "$REPO_ROOT/tools/ds4-sync.sh" \
+        "$REPO_ROOT/tools/ds4-check.sh" \
+        "$REPO_ROOT/tools/ds4-export.sh" \
         "$REPO_ROOT/tools/ds4-gguf-arch.py" "$dest/tools/"
-    cp "$REPO_ROOT/tests/ds4_e2e_test.bash" "$dest/tests/"
+    cp "$REPO_ROOT/tests/ds4_e2e_test.sh" "$dest/tests/"
 }
 
 # Run the model-backed E2E script in a controlled environment and capture its
@@ -110,7 +110,7 @@ _e2e_scratch_repo() {
 test_e2e_requires_external_ds4py() {
     local err="$TMP_ROOT/e2e-no-ds4py.err"
     if ( unset DS4PY_PROJECT DS4_TEST_MODEL 2>/dev/null || true
-         bash "$REPO_ROOT/tests/ds4_e2e_test.bash" ) 2>"$err"; then
+         bash "$REPO_ROOT/tests/ds4_e2e_test.sh" ) 2>"$err"; then
         printf '  FAIL: expected missing DS4PY_PROJECT to fail\n' >&2
         return 1
     fi
@@ -130,7 +130,7 @@ test_e2e_requires_dense_qwen35_model() {
     local err="$TMP_ROOT/e2e-no-model.err"
     if ( unset DS4_TEST_MODEL 2>/dev/null || true
          DS4PY_PROJECT="$TMP_ROOT/absent-ds4py" \
-         bash "$REPO_ROOT/tests/ds4_e2e_test.bash" ) 2>"$err"; then
+         bash "$REPO_ROOT/tests/ds4_e2e_test.sh" ) 2>"$err"; then
         printf '  FAIL: expected missing DS4_TEST_MODEL to fail\n' >&2
         return 1
     fi
@@ -154,7 +154,7 @@ test_e2e_rejects_wrong_architecture_model() {
 
     local err="$TMP_ROOT/e2e-wrong.err"
     if ( DS4PY_PROJECT="$venv" DS4_TEST_MODEL="$model" \
-         bash "$REPO_ROOT/tests/ds4_e2e_test.bash" ) 2>"$err"; then
+         bash "$REPO_ROOT/tests/ds4_e2e_test.sh" ) 2>"$err"; then
         printf '  FAIL: expected wrong-architecture model to be rejected\n' >&2
         return 1
     fi
@@ -220,7 +220,7 @@ EOF
          DS4_CACHE_DIR="$TMP_ROOT/e2e-cache" \
          UPSTREAM_URL="$upstream" \
          UPSTREAM_COMMIT="$pin" \
-         bash "$repo/tests/ds4_e2e_test.bash" ) >"$out" 2>"$err"; then
+         bash "$repo/tests/ds4_e2e_test.sh" ) >"$out" 2>"$err"; then
         printf '  FAIL: expected e2e to stop at the ds4py build step\n' >&2
         return 1
     fi

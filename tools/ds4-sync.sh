@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# tools/ds4-sync.bash
+# tools/ds4-sync.sh
 #
 # Materialize .ds4/tree from .ds4/cache at the pinned upstream commit, apply
 # the selected patch target, and record the scratch branch and state.
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 _DS4_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$_DS4_LIB_DIR/ds4-lib.bash"
+source "$_DS4_LIB_DIR/ds4-lib.sh"
 
 DS4_TREE_DIR="${DS4_TREE_DIR:-$DS4_REPO_ROOT/.ds4/tree}"
 

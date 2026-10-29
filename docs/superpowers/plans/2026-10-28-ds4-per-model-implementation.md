@@ -39,8 +39,8 @@
 ### Task 1: Shared Bash Library and Test Harness
 
 **Files:**
-- Create: `tools/ds4-lib.bash`
-- Create: `tests/ds4_tools_test.bash`
+- Create: `tools/ds4-lib.sh`
+- Create: `tests/ds4_tools_test.sh`
 
 **Interfaces:**
 - Produces: `ds4_die MESSAGE`, `ds4_repo_root`, `ds4_load_pin` setting `UPSTREAM_URL` and `UPSTREAM_COMMIT`, `ds4_model_names` setting the `DS4_MODEL_NAMES` array, `ds4_target_stop_model` setting `DS4_STOP_MODEL`, `ds4_patch_files DIR` setting `DS4_PATCH_FILES`, `ds4_ensure_cache`, `ds4_clone_at_pin DEST`, and `ds4_apply_target TREE [STOP_MODEL]`.
@@ -54,7 +54,7 @@ Add tests named `test_load_pin_requires_exact_url_and_commit`, `test_model_names
 
 - [ ] **Step 2: Run the focused tests and verify RED**
 
-Run `bash tests/ds4_tools_test.bash`; expect failure because `tools/ds4-lib.bash` does not exist.
+Run `bash tests/ds4_tools_test.sh`; expect failure because `tools/ds4-lib.sh` does not exist.
 
 - [ ] **Step 3: Implement the shared library**
 
@@ -66,21 +66,21 @@ Add `test_cached_pin_works_when_remote_is_unreachable`, `test_missing_cached_pin
 
 - [ ] **Step 5: Run library tests and syntax checks**
 
-Run `bash tests/ds4_tools_test.bash` and `bash -n tools/ds4-lib.bash tests/ds4_tools_test.bash`; expect all tests to pass.
+Run `bash tests/ds4_tools_test.sh` and `bash -n tools/ds4-lib.sh tests/ds4_tools_test.sh`; expect all tests to pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/ds4-lib.bash tests/ds4_tools_test.bash
+git add tools/ds4-lib.sh tests/ds4_tools_test.sh
 git commit -m "feat: add shared ds4 patch tooling primitives"
 ```
 
 ### Task 2: `ds4-sync`
 
 **Files:**
-- Create: `tools/ds4-sync.bash`
-- Modify: `tests/ds4_tools_test.bash`
-- Consume: `tools/ds4-lib.bash` interfaces from Task 1
+- Create: `tools/ds4-sync.sh`
+- Modify: `tests/ds4_tools_test.sh`
+- Consume: `tools/ds4-lib.sh` interfaces from Task 1
 
 **Interfaces:**
 - CLI: `ds4-sync [--common-only | --model NAME] [--force]`; `--help` prints usage without changing files.
@@ -93,7 +93,7 @@ Add `test_sync_defaults_to_all_models`, `test_sync_common_only`, and `test_sync_
 
 - [ ] **Step 2: Run sync tests and verify RED**
 
-Run `bash tests/ds4_tools_test.bash`; expect the new tests to fail because `tools/ds4-sync.bash` is missing.
+Run `bash tests/ds4_tools_test.sh`; expect the new tests to fail because `tools/ds4-sync.sh` is missing.
 
 - [ ] **Step 3: Implement sync materialization and argument validation**
 
@@ -105,20 +105,20 @@ Add `test_sync_refuses_dirty_tree_without_force`, `test_sync_refuses_unexported_
 
 - [ ] **Step 5: Run the complete tool suite**
 
-Run `bash tests/ds4_tools_test.bash` and `bash -n tools/ds4-*.bash`; expect all tests to pass.
+Run `bash tests/ds4_tools_test.sh` and `bash -n tools/ds4-*.sh`; expect all tests to pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/ds4-sync.bash tests/ds4_tools_test.bash
+git add tools/ds4-sync.sh tests/ds4_tools_test.sh
 git commit -m "feat: materialize ordered ds4 patch targets"
 ```
 
 ### Task 3: Transactional `ds4-export`
 
 **Files:**
-- Create: `tools/ds4-export.bash`
-- Modify: `tests/ds4_tools_test.bash`
+- Create: `tools/ds4-export.sh`
+- Modify: `tests/ds4_tools_test.sh`
 - Consume: Task 1 state/refs and Task 2 `.ds4/tree`
 
 **Interfaces:**
@@ -132,7 +132,7 @@ Add `test_export_common_renumbers_real_range` and `test_export_model_uses_previo
 
 - [ ] **Step 2: Run export tests and verify RED**
 
-Run `bash tests/ds4_tools_test.bash`; expect failure because `tools/ds4-export.bash` is missing.
+Run `bash tests/ds4_tools_test.sh`; expect failure because `tools/ds4-export.sh` is missing.
 
 - [ ] **Step 3: Implement range validation and candidate generation**
 
@@ -144,20 +144,20 @@ Add `test_export_rejects_merge_commit`, `test_export_rejects_empty_range`, `test
 
 - [ ] **Step 5: Run the complete tool suite**
 
-Run `bash tests/ds4_tools_test.bash` and `bash -n tools/ds4-*.bash`; expect all tests to pass.
+Run `bash tests/ds4_tools_test.sh` and `bash -n tools/ds4-*.sh`; expect all tests to pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/ds4-export.bash tests/ds4_tools_test.bash
+git add tools/ds4-export.sh tests/ds4_tools_test.sh
 git commit -m "feat: export ds4 patch ranges transactionally"
 ```
 
 ### Task 4: `ds4-check`
 
 **Files:**
-- Create: `tools/ds4-check.bash`
-- Modify: `tests/ds4_tools_test.bash`
+- Create: `tools/ds4-check.sh`
+- Modify: `tests/ds4_tools_test.sh`
 - Consume: Task 1 target application and Task 2 scratch state/refs
 
 **Interfaces:**
@@ -171,7 +171,7 @@ Add `test_check_default_covers_common_every_prefix_and_full_tree`, `test_check_s
 
 - [ ] **Step 2: Run check tests and verify RED**
 
-Run `bash tests/ds4_tools_test.bash`; expect failure because `tools/ds4-check.bash` is missing.
+Run `bash tests/ds4_tools_test.sh`; expect failure because `tools/ds4-check.sh` is missing.
 
 - [ ] **Step 3: Implement target reconstruction and scratch comparisons**
 
@@ -183,12 +183,12 @@ Add `test_check_build_passes_real_source_path_to_ds4py` and `test_check_detects_
 
 - [ ] **Step 5: Run the complete tool suite**
 
-Run `bash tests/ds4_tools_test.bash` and `bash -n tools/ds4-*.bash`; expect all tests to pass.
+Run `bash tests/ds4_tools_test.sh` and `bash -n tools/ds4-*.sh`; expect all tests to pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/ds4-check.bash tests/ds4_tools_test.bash
+git add tools/ds4-check.sh tests/ds4_tools_test.sh
 git commit -m "feat: verify ds4 patch targets from pristine clones"
 ```
 
@@ -197,7 +197,7 @@ git commit -m "feat: verify ds4 patch targets from pristine clones"
 **Files:**
 - Modify: `devenv.nix`
 - Modify: `README.md`
-- Modify: `tests/ds4_tools_test.bash`
+- Modify: `tests/ds4_tools_test.sh`
 - Create: `.github/workflows/ds4-tools.yml`
 
 **Interfaces:**
@@ -211,7 +211,7 @@ Add `test_devenv_entry_points_show_help`, which invokes each command with `--hel
 
 - [ ] **Step 2: Run the entry-point test and verify RED**
 
-Run `bash tests/ds4_tools_test.bash`; expect the new test to fail because the devenv scripts are not registered.
+Run `bash tests/ds4_tools_test.sh`; expect the new test to fail because the devenv scripts are not registered.
 
 - [ ] **Step 3: Register scripts and document the workflow**
 
@@ -219,16 +219,16 @@ Add devenv script entry points that exec the repository's Bash tools and forward
 
 - [ ] **Step 4: Add Ubuntu CI**
 
-Create `.github/workflows/ds4-tools.yml` for pull requests, pushes to `main`, and manual dispatch. On `ubuntu-latest`, check out this repo, install uv/Python 3.14, run Bash syntax checks and `bash tests/ds4_tools_test.bash`, then check out `rochecompaan/ds4-py` at `f0e2118629c315e835435c82c973638e6f9e49bc` under `.ds4/ds4-py`. Run `uv sync --project .ds4/ds4-py --python 3.14`, prepend `.ds4/ds4-py/.venv/bin` to `PATH`, and run `bash tools/ds4-check.bash --build`; the tool must explicitly select `--backend cpu` on Linux. Validate locally with `actionlint .github/workflows/ds4-tools.yml`.
+Create `.github/workflows/ds4-tools.yml` for pull requests, pushes to `main`, and manual dispatch. On `ubuntu-latest`, check out this repo, install uv/Python 3.14, run Bash syntax checks and `bash tests/ds4_tools_test.sh`, then check out `rochecompaan/ds4-py` at `f0e2118629c315e835435c82c973638e6f9e49bc` under `.ds4/ds4-py`. Run `uv sync --project .ds4/ds4-py --python 3.14`, prepend `.ds4/ds4-py/.venv/bin` to `PATH`, and run `bash tools/ds4-check.sh --build`; the tool must explicitly select `--backend cpu` on Linux. Validate locally with `actionlint .github/workflows/ds4-tools.yml`.
 
 - [ ] **Step 5: Run integration and complete tool tests**
 
-Run `devenv shell -- ds4-sync --help`, `devenv shell -- ds4-export --help`, `devenv shell -- ds4-check --help`, `bash tests/ds4_tools_test.bash`, and `devenv shell -- actionlint .github/workflows/ds4-tools.yml`; expect success. CI cannot pass the post-migration build until Task 6 supplies the new directories, so do not publish this intermediate branch merely to run it.
+Run `devenv shell -- ds4-sync --help`, `devenv shell -- ds4-export --help`, `devenv shell -- ds4-check --help`, `bash tests/ds4_tools_test.sh`, and `devenv shell -- actionlint .github/workflows/ds4-tools.yml`; expect success. CI cannot pass the post-migration build until Task 6 supplies the new directories, so do not publish this intermediate branch merely to run it.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add devenv.nix README.md tests/ds4_tools_test.bash .github/workflows/ds4-tools.yml
+git add devenv.nix README.md tests/ds4_tools_test.sh .github/workflows/ds4-tools.yml
 git commit -m "docs: add portable ds4 tooling workflow"
 ```
 
@@ -284,20 +284,20 @@ git commit -m "refactor: replace flat ds4 series with per-model layout"
 ### Task 7: Real-Tree and Model-Backed E2E
 
 **Files:**
-- Create: `tests/ds4_e2e_test.bash`
-- Modify: `tests/ds4_tools_test.bash`
+- Create: `tests/ds4_e2e_test.sh`
+- Modify: `tests/ds4_tools_test.sh`
 - Modify: `README.md`
 - Consume: the completed tools and migrated real patch directories
 
 **Interfaces:**
 - `DS4PY_PROJECT` selects an external ds4-py checkout; its `.venv/bin` is on `PATH` during execution.
 - `DS4_TEST_MODEL` is required and must identify a dense qwen35 GGUF so the migrated implementation is exercised.
-- `tests/ds4_e2e_test.bash` is read-only with respect to tracked patches: it may materialize/build scratch trees but must not export, edit patches, or commit.
+- `tests/ds4_e2e_test.sh` is read-only with respect to tracked patches: it may materialize/build scratch trees but must not export, edit patches, or commit.
 - Ubuntu CI continues to run only the no-model shell suite and CPU builds; this model-backed test is an explicit local release gate.
 
 - [ ] **Step 1: Write failing E2E preflight tests**
 
-Add `test_e2e_requires_dense_qwen35_model` and `test_e2e_requires_external_ds4py` to the shell suite. They must fail because `tests/ds4_e2e_test.bash` does not exist, then verify clear nonzero usage errors without reading a model or building when required inputs are absent.
+Add `test_e2e_requires_dense_qwen35_model` and `test_e2e_requires_external_ds4py` to the shell suite. They must fail because `tests/ds4_e2e_test.sh` does not exist, then verify clear nonzero usage errors without reading a model or building when required inputs are absent.
 
 - [ ] **Step 2: Implement the real-tree E2E script**
 
@@ -309,10 +309,10 @@ Run the script with a dense qwen35 model and the external ds4-py environment. Ex
 
 - [ ] **Step 4: Document and commit the repeatable gate**
 
-Document the two environment variables and the E2E command in README without machine-specific paths. Run `bash -n tests/ds4_e2e_test.bash` and the no-model shell suite again, then commit:
+Document the two environment variables and the E2E command in README without machine-specific paths. Run `bash -n tests/ds4_e2e_test.sh` and the no-model shell suite again, then commit:
 
 ```bash
-git add tests/ds4_e2e_test.bash tests/ds4_tools_test.bash README.md
+git add tests/ds4_e2e_test.sh tests/ds4_tools_test.sh README.md
 git commit -m "test: add model-backed ds4 migration e2e gate"
 ```
 
@@ -328,8 +328,8 @@ export PATH="$DS4PY_PROJECT/.venv/bin:$PATH"
 devenv shell -- ds4py --help
 
 # Shell syntax and tool behavior
-devenv shell -- bash -n tools/ds4-*.bash tests/ds4_tools_test.bash
-devenv shell -- bash tests/ds4_tools_test.bash
+devenv shell -- bash -n tools/ds4-*.sh tests/ds4_tools_test.sh
+devenv shell -- bash tests/ds4_tools_test.sh
 
 # Materialize the full common + qwen35 tree
 devenv shell -- ds4-sync
@@ -352,5 +352,5 @@ devenv shell -- make -C .ds4/tree test-qwen4-kernels
 
 # Required model-backed E2E: dense qwen35, sync/restore, and generation parity
 export DS4_TEST_MODEL=/path/to/dense-qwen35.gguf
-devenv shell -- bash tests/ds4_e2e_test.bash
+devenv shell -- bash tests/ds4_e2e_test.sh
 ```

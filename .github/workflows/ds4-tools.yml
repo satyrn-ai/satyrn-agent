@@ -29,12 +29,12 @@ jobs:
 
       - name: Bash syntax checks
         run: |
-          for file in tools/*.bash tests/ds4_test_helpers.bash tests/ds4_*_test.bash; do
+          for file in tools/*.sh tests/ds4_test_helpers.sh tests/ds4_*_test.sh; do
             bash -n "$file"
           done
 
       - name: Run shell suite
-        run: bash tests/ds4_tools_test.bash
+        run: bash tests/ds4_tools_test.sh
 
       - name: Check out ds4-py at the pinned commit
         uses: actions/checkout@v4
@@ -49,4 +49,4 @@ jobs:
       - name: Build each checked tree with ds4-py (CPU backend)
         run: |
           export PATH="$PWD/.ds4/ds4-py/.venv/bin:$PATH"
-          bash tools/ds4-check.bash --build
+          bash tools/ds4-check.sh --build

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# tests/ds4_test_helpers.bash
+# tests/ds4_test_helpers.sh
 #
 # Shared setup, assertions, fixtures, and runner for the ds4 test modules.
 # Source this file; do not execute it. Bash 3.2-compatible.
@@ -8,7 +8,7 @@
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/.." && pwd)"
 
-source "$REPO_ROOT/tools/ds4-lib.bash"
+source "$REPO_ROOT/tools/ds4-lib.sh"
 
 # Run every test module in a private temp tree and keep Git isolated from user
 # and system configuration while still giving temp repositories an identity.
@@ -113,7 +113,7 @@ _ref_exists() {
 # --- shared tool runners and fixtures -----------------------------------------
 
 _run_sync() {
-    bash "$REPO_ROOT/tools/ds4-sync.bash" "$@"
+    bash "$REPO_ROOT/tools/ds4-sync.sh" "$@"
 }
 
 # Build an upstream, a common/alpha/zebra patch series, and export the globals
@@ -140,7 +140,7 @@ _sync_fixture() {
 }
 
 _run_check() {
-    bash "$REPO_ROOT/tools/ds4-check.bash" "$@"
+    bash "$REPO_ROOT/tools/ds4-check.sh" "$@"
 }
 
 # --- runner -------------------------------------------------------------------

@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# tests/ds4_export_test.bash
+# tests/ds4_export_test.sh
 #
-# Tests for tools/ds4-export.bash.
+# Tests for tools/ds4-export.sh.
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$TEST_DIR/ds4_test_helpers.bash"
+source "$TEST_DIR/ds4_test_helpers.sh"
 
 # --- export tests --------------------------------------------------------------
 
 _run_export() {
-    bash "$REPO_ROOT/tools/ds4-export.bash" "$@"
+    bash "$REPO_ROOT/tools/ds4-export.sh" "$@"
 }
 
 _export_fixture() {
