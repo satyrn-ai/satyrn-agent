@@ -22,19 +22,25 @@ jobs:
       - name: Check out satyrn-agent
         uses: actions/checkout@v4
 
-      - name: Install uv and Python 3.14
-        uses: astral-sh/setup-uv@v6
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
         with:
-          python-version: "3.14"
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Install devenv
+        run: nix profile install --accept-flake-config nixpkgs#devenv
 
       - name: Bash syntax checks
         run: |
-          for file in tools/*.sh tests/ds4_test_helpers.sh tests/ds4_*_test.sh; do
-            bash -n "$file"
-          done
+          devenv shell -- bash -c "for file in tools/*.sh tests/ds4_test_helpers.sh tests/ds4_*_test.sh; do bash -n \"\$file\"; done"
 
       - name: Run shell suite
-        run: bash tests/ds4_tools_test.sh
+        run: devenv shell -- bash tests/ds4_tools_test.sh
+
+      - name: Lint workflow
+        run: devenv shell -- actionlint .github/workflows/ds4-tools.yml
 
       - name: Check out ds4-py at the pinned commit
         uses: actions/checkout@v4
@@ -44,9 +50,9 @@ jobs:
           path: .ds4/ds4-py
 
       - name: Install ds4-py environment
-        run: uv sync --project .ds4/ds4-py --python 3.14
+        run: devenv shell -- env -u UV_PROJECT_ENVIRONMENT uv sync --project .ds4/ds4-py
 
       - name: Build each checked tree with ds4-py (CPU backend)
         run: |
           export PATH="$PWD/.ds4/ds4-py/.venv/bin:$PATH"
-          bash tools/ds4-check.sh --build
+          devenv shell -- bash tools/ds4-check.sh --build
