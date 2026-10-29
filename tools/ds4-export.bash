@@ -42,6 +42,11 @@ _DS4_EXPORT_WORK=""
 _DS4_EXPORT_OWNED=""
 _DS4_EXPORT_REPLACED=0
 _DS4_EXPORT_DONE=0
+_DS4_EXPORT_SELECTED_REF=""
+_DS4_EXPORT_SELECTED_REF_PREV=""
+_DS4_EXPORT_SELECTED_REF_CHANGED=0
+_DS4_EXPORT_STATE_BACKUP=""
+_DS4_EXPORT_STATE_CHANGED=0
 _export_cleanup() {
     # If the export did not complete, restore the original owned directory.
     if [[ $_DS4_EXPORT_DONE -eq 0 && -n "$_DS4_EXPORT_OWNED" ]]; then
@@ -57,6 +62,22 @@ _export_cleanup() {
             # No original directory existed; roll back to "no directory".
             rm -rf "$_DS4_EXPORT_OWNED" 2>/dev/null || true
         fi
+    fi
+    # Roll back the selected boundary ref and ds4-state as well, so the
+    # committed patches, boundary ref, and state never diverge when a later
+    # step (or an interruption) fails after the directory replacement began.
+    if [[ $_DS4_EXPORT_DONE -eq 0 && $_DS4_EXPORT_SELECTED_REF_CHANGED -eq 1 && -n "$_DS4_EXPORT_SELECTED_REF" ]]; then
+        if [[ -n "$_DS4_EXPORT_SELECTED_REF_PREV" ]]; then
+            git -C "$DS4_TREE_DIR" update-ref "$_DS4_EXPORT_SELECTED_REF" \
+                "$_DS4_EXPORT_SELECTED_REF_PREV" 2>/dev/null || true
+        else
+            git -C "$DS4_TREE_DIR" update-ref -d "$_DS4_EXPORT_SELECTED_REF" \
+                2>/dev/null || true
+        fi
+    fi
+    if [[ $_DS4_EXPORT_DONE -eq 0 && $_DS4_EXPORT_STATE_CHANGED -eq 1 && -n "$_DS4_EXPORT_STATE_BACKUP" ]]; then
+        mv -f "$_DS4_EXPORT_STATE_BACKUP" "$DS4_TREE_DIR/.git/ds4-state" \
+            2>/dev/null || true
     fi
     if [[ -n "$_DS4_EXPORT_WORK" ]]; then
         rm -rf "$_DS4_EXPORT_WORK" 2>/dev/null || true
@@ -271,6 +292,33 @@ main() {
     # bytes (including when the move already landed but the shell exits before
     # the next statement).
     _DS4_EXPORT_OWNED="$owned_dir"
+
+    # Capture the pre-transaction boundary ref and state bytes before any
+    # mutation so cleanup can restore them if a later step fails. The
+    # selected boundary is the ref ds4-check verifies for this target, so it
+    # must advance to the same HEAD the exported patches reconstruct.
+    local selected_ref state_file state_backup
+    if [[ "$owned_name" == "common" ]]; then
+        selected_ref="refs/ds4/common"
+    else
+        selected_ref="refs/ds4/model/$owned_name"
+    fi
+    _DS4_EXPORT_SELECTED_REF="$selected_ref"
+    if git -C "$DS4_TREE_DIR" rev-parse --verify --quiet "$selected_ref" \
+        >/dev/null 2>&1; then
+        _DS4_EXPORT_SELECTED_REF_PREV="$(git -C "$DS4_TREE_DIR" rev-parse "$selected_ref")" ||
+            ds4_die "cannot resolve selected boundary ref $selected_ref"
+    else
+        _DS4_EXPORT_SELECTED_REF_PREV=""
+    fi
+    state_file="$DS4_TREE_DIR/.git/ds4-state"
+    state_backup="$work/state-backup"
+    if [[ -f "$state_file" ]]; then
+        cp "$state_file" "$state_backup" ||
+            ds4_die "cannot back up state file"
+        _DS4_EXPORT_STATE_BACKUP="$state_backup"
+    fi
+
     local backup="$work/backup"
     if [[ -e "$owned_dir" ]]; then
         mv "$owned_dir" "$backup" ||
@@ -280,7 +328,15 @@ main() {
     mv "$candidate" "$owned_dir" ||
         ds4_die "cannot move candidate into place"
 
+    # Advance the boundary ref inside the same transaction as the directory
+    # replacement so ds4-check verifies the freshly exported patches against
+    # the new boundary rather than the stale pre-export tip.
+    git -C "$DS4_TREE_DIR" update-ref "$selected_ref" "$head" ||
+        ds4_die "cannot advance selected boundary ref $selected_ref"
+    _DS4_EXPORT_SELECTED_REF_CHANGED=1
+
     # Record the successful export so a later sync knows HEAD is exported.
+    _DS4_EXPORT_STATE_CHANGED=1
     _ds4_export_write_state "$DS4_TREE_DIR" "$DS4_STATE_TARGET" \
         "$DS4_STATE_MODEL" "$DS4_STATE_PREVIOUS_TIP" \
         "$DS4_STATE_SYNC_HEAD" "$head"

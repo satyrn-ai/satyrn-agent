@@ -38,7 +38,15 @@ EOF
 }
 
 _DS4_SYNC_CLEANUP=""
+_DS4_SYNC_OLD_TREE=""
 _sync_cleanup() {
+    # The old-tree backup lives inside the work directory that this trap
+    # removes. Restore it first when a move already landed but reported
+    # failure (or the script was interrupted), so recursive cleanup cannot
+    # delete both the original and its backup.
+    if [[ -n "$_DS4_SYNC_OLD_TREE" && -e "$_DS4_SYNC_OLD_TREE" && ! -e "$DS4_TREE_DIR" ]]; then
+        mv "$_DS4_SYNC_OLD_TREE" "$DS4_TREE_DIR" 2>/dev/null || true
+    fi
     if [[ -n "$_DS4_SYNC_CLEANUP" ]]; then
         rm -rf "$_DS4_SYNC_CLEANUP" 2>/dev/null || true
     fi
@@ -188,6 +196,7 @@ main() {
     _DS4_SYNC_CLEANUP="$workdir"
     tmp_tree="$workdir/tree"
     old_tree="$workdir/old"
+    _DS4_SYNC_OLD_TREE="$old_tree"
 
     ds4_clone_at_pin "$tmp_tree"
     git -C "$tmp_tree" remote add upstream "$UPSTREAM_URL" ||

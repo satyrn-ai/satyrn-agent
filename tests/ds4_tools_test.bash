@@ -828,6 +828,47 @@ test_sync_force_replaces_only_scratch_tree() {
     }
 }
 
+test_sync_interrupted_old_tree_move_restores_original() {
+    _sync_fixture "$TMP_ROOT/sync-mv-upstream" "$TMP_ROOT/sync-mv-patches" \
+        "$TMP_ROOT/sync-mv-cache" "$TMP_ROOT/sync-mv-tree"
+
+    _run_sync
+    local head0
+    head0="$(git -C "$DS4_TREE_DIR" rev-parse HEAD)"
+
+    # Shim mv so the old-tree move performs the rename and then reports
+    # failure, exactly like a move that is interrupted after it lands but
+    # before the script observes success. The original tree must survive even
+    # though its backup lives inside the EXIT-cleanup work directory.
+    local bindir="$TMP_ROOT/sync-mv-bin" real_mv
+    real_mv="$(command -v mv)"
+    mkdir -p "$bindir"
+    cat > "$bindir/mv" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "$DS4_TREE_DIR" && "\$2" == */old ]]; then
+    "$real_mv" "\$1" "\$2"
+    exit 1
+fi
+exec "$real_mv" "\$@"
+EOF
+    chmod +x "$bindir/mv"
+
+    local err="$TMP_ROOT/sync-mv.err"
+    if PATH="$bindir:$PATH" _run_sync 2>"$err"; then
+        printf '  FAIL: expected interrupted old-tree move to fail\n' >&2
+        return 1
+    fi
+    grep -q 'cannot move existing tree aside' "$err" || {
+        printf '  FAIL: error did not mention the old-tree move\n' >&2
+        return 1
+    }
+
+    assert_eq "$head0" "$(git -C "$DS4_TREE_DIR" rev-parse HEAD)" \
+        "interrupted old-tree move preserved HEAD"
+    assert_file_eq $'line1\ncommon\nalpha\nzebra\n' "$DS4_TREE_DIR/notes.txt" \
+        "interrupted old-tree move preserved notes.txt bytes"
+}
+
 # --- export tests --------------------------------------------------------------
 
 _run_export() {
@@ -1213,6 +1254,64 @@ EOF
     }
     _assert_dirs_identical "$TMP_ROOT/exp-int-before" "$DS4_PATCHES_DIR" \
         "all patch bytes untouched after replacement interruption"
+}
+
+test_export_then_check_common() {
+    _export_fixture "$TMP_ROOT/exp-check-common-upstream" \
+        "$TMP_ROOT/exp-check-common-patches" \
+        "$TMP_ROOT/exp-check-common-cache" \
+        "$TMP_ROOT/exp-check-common-tree" \
+        "$TMP_ROOT/exp-check-common-exportdir"
+    export DS4_CHECK_DIR="$TMP_ROOT/exp-check-common-checkdir"
+
+    _run_sync --common-only
+
+    printf 'common-a\n' >> "$DS4_TREE_DIR/notes.txt"
+    git -C "$DS4_TREE_DIR" add notes.txt
+    git -C "$DS4_TREE_DIR" commit -qm "common edit a"
+
+    _run_export
+
+    local out="$TMP_ROOT/exp-check-common.out"
+    local err="$TMP_ROOT/exp-check-common.err"
+    if ! _run_check --common-only >"$out" 2>"$err"; then
+        cat "$err" >&2
+        printf '  FAIL: export->check common failed\n' >&2
+        return 1
+    fi
+    grep -q '^check common$' "$out" || {
+        printf '  FAIL: export->check common did not report common\n' >&2
+        return 1
+    }
+}
+
+test_export_then_check_model() {
+    _export_fixture "$TMP_ROOT/exp-check-model-upstream" \
+        "$TMP_ROOT/exp-check-model-patches" \
+        "$TMP_ROOT/exp-check-model-cache" \
+        "$TMP_ROOT/exp-check-model-tree" \
+        "$TMP_ROOT/exp-check-model-exportdir"
+    export DS4_CHECK_DIR="$TMP_ROOT/exp-check-model-checkdir"
+
+    _run_sync --model alpha
+
+    printf 'alpha-a\n' >> "$DS4_TREE_DIR/notes.txt"
+    git -C "$DS4_TREE_DIR" add notes.txt
+    git -C "$DS4_TREE_DIR" commit -qm "alpha edit a"
+
+    _run_export
+
+    local out="$TMP_ROOT/exp-check-model.out"
+    local err="$TMP_ROOT/exp-check-model.err"
+    if ! _run_check --model alpha >"$out" 2>"$err"; then
+        cat "$err" >&2
+        printf '  FAIL: export->check model failed\n' >&2
+        return 1
+    fi
+    grep -q '^check alpha$' "$out" || {
+        printf '  FAIL: export->check model did not report alpha\n' >&2
+        return 1
+    }
 }
 
 test_export_help_prints_usage_without_changes() {
@@ -1803,6 +1902,7 @@ ALL_TESTS=(
     test_sync_refuses_dirty_tree_without_force
     test_sync_refuses_unexported_commit_without_force
     test_sync_force_replaces_only_scratch_tree
+    test_sync_interrupted_old_tree_move_restores_original
     test_export_common_renumbers_real_range
     test_export_empty_model_list_fails_cleanly
     test_export_model_uses_previous_model_tip
@@ -1811,6 +1911,8 @@ ALL_TESTS=(
     test_export_rejects_dirty_patches_without_force
     test_export_round_trip_failure_leaves_all_patch_bytes_untouched
     test_export_replacement_interruption_restores_original
+    test_export_then_check_common
+    test_export_then_check_model
     test_export_help_prints_usage_without_changes
     test_check_default_covers_common_every_prefix_and_full_tree
     test_check_selected_target
