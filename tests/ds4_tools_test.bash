@@ -205,7 +205,7 @@ test_empty_model_list_helpers_do_not_crash() {
 
     # Empty model lists must reject a model cleanly, not crash on the
     # bash-3.2 empty-array + set -u expansion.
-    if ( _ds4_is_model alpha ); then
+    if ( ds4_is_model alpha ); then
         printf '  FAIL: expected empty model list to reject alpha\n' >&2
         return 1
     fi
@@ -483,6 +483,22 @@ test_state_round_trip_does_not_execute_values() {
     }
 }
 
+test_state_write_accepts_explicit_exported_head() {
+    local tree="$TMP_ROOT/state-exported-tree"
+    mkdir -p "$tree"
+    git -C "$tree" init -q
+
+    ds4_state_write "$tree" alpha alpha prev-tip sync-head exported-head
+    ds4_state_read "$tree"
+
+    assert_eq "alpha" "$DS4_STATE_TARGET" "explicit TARGET"
+    assert_eq "alpha" "$DS4_STATE_MODEL" "explicit MODEL"
+    assert_eq "prev-tip" "$DS4_STATE_PREVIOUS_TIP" "explicit PREVIOUS_TIP"
+    assert_eq "sync-head" "$DS4_STATE_SYNC_HEAD" "explicit SYNC_HEAD"
+    assert_eq "exported-head" "$DS4_STATE_EXPORTED_HEAD" \
+        "explicit EXPORTED_HEAD override"
+}
+
 # --- sync tests ---------------------------------------------------------------
 
 _run_sync() {
@@ -549,7 +565,7 @@ test_sync_defaults_to_all_models() {
     ds4_state_read "$DS4_TREE_DIR"
     local head
     head="$(git -C "$DS4_TREE_DIR" rev-parse HEAD)"
-    assert_eq "all" "$DS4_STATE_TARGET" "all-models target"
+    assert_eq "zebra" "$DS4_STATE_TARGET" "all-models target"
     assert_eq "zebra" "$DS4_STATE_MODEL" "all-models editable model"
     assert_eq "$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/model/alpha)" \
         "$DS4_STATE_PREVIOUS_TIP" "all-models previous tip"
@@ -1256,6 +1272,116 @@ EOF
         "all patch bytes untouched after replacement interruption"
 }
 
+test_export_ref_update_interruption_rolls_back_ref_and_directory() {
+    _export_fixture "$TMP_ROOT/exp-ref-upstream" "$TMP_ROOT/exp-ref-patches" \
+        "$TMP_ROOT/exp-ref-cache" "$TMP_ROOT/exp-ref-tree" \
+        "$TMP_ROOT/exp-ref-exportdir"
+
+    _run_sync
+
+    printf 'zebra-a\n' >> "$DS4_TREE_DIR/notes.txt"
+    git -C "$DS4_TREE_DIR" add notes.txt
+    git -C "$DS4_TREE_DIR" commit -qm "zebra edit"
+
+    local ref_before
+    ref_before="$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/model/zebra)"
+    cp "$DS4_TREE_DIR/.git/ds4-state" "$TMP_ROOT/exp-ref-state-before" ||
+        return 1
+    _snapshot_dir "$DS4_PATCHES_DIR" "$TMP_ROOT/exp-ref-before"
+
+    # Shim git so the selected-boundary update-ref performs the write and then
+    # reports failure, like a signal landing after the ref write but before the
+    # rollback flag was recorded in the old ordering. Cleanup must roll the ref
+    # back and restore the replaced directory.
+    local bindir="$TMP_ROOT/exp-ref-bin" real_git
+    real_git="$(command -v git)"
+    mkdir -p "$bindir"
+    cat > "$bindir/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "-C" && "\$2" == "$DS4_TREE_DIR" && "\$3" == "update-ref" && "\$4" == "refs/ds4/model/zebra" ]]; then
+    "$real_git" "\$@"
+    exit 1
+fi
+exec "$real_git" "\$@"
+EOF
+    chmod +x "$bindir/git"
+
+    local err="$TMP_ROOT/exp-ref.err"
+    if PATH="$bindir:$PATH" _run_export 2>"$err"; then
+        printf '  FAIL: expected interrupted ref update to fail\n' >&2
+        return 1
+    fi
+    grep -q 'boundary ref' "$err" || {
+        printf '  FAIL: error did not mention boundary ref\n' >&2
+        return 1
+    }
+
+    assert_eq "$ref_before" \
+        "$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/model/zebra)" \
+        "interrupted ref update restored selected boundary ref"
+    _assert_dirs_identical "$TMP_ROOT/exp-ref-before" "$DS4_PATCHES_DIR" \
+        "all patch bytes untouched after ref update interruption"
+    cmp -s "$TMP_ROOT/exp-ref-state-before" "$DS4_TREE_DIR/.git/ds4-state" || {
+        printf '  FAIL: state changed after ref update interruption\n' >&2
+        return 1
+    }
+}
+
+test_export_state_write_interruption_rolls_back_state_ref_and_directory() {
+    _export_fixture "$TMP_ROOT/exp-state-upstream" "$TMP_ROOT/exp-state-patches" \
+        "$TMP_ROOT/exp-state-cache" "$TMP_ROOT/exp-state-tree" \
+        "$TMP_ROOT/exp-state-exportdir"
+
+    _run_sync
+
+    printf 'zebra-a\n' >> "$DS4_TREE_DIR/notes.txt"
+    git -C "$DS4_TREE_DIR" add notes.txt
+    git -C "$DS4_TREE_DIR" commit -qm "zebra edit"
+
+    local ref_before
+    ref_before="$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/model/zebra)"
+    cp "$DS4_TREE_DIR/.git/ds4-state" "$TMP_ROOT/exp-state-state-before" ||
+        return 1
+    _snapshot_dir "$DS4_PATCHES_DIR" "$TMP_ROOT/exp-state-before"
+
+    # Shim mv so the ds4-state write lands and then reports failure, like a
+    # signal after the state file is moved but before the completion flag.
+    # Cleanup must restore the original state bytes, the advanced boundary
+    # ref, and the replaced patch directory.
+    local bindir="$TMP_ROOT/exp-state-bin" real_mv
+    real_mv="$(command -v mv)"
+    mkdir -p "$bindir"
+    cat > "$bindir/mv" <<EOF
+#!/usr/bin/env bash
+if [[ "\$3" == "$DS4_TREE_DIR/.git/ds4-state" ]]; then
+    "$real_mv" "\$@"
+    exit 1
+fi
+exec "$real_mv" "\$@"
+EOF
+    chmod +x "$bindir/mv"
+
+    local err="$TMP_ROOT/exp-state.err"
+    if PATH="$bindir:$PATH" _run_export 2>"$err"; then
+        printf '  FAIL: expected interrupted state write to fail\n' >&2
+        return 1
+    fi
+    grep -q 'state file' "$err" || {
+        printf '  FAIL: error did not mention state file\n' >&2
+        return 1
+    }
+
+    assert_eq "$ref_before" \
+        "$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/model/zebra)" \
+        "interrupted state write restored selected boundary ref"
+    _assert_dirs_identical "$TMP_ROOT/exp-state-before" "$DS4_PATCHES_DIR" \
+        "all patch bytes untouched after state write interruption"
+    cmp -s "$TMP_ROOT/exp-state-state-before" "$DS4_TREE_DIR/.git/ds4-state" || {
+        printf '  FAIL: state not restored after state write interruption\n' >&2
+        return 1
+    }
+}
+
 test_export_then_check_common() {
     _export_fixture "$TMP_ROOT/exp-check-common-upstream" \
         "$TMP_ROOT/exp-check-common-patches" \
@@ -1893,6 +2019,7 @@ ALL_TESTS=(
     test_cached_pin_works_when_remote_is_unreachable
     test_missing_cached_pin_fails
     test_state_round_trip_does_not_execute_values
+    test_state_write_accepts_explicit_exported_head
     test_sync_defaults_to_all_models
     test_sync_common_only
     test_sync_model_stops_at_editable_prefix
@@ -1911,6 +2038,8 @@ ALL_TESTS=(
     test_export_rejects_dirty_patches_without_force
     test_export_round_trip_failure_leaves_all_patch_bytes_untouched
     test_export_replacement_interruption_restores_original
+    test_export_ref_update_interruption_rolls_back_ref_and_directory
+    test_export_state_write_interruption_rolls_back_state_ref_and_directory
     test_export_then_check_common
     test_export_then_check_model
     test_export_help_prints_usage_without_changes

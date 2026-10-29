@@ -175,8 +175,8 @@ main() {
         edit_branch="ds4/common"
         prev_ref=""
     else
-        state_target="all"
         state_model="${DS4_MODEL_NAMES[${#DS4_MODEL_NAMES[@]}-1]}"
+        state_target="$state_model"
         edit_branch="ds4/model/$state_model"
         if [[ ${#DS4_MODEL_NAMES[@]} -gt 1 ]]; then
             prev_ref="refs/ds4/model/${DS4_MODEL_NAMES[${#DS4_MODEL_NAMES[@]}-2]}"

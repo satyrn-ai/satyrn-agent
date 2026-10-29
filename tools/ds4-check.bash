@@ -41,27 +41,6 @@ Options:
 EOF
 }
 
-_check_is_model() {
-    local name="$1" m
-    for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
-        [[ "$m" == "$name" ]] && return 0
-    done
-    return 1
-}
-
-# Compare a reconstructed tree id in CHECK with the matching source tree id in
-# SOURCE, and die with a clear message on mismatch.
-_check_assert_tree_eq() {
-    local check="$1" check_spec="$2" source="$3" source_spec="$4" what="$5"
-    local got want
-    got="$(git -C "$check" rev-parse "$check_spec")" ||
-        ds4_die "cannot resolve reconstructed $what"
-    want="$(git -C "$source" rev-parse "$source_spec")" ||
-        ds4_die "cannot resolve scratch $what"
-    [[ "$got" == "$want" ]] ||
-        ds4_die "$what mismatch: reconstructed $got != scratch $want"
-}
-
 main() {
     local common_only=0 model="" build=0 positional=()
     while [[ $# -gt 0 ]]; do
@@ -114,7 +93,7 @@ main() {
     ds4_model_names
 
     if [[ -n "$model" ]]; then
-        _check_is_model "$model" || ds4_die "unknown model '$model'"
+        ds4_is_model "$model" || ds4_die "unknown model '$model'"
     fi
 
     # Fail before any clone or scratch directory is created if the common
@@ -146,13 +125,8 @@ main() {
             common)
                 scratch_check_target="common"
                 ;;
-            all)
-                if [[ ${#DS4_MODEL_NAMES[@]} -gt 0 ]]; then
-                    scratch_check_target="${DS4_MODEL_NAMES[${#DS4_MODEL_NAMES[@]}-1]}"
-                fi
-                ;;
             *)
-                if _check_is_model "$DS4_STATE_TARGET"; then
+                if ds4_is_model "$DS4_STATE_TARGET"; then
                     scratch_check_target="$DS4_STATE_TARGET"
                 fi
                 ;;
@@ -187,22 +161,22 @@ main() {
         # must reproduce every preceding boundary ref and the editable HEAD.
         if [[ -n "$scratch_check_target" && "$target" == "$scratch_check_target" ]]; then
             if [[ "$target" == "common" ]]; then
-                _check_assert_tree_eq "$clone" 'refs/ds4/common^{tree}' \
+                ds4_assert_tree_eq "$clone" 'refs/ds4/common^{tree}' \
                     "$DS4_TREE_DIR" 'refs/ds4/common^{tree}' "common boundary tree"
             else
-                _check_assert_tree_eq "$clone" 'refs/ds4/common^{tree}' \
+                ds4_assert_tree_eq "$clone" 'refs/ds4/common^{tree}' \
                     "$DS4_TREE_DIR" 'refs/ds4/common^{tree}' "common boundary tree"
                 for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
                     [[ "$m" == "$target" ]] && break
-                    _check_assert_tree_eq "$clone" "refs/ds4/model/$m^{tree}" \
+                    ds4_assert_tree_eq "$clone" "refs/ds4/model/$m^{tree}" \
                         "$DS4_TREE_DIR" "refs/ds4/model/$m^{tree}" \
                         "$m boundary tree"
                 done
-                _check_assert_tree_eq "$clone" "refs/ds4/model/$target^{tree}" \
+                ds4_assert_tree_eq "$clone" "refs/ds4/model/$target^{tree}" \
                     "$DS4_TREE_DIR" "refs/ds4/model/$target^{tree}" \
                     "$target boundary tree"
             fi
-            _check_assert_tree_eq "$clone" 'HEAD^{tree}' \
+            ds4_assert_tree_eq "$clone" 'HEAD^{tree}' \
                 "$DS4_TREE_DIR" 'HEAD^{tree}' "final tree"
         fi
 

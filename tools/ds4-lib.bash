@@ -21,6 +21,8 @@
 #       Validate and record STOP in DS4_STOP_MODEL: "" (apply every model),
 #       "common" (common only), or a known model name. Requires
 #       DS4_MODEL_NAMES to be populated.
+#   ds4_is_model NAME
+#       Return success when NAME is one of the names in DS4_MODEL_NAMES.
 #   ds4_patch_files DIR
 #       Populate DS4_PATCH_FILES with DIR/*.patch paths in LC_ALL=C filename
 #       order. Dies if DIR is missing or contains no *.patch files.
@@ -38,9 +40,14 @@
 #       omitted, DS4_STOP_MODEL (set by ds4_target_stop_model) is used. After
 #       each applied range, records refs/ds4/common and refs/ds4/model/<name>
 #       in TREE.
-#   ds4_state_write TREE TARGET MODEL PREVIOUS_TIP SYNC_HEAD
+#   ds4_git_am TREE PATCH...
+#       Apply PATCH... with `git am` in TREE, aborting and dying on failure.
+#   ds4_assert_tree_eq CHECK CHECK_SPEC SOURCE SOURCE_SPEC WHAT
+#       Die unless CHECK:CHECK_SPEC and SOURCE:SOURCE_SPEC resolve to the
+#       same tree id.
+#   ds4_state_write TREE TARGET MODEL PREVIOUS_TIP SYNC_HEAD [EXPORTED_HEAD]
 #       Write TREE/.git/ds4-state with TARGET, MODEL, PREVIOUS_TIP, SYNC_HEAD,
-#       and EXPORTED_HEAD (initialized to SYNC_HEAD).
+#       and EXPORTED_HEAD (defaults to SYNC_HEAD when omitted).
 #   ds4_state_read TREE
 #       Read TREE/.git/ds4-state into DS4_STATE_TARGET, DS4_STATE_MODEL,
 #       DS4_STATE_PREVIOUS_TIP, DS4_STATE_SYNC_HEAD, and
@@ -98,7 +105,7 @@ ds4_load_pin() {
         ds4_die "$pin_file must define UPSTREAM_URL and UPSTREAM_COMMIT"
 }
 
-_ds4_is_model() {
+ds4_is_model() {
     local name="$1" m
     for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
         [[ "$m" == "$name" ]] && return 0
@@ -136,7 +143,7 @@ ds4_model_names() {
 ds4_target_stop_model() {
     local stop="${1:-}"
     if [[ -n "$stop" && "$stop" != "common" ]]; then
-        _ds4_is_model "$stop" || ds4_die "unknown model '$stop'"
+        ds4_is_model "$stop" || ds4_die "unknown model '$stop'"
     fi
     DS4_STOP_MODEL="$stop"
 }
@@ -206,13 +213,26 @@ ds4_clone_at_pin() {
         ds4_die "upstream commit $UPSTREAM_COMMIT not found in cache"
 }
 
-_ds4_git_am() {
+ds4_git_am() {
     local tree="$1"
     shift
     if ! git -C "$tree" am --quiet "$@"; then
         git -C "$tree" am --abort >/dev/null 2>&1 || true
         ds4_die "git am failed in $tree"
     fi
+}
+
+# Compare a reconstructed tree id in CHECK with the matching source tree id in
+# SOURCE, and die with a clear message on mismatch.
+ds4_assert_tree_eq() {
+    local check="$1" check_spec="$2" source="$3" source_spec="$4" what="$5"
+    local got want
+    got="$(git -C "$check" rev-parse "$check_spec")" ||
+        ds4_die "cannot resolve reconstructed $what"
+    want="$(git -C "$source" rev-parse "$source_spec")" ||
+        ds4_die "cannot resolve source $what"
+    [[ "$got" == "$want" ]] ||
+        ds4_die "$what mismatch: reconstructed $got != source $want"
 }
 
 ds4_apply_target() {
@@ -222,7 +242,7 @@ ds4_apply_target() {
     ds4_model_names
 
     if [[ -n "$stop" && "$stop" != "common" ]]; then
-        _ds4_is_model "$stop" || ds4_die "unknown model '$stop'"
+        ds4_is_model "$stop" || ds4_die "unknown model '$stop'"
     fi
 
     if ! git -C "$tree" diff --quiet; then
@@ -233,7 +253,7 @@ ds4_apply_target() {
     fi
 
     ds4_patch_files "$DS4_PATCHES_DIR/common"
-    _ds4_git_am "$tree" "${DS4_PATCH_FILES[@]}"
+    ds4_git_am "$tree" "${DS4_PATCH_FILES[@]}"
     git -C "$tree" update-ref "refs/ds4/common" HEAD ||
         ds4_die "failed to update refs/ds4/common"
 
@@ -242,7 +262,7 @@ ds4_apply_target() {
     local model
     for model in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
         ds4_patch_files "$DS4_PATCHES_DIR/$model"
-        _ds4_git_am "$tree" "${DS4_PATCH_FILES[@]}"
+        ds4_git_am "$tree" "${DS4_PATCH_FILES[@]}"
         git -C "$tree" update-ref "refs/ds4/model/$model" HEAD ||
             ds4_die "failed to update refs/ds4/model/$model"
         [[ -n "$stop" && "$stop" == "$model" ]] && return 0
@@ -252,6 +272,7 @@ ds4_apply_target() {
 
 ds4_state_write() {
     local tree="$1" target="$2" model="$3" previous_tip="$4" sync_head="$5"
+    local exported_head="${6:-$sync_head}"
     [[ -d "$tree/.git" ]] || ds4_die "not a git tree: $tree"
 
     local state_file="$tree/.git/ds4-state"
@@ -261,7 +282,7 @@ ds4_state_write() {
         printf 'MODEL=%s\n' "$model"
         printf 'PREVIOUS_TIP=%s\n' "$previous_tip"
         printf 'SYNC_HEAD=%s\n' "$sync_head"
-        printf 'EXPORTED_HEAD=%s\n' "$sync_head"
+        printf 'EXPORTED_HEAD=%s\n' "$exported_head"
     } > "$tmp" || ds4_die "failed to write state file $state_file"
     mv -f "$tmp" "$state_file" || ds4_die "failed to move state file into place"
 }

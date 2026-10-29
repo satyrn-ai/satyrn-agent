@@ -85,50 +85,6 @@ _export_cleanup() {
 }
 trap _export_cleanup EXIT
 
-_export_is_model() {
-    local name="$1" m
-    for m in "${DS4_MODEL_NAMES[@]+"${DS4_MODEL_NAMES[@]}"}"; do
-        [[ "$m" == "$name" ]] && return 0
-    done
-    return 1
-}
-
-_export_git_am() {
-    local tree="$1"
-    shift
-    if ! git -C "$tree" am --quiet "$@"; then
-        git -C "$tree" am --abort >/dev/null 2>&1 || true
-        ds4_die "git am failed in $tree"
-    fi
-}
-
-# Compare a reconstructed tree id in CHECK with the matching source tree id in
-# SOURCE, and die with a clear message on mismatch.
-_export_assert_tree_eq() {
-    local check="$1" check_spec="$2" source="$3" source_spec="$4" what="$5"
-    local got want
-    got="$(git -C "$check" rev-parse "$check_spec")" ||
-        ds4_die "cannot resolve reconstructed $what"
-    want="$(git -C "$source" rev-parse "$source_spec")" ||
-        ds4_die "cannot resolve source $what"
-    [[ "$got" == "$want" ]] ||
-        ds4_die "$what mismatch: reconstructed $got != source $want"
-}
-
-_ds4_export_write_state() {
-    local tree="$1" target="$2" model="$3" prev="$4" sync="$5" exported="$6"
-    local state_file="$tree/.git/ds4-state"
-    local tmp="$state_file.tmp.$$"
-    {
-        printf 'TARGET=%s\n' "$target"
-        printf 'MODEL=%s\n' "$model"
-        printf 'PREVIOUS_TIP=%s\n' "$prev"
-        printf 'SYNC_HEAD=%s\n' "$sync"
-        printf 'EXPORTED_HEAD=%s\n' "$exported"
-    } > "$tmp" || ds4_die "failed to write state file $state_file"
-    mv -f "$tmp" "$state_file" || ds4_die "failed to move state file into place"
-}
-
 # Print success when the patches tree is dirty: either it has uncommitted
 # changes in its containing repository, or (when no repository exists) the
 # owned directory contains entries other than *.patch files.
@@ -198,15 +154,8 @@ main() {
     if [[ "$DS4_STATE_TARGET" == "common" ]]; then
         owned_name="common"
         range_base="$UPSTREAM_COMMIT"
-    elif [[ "$DS4_STATE_TARGET" == "all" ]]; then
-        _export_is_model "$DS4_STATE_MODEL" ||
-            ds4_die "state MODEL is not a known model"
-        owned_name="$DS4_STATE_MODEL"
-        range_base="$DS4_STATE_PREVIOUS_TIP"
-    elif _export_is_model "$DS4_STATE_TARGET"; then
-        [[ "$DS4_STATE_MODEL" == "$DS4_STATE_TARGET" ]] ||
-            ds4_die "state MODEL does not match TARGET"
-        owned_name="$DS4_STATE_MODEL"
+    elif ds4_is_model "$DS4_STATE_TARGET"; then
+        owned_name="$DS4_STATE_TARGET"
         range_base="$DS4_STATE_PREVIOUS_TIP"
     else
         ds4_die "unrecognized state TARGET '$DS4_STATE_TARGET'"
@@ -270,20 +219,20 @@ main() {
     if [[ ${#prev_dirs[@]} -gt 0 ]]; then
         for prev_dir in "${prev_dirs[@]}"; do
             ds4_patch_files "$DS4_PATCHES_DIR/$prev_dir"
-            _export_git_am "$check" "${DS4_PATCH_FILES[@]}"
+            ds4_git_am "$check" "${DS4_PATCH_FILES[@]}"
             if [[ "$prev_dir" == "common" ]]; then
                 ref="refs/ds4/common"
             else
                 ref="refs/ds4/model/$prev_dir"
             fi
-            _export_assert_tree_eq "$check" 'HEAD^{tree}' \
+            ds4_assert_tree_eq "$check" 'HEAD^{tree}' \
                 "$DS4_TREE_DIR" "$ref^{tree}" "$prev_dir boundary tree"
         done
     fi
 
     ds4_patch_files "$candidate"
-    _export_git_am "$check" "${DS4_PATCH_FILES[@]}"
-    _export_assert_tree_eq "$check" 'HEAD^{tree}' \
+    ds4_git_am "$check" "${DS4_PATCH_FILES[@]}"
+    ds4_assert_tree_eq "$check" 'HEAD^{tree}' \
         "$DS4_TREE_DIR" 'HEAD^{tree}' "final HEAD tree"
 
     # Replace only the owned directory, keeping a backup for rollback. The
@@ -330,14 +279,16 @@ main() {
 
     # Advance the boundary ref inside the same transaction as the directory
     # replacement so ds4-check verifies the freshly exported patches against
-    # the new boundary rather than the stale pre-export tip.
+    # the new boundary rather than the stale pre-export tip. Record the
+    # rollback intent *before* the ref write so a signal that lands after the
+    # write still rolls the ref back.
+    _DS4_EXPORT_SELECTED_REF_CHANGED=1
     git -C "$DS4_TREE_DIR" update-ref "$selected_ref" "$head" ||
         ds4_die "cannot advance selected boundary ref $selected_ref"
-    _DS4_EXPORT_SELECTED_REF_CHANGED=1
 
     # Record the successful export so a later sync knows HEAD is exported.
     _DS4_EXPORT_STATE_CHANGED=1
-    _ds4_export_write_state "$DS4_TREE_DIR" "$DS4_STATE_TARGET" \
+    ds4_state_write "$DS4_TREE_DIR" "$DS4_STATE_TARGET" \
         "$DS4_STATE_MODEL" "$DS4_STATE_PREVIOUS_TIP" \
         "$DS4_STATE_SYNC_HEAD" "$head"
     _DS4_EXPORT_DONE=1
