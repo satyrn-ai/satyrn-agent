@@ -1,17 +1,21 @@
 # satyrn-agent
 
+🚧 *This repo is under active development.*
+
 The downstream agent from the ds4-py design: a customisation of ds4-py that
-runs against a patched ds4 engine (dense qwen35 on Metal, DFlash speculative
+runs against a patched [ds4](https://dwarfstar.sh/) engine (dense qwen35 on Metal, DFlash speculative
 decode).
 
-Status: patch-series tooling. `ds4-sync`, `ds4-export`, and `ds4-check` are
-registered as devenv commands and also run standalone from `tools/`. The
-patch series is now the per-model layout: `patches/common/` (model-independent
-host extensions and Metal language-version pins) plus `patches/qwen35/` (the
-dense qwen35 policy and implementation). The migrated series reconstructs the
-same Git tree and filesystem bytes as the former flat ten-patch bootstrap
-series, and the tools are exercised against the repo's own series in addition
-to the test suite.
+## Development status
+
+Current status: patch-series tooling. `ds4-sync`, `ds4-export`, and
+`ds4-check` are registered as devenv commands and also run standalone from
+`tools/`. The patch series is now the per-model layout: `patches/common/`
+(model-independent host extensions and Metal language-version pins) plus
+`patches/qwen35/` (the dense qwen35 policy and implementation). The migrated
+series reconstructs the same Git tree and filesystem bytes as the former flat
+ten-patch bootstrap series, and the tools are exercised against the repo's own
+series in addition to the test suite.
 
 ## Layout
 
