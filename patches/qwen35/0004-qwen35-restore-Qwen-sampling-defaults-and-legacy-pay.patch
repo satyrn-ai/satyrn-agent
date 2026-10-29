@@ -1,0 +1,54 @@
+From 69622501e362ebdbbd0e3fdefc1e6348e79846d7 Mon Sep 17 00:00:00 2001
+From: Koudai Aono <koxudaxi@gmail.com>
+Date: Tue, 6 Oct 2026 15:10:05 +0900
+Subject: [PATCH 4/8] qwen35: restore Qwen sampling defaults and legacy payload
+ predicate
+
+Upstream: offer upstream with the libds4 target
+Retire-when: upstream has both
+Carried-commits: 8b70f74
+---
+ ds4.c | 7 ++++++-
+ ds4.h | 4 ++--
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/ds4.c b/ds4.c
+index 2becb3ef..00b8eedf 100644
+--- a/ds4.c
++++ b/ds4.c
+@@ -64053,7 +64053,7 @@ static uint64_t qwen35_payload_tensor_bytes(uint32_t rows);
+ #endif
+ 
+ bool ds4_session_supports_payload(ds4_session *s) {
+-    return s != NULL && !s->distributed && ds4_session_is_qwen4(s);
++    return s != NULL;
+ }
+ 
+ uint64_t ds4_session_payload_bytes(ds4_session *s) {
+@@ -73924,6 +73924,11 @@ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
+     if (ds4_engine_is_glm_dsa(e)) {
+         *top_p = 0.95f;
+         *min_p = 0.0f;
++    } else if (ds4_engine_is_qwen4(e)) {
++        *temperature = 0.6f;
++        *top_k = 20;
++        *top_p = 0.95f;
++        *min_p = 0.0f;
+     }
+ }
+ 
+diff --git a/ds4.h b/ds4.h
+index 04eb3658..2d2cfc1d 100644
+--- a/ds4.h
++++ b/ds4.h
+@@ -309,8 +309,8 @@ bool ds4_engine_is_glm_dsa(ds4_engine *e);
+ bool ds4_engine_is_glm53(ds4_engine *e);
+ bool ds4_engine_is_qwen4(ds4_engine *e);
+ /* The sampler defaults for the loaded model: the generic DS4_DEFAULT_*
+- * values, overridden per family as the CLI does. For hosts that sample
+- * themselves. */
++ * values, overridden per family as the CLI does (Qwen: 0.6, top_k 20,
++ * 0.95, 0). For hosts that sample themselves. */
+ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
+                                   int *top_k, float *top_p, float *min_p);
+ /* Qwen3.8 reasoning-effort system instruction for a think mode (NULL when none) */

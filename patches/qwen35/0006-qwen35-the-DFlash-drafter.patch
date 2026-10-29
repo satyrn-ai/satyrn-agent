@@ -1,7 +1,7 @@
-From d7701bbec763b4b964e30c3be22e9382e3a045ac Mon Sep 17 00:00:00 2001
+From f6a9a5fc4a2cca18753b263c1d9d712b154040a8 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 06:49:14 +0900
-Subject: [PATCH 06/9] qwen35: the DFlash drafter
+Subject: [PATCH 6/8] qwen35: the DFlash drafter
 
 Loads a DFlash2 drafter, captures the target's features, keeps the drafter's K/V rings, runs its block graph and lattice walk, and saves its ring in the payload.
 
@@ -26,7 +26,7 @@ Carried-commits: 4fff88b e2d05e2 14bee95 8f3af76 bc952fc 6b1a8aa 6d2c2d0
  create mode 100644 tests/test_dflash_open.c
 
 diff --git a/.gitignore b/.gitignore
-index ae61076..5bc7478 100644
+index ae61076a..5bc74787 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -86,6 +86,8 @@
@@ -39,7 +39,7 @@ index ae61076..5bc7478 100644
  /tests/test_image_decode
  /tests/test_deepseek41_metal
 diff --git a/Makefile b/Makefile
-index 7e3a658..e55714f 100644
+index 7e3a658b..e55714f3 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -93,6 +93,7 @@ help:
@@ -94,7 +94,7 @@ index 7e3a658..e55714f 100644
  
  # The active tokenizer includes generated Unicode classes.
 diff --git a/ds4.c b/ds4.c
-index 149ac08..68417d5 100644
+index 149ac082..68417d5b 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -2981,6 +2981,7 @@ typedef enum {
@@ -1429,7 +1429,7 @@ index 149ac08..68417d5 100644
      if (!out) return;
      memset(out, 0, sizeof(*out));
 diff --git a/ds4.h b/ds4.h
-index 68f883e..abe4235 100644
+index 68f883ea..abe42357 100644
 --- a/ds4.h
 +++ b/ds4.h
 @@ -178,6 +178,12 @@ typedef struct {
@@ -1485,7 +1485,7 @@ index 68f883e..abe4235 100644
   * batch verify for KV side effects, then obey the leader's commit frame
   * (keep, or roll back and replay). flags are the VERIFY frame's
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 179edbf..a2a50b0 100644
+index 179edbf7..a2a50b0a 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -815,9 +815,10 @@ int ds4_gpu_matmul_q6_K_tensor(
@@ -1564,10 +1564,10 @@ index 179edbf..a2a50b0 100644
  }
  #endif
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 3cad104..f3003b3 100644
+index 8a97174d..e1fb9989 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -4787,6 +4787,7 @@ static NSString *ds4_gpu_full_source(void) {
+@@ -4808,6 +4808,7 @@ static NSString *ds4_gpu_full_source(void) {
          @[@"DS4_METAL_QWEN4_SOURCE",      @"metal/qwen4.metal"],
          @[@"DS4_METAL_QWEN4_VISION_SOURCE", @"metal/qwen4_vision.metal"],
          @[@"DS4_METAL_QWEN35_MMA_SOURCE", @"metal/qwen35_mma.metal"],
@@ -1575,7 +1575,7 @@ index 3cad104..f3003b3 100644
      ];
  
      NSMutableString *source = [NSMutableString stringWithString:base];
-@@ -20244,15 +20245,18 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -20265,15 +20266,18 @@ int ds4_gpu_matmul_mma_rows_tensor(
          const ds4_gpu_tensor *x,
          uint64_t              n_tok) {
      if (!g_initialized && !ds4_gpu_init()) return 0;
@@ -1598,7 +1598,7 @@ index 3cad104..f3003b3 100644
      if (out_dim > UINT64_MAX / row_bytes) return 0;
      const uint64_t weight_bytes = out_dim * row_bytes;
      const uint64_t x_bytes = n_tok * in_dim * sizeof(float);
-@@ -20269,14 +20273,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -20290,14 +20294,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
       * llama.cpp's few-row tiling at one 8-row src1 tile
       * (ggml_metal_op_mul_mat_mma_tiling, ggml-metal-device.cpp, a46709b):
       * NSG simdgroups split K, from 32 for at most 64 weight rows down to 8
@@ -1615,7 +1615,7 @@ index 3cad104..f3003b3 100644
      const uint64_t nt_smem = 16384u / ((uint64_t)nsg * 256u);
      const uint64_t nt_rows = out_dim / (128u * 8u);
      const uint64_t nt_limit = nt_smem < nt_rows ? nt_smem : nt_rows;
-@@ -20284,7 +20288,7 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -20305,7 +20309,7 @@ int ds4_gpu_matmul_mma_rows_tensor(
      while (nt > 1 && (uint64_t)nt > nt_limit) nt /= 2;
  
      char fn_name[64];
@@ -1624,7 +1624,7 @@ index 3cad104..f3003b3 100644
  
      @autoreleasepool {
          id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
-@@ -51040,3 +51044,176 @@ int ds4_gpu_qwen4_hc_mix_rows_tensor(ds4_gpu_tensor *mixed, const ds4_gpu_tensor
+@@ -51061,3 +51065,176 @@ int ds4_gpu_qwen4_hc_mix_rows_tensor(ds4_gpu_tensor *mixed, const ds4_gpu_tensor
      return qwen4_dispatch(QWEN4_K_HC_MIX_ROWS, &args, sizeof(args), b, 3,
                            MTLSizeMake((n_embd + 255) / 256, n_tokens, 1), MTLSizeMake(256, 1, 1), 0);
  }
@@ -1803,7 +1803,7 @@ index 3cad104..f3003b3 100644
 +}
 diff --git a/metal/dflash.metal b/metal/dflash.metal
 new file mode 100644
-index 0000000..d895350
+index 00000000..d895350b
 --- /dev/null
 +++ b/metal/dflash.metal
 @@ -0,0 +1,327 @@
@@ -2135,7 +2135,7 @@ index 0000000..d895350
 +    }
 +}
 diff --git a/metal/qwen35_mma.metal b/metal/qwen35_mma.metal
-index 1c84900..13380d6 100644
+index 1c84900d..13380d61 100644
 --- a/metal/qwen35_mma.metal
 +++ b/metal/qwen35_mma.metal
 @@ -1,11 +1,15 @@
@@ -2324,7 +2324,7 @@ index 1c84900..13380d6 100644
 +template [[host_name("kernel_qwen35_mma_q4_0_f32_nt4")]] kernel qwen35_mma_t kernel_qwen35_mma_blk_f32<4, qwen35_mma_q4_0>;
 diff --git a/tests/test_dflash_live.c b/tests/test_dflash_live.c
 new file mode 100644
-index 0000000..5728ce8
+index 00000000..5728ce80
 --- /dev/null
 +++ b/tests/test_dflash_live.c
 @@ -0,0 +1,838 @@
@@ -3168,7 +3168,7 @@ index 0000000..5728ce8
 +}
 diff --git a/tests/test_dflash_open.c b/tests/test_dflash_open.c
 new file mode 100644
-index 0000000..829be9b
+index 00000000..829be9b4
 --- /dev/null
 +++ b/tests/test_dflash_open.c
 @@ -0,0 +1,36 @@
@@ -3209,7 +3209,7 @@ index 0000000..829be9b
 +    return 0;
 +}
 diff --git a/tests/test_qwen4_kernels.c b/tests/test_qwen4_kernels.c
-index 343a0a2..1263d8f 100644
+index 343a0a26..1263d8fd 100644
 --- a/tests/test_qwen4_kernels.c
 +++ b/tests/test_qwen4_kernels.c
 @@ -155,12 +155,12 @@ static uint64_t arena_bf16(arena_t *a, uint64_t n, double **shadow, float scale)
@@ -3848,6 +3848,3 @@ index 343a0a2..1263d8f 100644
  #endif
      printf("all qwen4 kernel tests passed\n");
      return 0;
--- 
-2.49.0
-

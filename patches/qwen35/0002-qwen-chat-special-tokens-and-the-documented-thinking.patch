@@ -1,7 +1,7 @@
-From 8f400d8390ff41ca10bf082ed629d0251acb0c8c Mon Sep 17 00:00:00 2001
+From bf1b2eef18ecfc9ba5f8a478b52557899cb16d0c Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Fri, 2 Oct 2026 12:46:09 +0900
-Subject: [PATCH 02/9] qwen: chat special tokens and the documented
+Subject: [PATCH 2/8] qwen: chat special tokens and the documented
  thinking-mode sampling
 
 Renders <tool_response> and a system message's <tool_call> as the special tokens the template uses, and samples the Qwen family at the documented thinking-mode values (0.6, 0.95, 20, 0) in ds4-agent and ds4.
@@ -16,7 +16,7 @@ Carried-commits: 480df32 14212a9
  3 files changed, 43 insertions(+), 13 deletions(-)
 
 diff --git a/ds4.c b/ds4.c
-index 46c5f10..2767594 100644
+index e26f1e08..10197fef 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -44992,15 +44992,23 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
@@ -47,7 +47,7 @@ index 46c5f10..2767594 100644
              } else {
                  bpe_tokenize_text(vocab, content, tokens);
 diff --git a/ds4_agent.c b/ds4_agent.c
-index deadc45..3ff34ba 100644
+index deadc450..3ff34ba6 100644
 --- a/ds4_agent.c
 +++ b/ds4_agent.c
 @@ -1006,11 +1006,22 @@ static agent_config parse_options(int argc, char **argv) {
@@ -79,7 +79,7 @@ index deadc45..3ff34ba 100644
  
  static ds4_think_mode effective_think_mode(const agent_config *cfg) {
 diff --git a/ds4_cli.c b/ds4_cli.c
-index af4e2b6..c5c955f 100644
+index af4e2b63..c5c955f1 100644
 --- a/ds4_cli.c
 +++ b/ds4_cli.c
 @@ -529,11 +529,22 @@ static void build_prompt(ds4_engine *engine, const cli_generation_options *gen,
@@ -110,6 +110,3 @@ index af4e2b6..c5c955f 100644
  }
  
  static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, const ds4_tokens *prompt) {
--- 
-2.49.0
-

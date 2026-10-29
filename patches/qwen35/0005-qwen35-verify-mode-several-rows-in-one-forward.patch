@@ -1,7 +1,7 @@
-From 0f0bcecae8eed1b8713b4199bc34f248674b37ba Mon Sep 17 00:00:00 2001
+From e96145592d51ebdb1fe8ed4a2bc628ddb7d9089f Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 05:05:49 +0900
-Subject: [PATCH 05/9] qwen35: verify mode, several rows in one forward
+Subject: [PATCH 5/8] qwen35: verify mode, several rows in one forward
 
 Multi-row verify on Metal for dense qwen35: the fused GDN front, attention rows with their own key splits, exact and MMA few-row matvecs, commit by recompute, and the session API with the open-verify refusal.
 
@@ -25,7 +25,7 @@ Carried-commits: 0b5f915 c7e9af6 dd6ad4f e0fa969 df2fb7e 754c338 46e6192 bc7f488
  create mode 100644 tests/test_qwen35_verify_live.c
 
 diff --git a/.gitignore b/.gitignore
-index b60b89c..ae61076 100644
+index b60b89ce..ae61076a 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -83,6 +83,7 @@
@@ -37,7 +37,7 @@ index b60b89c..ae61076 100644
  /tests/test_qwen4_vision
  /tests/test_deepseek4_vision_image
 diff --git a/Makefile b/Makefile
-index d4877fb..7e3a658 100644
+index d4877fbe..7e3a658b 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -89,7 +89,10 @@ help:
@@ -104,7 +104,7 @@ index d4877fb..7e3a658 100644
  
  # The active tokenizer includes generated Unicode classes.
 diff --git a/ds4.c b/ds4.c
-index 00b8eed..149ac08 100644
+index 00b8eedf..149ac082 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -58854,6 +58854,11 @@ static const ds4_vision_span *qwen4_fake_spans(size_t *count) {
@@ -924,7 +924,7 @@ index 00b8eed..149ac08 100644
      if (pos >= s->checkpoint.len) return;
      if (ds4_session_rewind_speculative(s, pos)) return;
 diff --git a/ds4.h b/ds4.h
-index 2d2cfc1..68f883e 100644
+index 2d2cfc1d..68f883ea 100644
 --- a/ds4.h
 +++ b/ds4.h
 @@ -586,6 +586,48 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
@@ -977,7 +977,7 @@ index 2d2cfc1..68f883e 100644
   * batch verify for KV side effects, then obey the leader's commit frame
   * (keep, or roll back and replay). flags are the VERIFY frame's
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 1df3c5f..179edbf 100644
+index 1df3c5fa..179edbf7 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -789,6 +789,20 @@ int ds4_gpu_matmul_quant_tensor(
@@ -1084,10 +1084,10 @@ index 1df3c5f..179edbf 100644
   * resampled position embedding [n_patches][n_embd]; out receives
   * [n_patches/4][n_out].  Weights are read from the mapped mmproj GGUF. */
 diff --git a/ds4_metal.m b/ds4_metal.m
-index c1d98ee..3cad104 100644
+index eb17dda0..8a97174d 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -4786,6 +4786,7 @@ static NSString *ds4_gpu_full_source(void) {
+@@ -4807,6 +4807,7 @@ static NSString *ds4_gpu_full_source(void) {
          @[@"DS4_METAL_SET_ROWS_SOURCE",   @"metal/set_rows.metal"],
          @[@"DS4_METAL_QWEN4_SOURCE",      @"metal/qwen4.metal"],
          @[@"DS4_METAL_QWEN4_VISION_SOURCE", @"metal/qwen4_vision.metal"],
@@ -1095,7 +1095,7 @@ index c1d98ee..3cad104 100644
      ];
  
      NSMutableString *source = [NSMutableString stringWithString:base];
-@@ -20055,6 +20056,93 @@ int ds4_gpu_matmul_quant_decode_mpp_model_view_tensor(
+@@ -20076,6 +20077,93 @@ int ds4_gpu_matmul_quant_decode_mpp_model_view_tensor(
                                              false);
  }
  
@@ -1189,7 +1189,7 @@ index c1d98ee..3cad104 100644
  /* Dense Q6_K projection: the matvec of the Q4_K_M recipes' Q6_K tensors
   * (down projections, output head) for dense qwen35. */
  typedef struct {
-@@ -20136,6 +20224,111 @@ int ds4_gpu_matmul_q6_K_tensor(
+@@ -20157,6 +20245,111 @@ int ds4_gpu_matmul_q6_K_tensor(
      return 1;
  }
  
@@ -1301,7 +1301,7 @@ index c1d98ee..3cad104 100644
  int ds4_gpu_matmul_quant_rows_scalar_tensor(
          ds4_gpu_tensor       *out,
          const void             *model_map,
-@@ -48337,6 +48530,7 @@ enum {
+@@ -48358,6 +48551,7 @@ enum {
      QWEN4_K_VIS_BIAS_RESIDUAL,
      QWEN4_K_VIS_BIAS_ACT,
      QWEN4_K_QWEN35_GDN_OUT,
@@ -1309,7 +1309,7 @@ index c1d98ee..3cad104 100644
      QWEN4_K_COUNT,
  };
  
-@@ -48443,6 +48637,7 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+@@ -48464,6 +48658,7 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
      "kernel_qwen4_vis_bias_residual",
      "kernel_qwen4_vis_bias_act",
      "kernel_qwen35_gdn_out",
@@ -1317,7 +1317,7 @@ index c1d98ee..3cad104 100644
  };
  
  typedef struct {
-@@ -48848,16 +49043,26 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
+@@ -48869,16 +49064,26 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
                            MTLSizeMake(n_k_head, n_tokens, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -1348,7 +1348,7 @@ index c1d98ee..3cad104 100644
      const uint64_t state_bytes = (uint64_t)n_v_head * head_dim * head_dim * sizeof(float);
      qwen4_bind bd[7];
      if (n_tokens == 0 || head_dim < 32 || head_dim > 128 || (head_dim % 32) != 0 || n_k_head == 0 ||
-@@ -48878,7 +49083,8 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
+@@ -48899,7 +49104,8 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
      } else {
          bd[6] = bd[3];
      }
@@ -1358,7 +1358,7 @@ index c1d98ee..3cad104 100644
          getenv("DS4_QWEN4_NO_GDN_R4") == NULL;
      if (head_dim == 128u && (n_tokens > 8u || decode_r4)) {
          /* SIMD groups own independent value rows, so changing their grouping
-@@ -48899,6 +49105,40 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
+@@ -48920,6 +49126,40 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
                            MTLSizeMake(head_dim, n_v_head, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -1399,7 +1399,7 @@ index c1d98ee..3cad104 100644
  static ds4_gpu_tensor *g_qwen4_gdn_slots;
  
  /* One decode step for every row of a batch against its own slot of the state
-@@ -49731,6 +49971,32 @@ int ds4_gpu_qwen4_attn_decode_rows_tensor(
+@@ -49752,6 +49992,32 @@ int ds4_gpu_qwen4_attn_decode_rows_tensor(
                            MTLSizeMake(n_head, n_rows, 1), MTLSizeMake(head_dim, 1, 1), 0);
  }
  
@@ -1432,7 +1432,7 @@ index c1d98ee..3cad104 100644
  int ds4_gpu_qwen4_moe_mid_tensor(
          ds4_gpu_tensor *mid, const ds4_gpu_tensor *x, const ds4_gpu_tensor *selected,
          const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset,
-@@ -50332,24 +50598,26 @@ int ds4_gpu_qwen4_mtp_combine_tensor(
+@@ -50353,24 +50619,26 @@ int ds4_gpu_qwen4_mtp_combine_tensor(
                            MTLSizeMake((n + 255u) / 256u, 1, 1), MTLSizeMake(256, 1, 1), 0);
  }
  
@@ -1464,7 +1464,7 @@ index c1d98ee..3cad104 100644
      if (n_tokens == 0 || n_k_head == 0 || head_dim % 32 != 0 || n_v_head % n_k_head != 0 ||
          conv_kernel < 2 || conv_kernel > 4 || row_bytes == 0 ||
          !qwen4_bind_tensor(&b[0], qkv, (uint64_t)n_tokens * conv_dim * sizeof(float), "gdn front qkv") ||
-@@ -50375,15 +50643,48 @@ int ds4_gpu_qwen4_gdn_front_tensor(
+@@ -50396,15 +50664,48 @@ int ds4_gpu_qwen4_gdn_front_tensor(
      } else {
          b[11] = b[1];
      }
@@ -1515,7 +1515,7 @@ index c1d98ee..3cad104 100644
          const ds4_gpu_tensor *x, uint32_t n_tokens, uint32_t in_dim, uint32_t n_out,
          ds4_gpu_tensor *const *outs, const void *model_map, uint64_t model_size,
 diff --git a/metal/moe.metal b/metal/moe.metal
-index 6994c54..9b8c425 100644
+index 6994c547..9b8c4259 100644
 --- a/metal/moe.metal
 +++ b/metal/moe.metal
 @@ -3381,6 +3381,140 @@ kernel void kernel_mul_mv_q4_K_dense_f32(
@@ -1661,7 +1661,7 @@ index 6994c54..9b8c425 100644
  //
 diff --git a/metal/qwen35_mma.metal b/metal/qwen35_mma.metal
 new file mode 100644
-index 0000000..1c84900
+index 00000000..1c84900d
 --- /dev/null
 +++ b/metal/qwen35_mma.metal
 @@ -0,0 +1,225 @@
@@ -1891,7 +1891,7 @@ index 0000000..1c84900
 +template [[host_name("kernel_qwen35_mma_q6_K_f32_nt2")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<2, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
 +template [[host_name("kernel_qwen35_mma_q6_K_f32_nt4")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<4, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index 4c587c3..f43df3d 100644
+index 4c587c31..f43df3d4 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -697,7 +697,7 @@ struct ds4_metal_args_qwen4_gdn_scan {
@@ -2004,7 +2004,7 @@ index 4c587c3..f43df3d 100644
                  for (uint t = 0; t + 1 < K; t++) snap_state[t * C + c] = state[t * C + c];
 diff --git a/tests/test_qwen35_verify_live.c b/tests/test_qwen35_verify_live.c
 new file mode 100644
-index 0000000..d0cf712
+index 00000000..d0cf712e
 --- /dev/null
 +++ b/tests/test_qwen35_verify_live.c
 @@ -0,0 +1,303 @@
@@ -2312,7 +2312,7 @@ index 0000000..d0cf712
 +    return cases > 0 && passed == cases ? 0 : 1;
 +}
 diff --git a/tests/test_qwen4_kernels.c b/tests/test_qwen4_kernels.c
-index ab305bd..343a0a2 100644
+index ab305bd9..343a0a26 100644
 --- a/tests/test_qwen4_kernels.c
 +++ b/tests/test_qwen4_kernels.c
 @@ -230,6 +230,38 @@ static uint64_t arena_q4_K(arena_t *a, uint64_t rows, uint64_t cols, double **sh
@@ -3103,6 +3103,3 @@ index ab305bd..343a0a2 100644
      printf("all qwen4 kernel tests passed\n");
      return 0;
  }
--- 
-2.49.0
-

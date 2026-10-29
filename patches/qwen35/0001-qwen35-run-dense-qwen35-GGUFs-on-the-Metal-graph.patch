@@ -1,7 +1,7 @@
-From a182389904f1f2de394b272d3ef91443a81c1b5d Mon Sep 17 00:00:00 2001
+From 7878ac30b708b863798419535d4ad950d4cbfb1d Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 30 Sep 2026 12:59:41 +0900
-Subject: [PATCH 01/9] qwen35: run dense qwen35 GGUFs on the Metal graph
+Subject: [PATCH 1/8] qwen35: run dense qwen35 GGUFs on the Metal graph
 
 Loads general.architecture = qwen35 (the dense Qwen3.8-27B) as a Qwen-family variant, follows llama.cpp's qwen35 graph on Metal, tiles Q6_K prompt batches, and allows the 27B's four KV heads.
 
@@ -16,7 +16,7 @@ Carried-commits: 591c6a0 6a015c6 3ffc922
  4 files changed, 935 insertions(+), 13 deletions(-)
 
 diff --git a/ds4.c b/ds4.c
-index aafcb44..46c5f10 100644
+index a79ffce4..e26f1e08 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -497,7 +497,7 @@ enum {
@@ -770,7 +770,7 @@ index aafcb44..46c5f10 100644
      const uint32_t pos0 = g->pos;
      const uint32_t n_trunk = DS4_N_LAYER - DS4_N_NEXTN_PREDICT;
      const uint32_t hc_dim = DS4_N_EMBD * DS4_N_HC;
-@@ -63513,7 +64048,7 @@ uint64_t ds4_session_payload_bytes(ds4_session *s) {
+@@ -63517,7 +64052,7 @@ uint64_t ds4_session_payload_bytes(ds4_session *s) {
  #ifndef DS4_HAS_QWEN4_GPU
          return 0;
  #else
@@ -779,7 +779,7 @@ index aafcb44..46c5f10 100644
          if (s->qwen4_rewound || s->qwen4_graph.pos != (uint32_t)s->checkpoint.len) return 0;
          uint64_t bytes = (uint64_t)DS4_SESSION_PAYLOAD_U32_FIELDS * sizeof(uint32_t);
          bytes += (uint64_t)s->checkpoint.len * sizeof(uint32_t);
-@@ -63703,6 +64238,10 @@ static uint64_t qwen4_payload_tensor_bytes(uint32_t rows, uint32_t mtp_rows) {
+@@ -63707,6 +64242,10 @@ static uint64_t qwen4_payload_tensor_bytes(uint32_t rows, uint32_t mtp_rows) {
  }
  
  static int qwen4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_t errlen) {
@@ -790,7 +790,7 @@ index aafcb44..46c5f10 100644
      if (!s->qwen4_graph_ready || s->qwen4_rewound ||
          s->qwen4_graph.pos != (uint32_t)s->checkpoint.len) {
          payload_set_err(err, errlen, "Qwen3.8 snapshot requires sync or eval after rewind");
-@@ -63782,6 +64321,10 @@ static int qwen4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_
+@@ -63786,6 +64325,10 @@ static int qwen4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_
  
  static int qwen4_session_load_payload(ds4_session *s, FILE *fp, const uint32_t *h, uint64_t *remaining,
                                        char *err, size_t errlen) {
@@ -801,7 +801,7 @@ index aafcb44..46c5f10 100644
      if (!s->qwen4_graph_ready) {
          payload_set_err(err, errlen, "Qwen3.8 graph is not ready for restore");
          return 1;
-@@ -68839,6 +69382,10 @@ static int qwen4_first_token_test(const ds4_model *model, const ds4_vocab *vocab
+@@ -68843,6 +69386,10 @@ static int qwen4_first_token_test(const ds4_model *model, const ds4_vocab *vocab
          return 1;
  #endif
      }
@@ -812,7 +812,7 @@ index aafcb44..46c5f10 100644
      int *seq = xmalloc(4096 * sizeof(int));
      uint32_t n_seq = 0;
      const char *seq_env = getenv("DS4_QWEN4_FT_TOKENS");
-@@ -71914,6 +72461,12 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -71918,6 +72465,12 @@ static int ds4_engine_open_internal(ds4_engine **out,
      if (engine_warm_full_model(opt) && DS4_MODEL_FAMILY != DS4_MODEL_FAMILY_DEEPSEEK41)
          model_warm_weights(&e->model);
      if (opt->vision_path && opt->vision_path[0]) {
@@ -825,7 +825,7 @@ index aafcb44..46c5f10 100644
          if (!ds4_model_is_glm53() && !g_ds4_flash_vision_exp && !ds4_model_is_qwen4() &&
              DS4_MODEL_FAMILY != DS4_MODEL_FAMILY_DEEPSEEK41) {
              fprintf(stderr,
-@@ -72262,6 +72815,12 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -72266,6 +72819,12 @@ static int ds4_engine_open_internal(ds4_engine **out,
          e->vision_image_token = vocab_lookup(&e->vocab, "<|image_pad|>");
          e->vision_end_token = vocab_lookup(&e->vocab, "<|vision_end|>");
      }
@@ -838,8 +838,8 @@ index aafcb44..46c5f10 100644
      if (opt->glm_mtp &&
          ((DS4_MODEL_FAMILY != DS4_MODEL_FAMILY_GLM_DSA && !ds4_model_is_qwen4()) ||
           DS4_N_NEXTN_PREDICT == 0)) {
-@@ -73213,8 +73772,10 @@ bool ds4_engine_is_qwen4(ds4_engine *e) {
-     return ds4_model_is_qwen4();
+@@ -73230,8 +73789,10 @@ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
+     }
  }
  
 -/* The official template's default effort is xhigh; medium adds no text. */
@@ -850,7 +850,7 @@ index aafcb44..46c5f10 100644
      switch (mode) {
      case DS4_THINK_HIGH:
      case DS4_THINK_MAX:  return DS4_QWEN4_REASONING_XHIGH;
-@@ -74335,7 +74896,8 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
+@@ -74352,7 +74913,8 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
           * previous sessions closed) and keeps private transients otherwise. */
          const uint32_t block_cap = (uint32_t)ctx_size / 4u + 1u;
          const bool share = e->share_session_prefill_workspace &&
@@ -861,7 +861,7 @@ index aafcb44..46c5f10 100644
              e->qwen4_shared_workspace->cap_tokens >= cap_tokens &&
              e->qwen4_shared_workspace->n_block_cap >= block_cap;
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 2965aef..1df3c5f 100644
+index 2965aef9..1df3c5fa 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -789,6 +789,31 @@ int ds4_gpu_matmul_quant_tensor(
@@ -917,10 +917,10 @@ index 2965aef..1df3c5f 100644
          ds4_gpu_tensor *gated, ds4_gpu_tensor *normed, const ds4_gpu_tensor *R,
          const ds4_gpu_tensor *key, const ds4_gpu_tensor *value,
 diff --git a/ds4_metal.m b/ds4_metal.m
-index f113c2d..c1d98ee 100644
+index b86815c4..eb17dda0 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -20055,6 +20055,87 @@ int ds4_gpu_matmul_quant_decode_mpp_model_view_tensor(
+@@ -20076,6 +20076,87 @@ int ds4_gpu_matmul_quant_decode_mpp_model_view_tensor(
                                              false);
  }
  
@@ -1008,7 +1008,7 @@ index f113c2d..c1d98ee 100644
  int ds4_gpu_matmul_quant_rows_scalar_tensor(
          ds4_gpu_tensor       *out,
          const void             *model_map,
-@@ -20076,6 +20157,67 @@ int ds4_gpu_matmul_quant_rows_scalar_tensor(
+@@ -20097,6 +20178,67 @@ int ds4_gpu_matmul_quant_rows_scalar_tensor(
                                         n_tok);
  }
  
@@ -1076,7 +1076,7 @@ index f113c2d..c1d98ee 100644
  int ds4_gpu_matmul_q8_0_rows_scalar_tensor(
          ds4_gpu_tensor       *out,
          const void             *model_map,
-@@ -48194,6 +48336,7 @@ enum {
+@@ -48215,6 +48357,7 @@ enum {
      QWEN4_K_VIS_ATTENTION,
      QWEN4_K_VIS_BIAS_RESIDUAL,
      QWEN4_K_VIS_BIAS_ACT,
@@ -1084,7 +1084,7 @@ index f113c2d..c1d98ee 100644
      QWEN4_K_COUNT,
  };
  
-@@ -48299,6 +48442,7 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+@@ -48320,6 +48463,7 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
      "kernel_qwen4_vis_attention",
      "kernel_qwen4_vis_bias_residual",
      "kernel_qwen4_vis_bias_act",
@@ -1092,7 +1092,7 @@ index f113c2d..c1d98ee 100644
  };
  
  typedef struct {
-@@ -48946,6 +49090,24 @@ int ds4_gpu_qwen4_gdn_out_tensor(
+@@ -48967,6 +49111,24 @@ int ds4_gpu_qwen4_gdn_out_tensor(
                            MTLSizeMake(n_head, n_tokens, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -1117,7 +1117,7 @@ index f113c2d..c1d98ee 100644
  int ds4_gpu_qwen4_ple_gate_tensor(
          ds4_gpu_tensor *gated, ds4_gpu_tensor *normed, const ds4_gpu_tensor *R,
          const ds4_gpu_tensor *key, const ds4_gpu_tensor *value,
-@@ -49111,6 +49273,48 @@ int ds4_gpu_qwen4_attn_prep_tensor(
+@@ -49132,6 +49294,48 @@ int ds4_gpu_qwen4_attn_prep_tensor(
                            MTLSizeMake(n_head + n_head_kv + n_idx_head + 1u, n_tokens, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -1167,7 +1167,7 @@ index f113c2d..c1d98ee 100644
          ds4_gpu_tensor *block_key, const ds4_gpu_tensor *ik_cache, const ds4_gpu_tensor *pos3,
          const void *model_map, uint64_t model_size, uint64_t g_ik_offset,
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index 8b37524..4c587c3 100644
+index 8b375249..4c587c31 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -956,6 +956,124 @@ kernel void kernel_qwen4_gdn_out(
@@ -1295,6 +1295,3 @@ index 8b37524..4c587c3 100644
  /* --- PLE ---------------------------------------------------------------- */
  
  struct ds4_metal_args_qwen4_ple_gate {
--- 
-2.49.0
-

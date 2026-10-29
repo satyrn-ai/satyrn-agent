@@ -1,0 +1,58 @@
+name: ds4 tools
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # ds4-check re-applies the patch series with `git am` inside pristine
+    # clones. Git refuses to create those commits without a committer identity,
+    # and GitHub-hosted runners ship no user.name/user.email configuration.
+    env:
+      GIT_COMMITTER_NAME: "github-actions[bot]"
+      GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+    steps:
+      - name: Check out satyrn-agent
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Install devenv
+        run: nix profile install --accept-flake-config nixpkgs#devenv
+
+      - name: Bash syntax checks
+        run: |
+          devenv shell -- bash -c "for file in tools/*.sh tests/ds4_test_helpers.sh tests/ds4_*_test.sh; do bash -n \"\$file\"; done"
+
+      - name: Run shell suite
+        run: devenv shell -- bash tests/ds4_tools_test.sh
+
+      - name: Lint workflow
+        run: devenv shell -- actionlint .github/workflows/ds4-tools.yml
+
+      - name: Check out ds4-py at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: rochecompaan/ds4-py
+          ref: f0e2118629c315e835435c82c973638e6f9e49bc
+          path: .ds4/ds4-py
+
+      - name: Install ds4-py environment
+        run: devenv shell -- env -u UV_PROJECT_ENVIRONMENT uv sync --project .ds4/ds4-py
+
+      - name: Build each checked tree with ds4-py (CPU backend)
+        run: |
+          export PATH="$PWD/.ds4/ds4-py/.venv/bin:$PATH"
+          devenv shell -- bash tools/ds4-check.sh --build

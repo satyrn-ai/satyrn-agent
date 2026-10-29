@@ -1,8 +1,8 @@
-From 4e975e3533a800c7ea91ad69f24f38db3610eb42 Mon Sep 17 00:00:00 2001
+From b345547872f97896eda29d84435e8c862bb7c5b2 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Mon, 26 Oct 2026 16:28:15 +0900
-Subject: [PATCH] metal: compile shaders as Metal 3.2 when the SDK and OS are
- 15 or later
+Subject: [PATCH 3/3] metal: compile shaders as Metal 3.2 when the SDK and OS
+ are 15 or later
 
 memory_order_seq_cst and thread_scope_device in dsv4_hc.metal and dsv4_misc.metal need Metal 3.2. The default language version follows the SDK of the host executable, so an SDK-14.2 Python compiles them below 3.2 and fails. Pin 3.2 on macOS 15+, with the existing 4.0 pin on 26+ overriding it.
 
@@ -13,7 +13,7 @@ Retire-when: upstream sets the language version itself
  1 file changed, 9 insertions(+), 2 deletions(-)
 
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 4718987..39feb0b 100644
+index 03e2c2e5..b86815c4 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
 @@ -2814,9 +2814,16 @@ static bool ds4_gpu_ported_m5_decode_feature_enabled(
@@ -35,6 +35,3 @@ index 4718987..39feb0b 100644
  #if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
      if (@available(macOS 26.0, *)) {
          options.languageVersion = MTLLanguageVersion4_0;
--- 
-2.49.0
-

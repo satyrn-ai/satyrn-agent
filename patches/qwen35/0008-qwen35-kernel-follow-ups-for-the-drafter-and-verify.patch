@@ -1,7 +1,7 @@
-From f27935f37ffbb69166bf6a9e36ee587bfeba553a Mon Sep 17 00:00:00 2001
+From d5fb252d805496625144b97fc8b7a8a66d40c7cc Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 21:25:08 +0900
-Subject: [PATCH 08/9] qwen35: kernel follow-ups for the drafter and verify
+Subject: [PATCH 8/8] qwen35: kernel follow-ups for the drafter and verify
 
 The drafter's attention with head_dim fixed at compile time, verify attention on shared K/V tiles, and Q4_K dequantized from one 16-byte load per piece.
 
@@ -19,7 +19,7 @@ Carried-commits: b00831d 17a9818 2fefe5f
  7 files changed, 903 insertions(+), 22 deletions(-)
 
 diff --git a/ds4.c b/ds4.c
-index c28fba8..653867b 100644
+index c28fba88..653867b5 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -60757,8 +60757,13 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
@@ -54,7 +54,7 @@ index c28fba8..653867b 100644
                                              g->pos3, g->qwen35_verify_table, (uint64_t)attn_slot * 8u,
                                              g->qwen35_verify_part, T, DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM,
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 535be48..81e4181 100644
+index 535be48a..81e41819 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -309,6 +309,8 @@ enum {
@@ -115,10 +115,10 @@ index 535be48..81e4181 100644
          ds4_gpu_tensor *out, const ds4_gpu_tensor *q,
          const ds4_gpu_tensor *k_blk, const ds4_gpu_tensor *v_blk,
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 9ad5b73..423788d 100644
+index 7d8915c0..39feb0ba 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -20288,7 +20288,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -20309,7 +20309,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
      while (nt > 1 && (uint64_t)nt > nt_limit) nt /= 2;
  
      char fn_name[64];
@@ -134,7 +134,7 @@ index 9ad5b73..423788d 100644
  
      @autoreleasepool {
          id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
-@@ -48540,6 +48547,8 @@ enum {
+@@ -48561,6 +48568,8 @@ enum {
      QWEN4_K_QWEN35_GDN_HIST_COMMIT,
      QWEN4_K_QWEN35_ATTN_FA,
      QWEN4_K_QWEN35_ATTN_FA_PAD,
@@ -143,7 +143,7 @@ index 9ad5b73..423788d 100644
      QWEN4_K_COUNT,
  };
  
-@@ -48649,6 +48658,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+@@ -48670,6 +48679,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
      "kernel_qwen35_gdn_hist_commit",
      "kernel_qwen35_attn_fa",
      "kernel_qwen35_attn_fa_pad",
@@ -152,7 +152,7 @@ index 9ad5b73..423788d 100644
  };
  
  typedef struct {
-@@ -50051,6 +50062,72 @@ int ds4_gpu_qwen35_attn_verify_tensor(
+@@ -50072,6 +50083,72 @@ int ds4_gpu_qwen35_attn_verify_tensor(
                                                   n_head, n_head_kv, head_dim, 0u, scale);
  }
  
@@ -225,7 +225,7 @@ index 9ad5b73..423788d 100644
  int ds4_gpu_qwen4_moe_mid_tensor(
          ds4_gpu_tensor *mid, const ds4_gpu_tensor *x, const ds4_gpu_tensor *selected,
          const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset,
-@@ -51238,7 +51315,9 @@ int ds4_gpu_dflash_attn_tensor(
+@@ -51259,7 +51336,9 @@ int ds4_gpu_dflash_attn_tensor(
          !qwen4_bind_tensor(&b[6], out, q_bytes, "dflash attention output")) {
          return 0;
      }
@@ -237,7 +237,7 @@ index 9ad5b73..423788d 100644
  }
  
 diff --git a/metal/dflash.metal b/metal/dflash.metal
-index d895350..602a5dc 100644
+index d895350b..602a5dcd 100644
 --- a/metal/dflash.metal
 +++ b/metal/dflash.metal
 @@ -268,6 +268,92 @@ kernel void kernel_dflash_attn(
@@ -334,7 +334,7 @@ index d895350..602a5dc 100644
  
  struct ds4_metal_args_dflash_selector {
 diff --git a/metal/qwen35_mma.metal b/metal/qwen35_mma.metal
-index 13380d6..f40150a 100644
+index 13380d61..f40150a9 100644
 --- a/metal/qwen35_mma.metal
 +++ b/metal/qwen35_mma.metal
 @@ -5,9 +5,9 @@
@@ -429,7 +429,7 @@ index 13380d6..f40150a 100644
  template [[host_name("kernel_qwen35_mma_q6_K_f32_nt2")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<2, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
  template [[host_name("kernel_qwen35_mma_q6_K_f32_nt4")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<4, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index 95b77dc..7364b64 100644
+index 95b77dc1..7364b64c 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -3022,6 +3022,245 @@ kernel void kernel_qwen35_attn_fa(
@@ -679,7 +679,7 @@ index 95b77dc..7364b64 100644
  
  #define QWEN4_MOE_NSG 4
 diff --git a/tests/test_qwen4_kernels.c b/tests/test_qwen4_kernels.c
-index ee8fe56..2257c7a 100644
+index ee8fe56e..2257c7a2 100644
 --- a/tests/test_qwen4_kernels.c
 +++ b/tests/test_qwen4_kernels.c
 @@ -4053,6 +4053,24 @@ static int qwen35_mma_q4_K(ds4_gpu_tensor *out, const void *map, uint64_t size,
@@ -1182,6 +1182,3 @@ index ee8fe56..2257c7a 100644
      test_dflash_drafter(&arena);
  #endif
      printf("all qwen4 kernel tests passed\n");
--- 
-2.49.0
-

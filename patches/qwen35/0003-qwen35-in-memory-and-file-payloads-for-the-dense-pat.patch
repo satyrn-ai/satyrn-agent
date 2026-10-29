@@ -1,7 +1,7 @@
-From 0caaa92dc363a0d261f442002f4eb97c8aede6fd Mon Sep 17 00:00:00 2001
+From cb7c13fe5abfe03427ea2ae01809f5192c5cce23 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Sun, 4 Oct 2026 10:40:13 +0900
-Subject: [PATCH 03/9] qwen35: in-memory and file payloads for the dense path
+Subject: [PATCH 3/8] qwen35: in-memory and file payloads for the dense path
 
 Snapshots and KV payloads for dense qwen35, including the linear-attention state, always on.
 
@@ -13,7 +13,7 @@ Carried-commits: 2d90d19 d4bd58d
  1 file changed, 138 insertions(+), 8 deletions(-)
 
 diff --git a/ds4.c b/ds4.c
-index 2767594..6ce4293 100644
+index 10197fef..2becb3ef 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -64049,6 +64049,7 @@ static int ds41_load_payload(ds4_session *s, FILE *fp, const uint32_t *h,
@@ -23,8 +23,8 @@ index 2767594..6ce4293 100644
 +static uint64_t qwen35_payload_tensor_bytes(uint32_t rows);
  #endif
  
- uint64_t ds4_session_payload_bytes(ds4_session *s) {
-@@ -64056,12 +64057,13 @@ uint64_t ds4_session_payload_bytes(ds4_session *s) {
+ bool ds4_session_supports_payload(ds4_session *s) {
+@@ -64060,12 +64061,13 @@ uint64_t ds4_session_payload_bytes(ds4_session *s) {
  #ifndef DS4_HAS_QWEN4_GPU
          return 0;
  #else
@@ -39,7 +39,7 @@ index 2767594..6ce4293 100644
          const uint32_t mtp_rows = s->qwen4_graph.mtp_pos < rows ? s->qwen4_graph.mtp_pos : rows;
          bytes += qwen4_payload_tensor_bytes(rows, mtp_rows);
          return bytes;
-@@ -64245,11 +64247,142 @@ static uint64_t qwen4_payload_tensor_bytes(uint32_t rows, uint32_t mtp_rows) {
+@@ -64249,11 +64251,142 @@ static uint64_t qwen4_payload_tensor_bytes(uint32_t rows, uint32_t mtp_rows) {
      return bytes;
  }
  
@@ -185,7 +185,7 @@ index 2767594..6ce4293 100644
      if (!s->qwen4_graph_ready || s->qwen4_rewound ||
          s->qwen4_graph.pos != (uint32_t)s->checkpoint.len) {
          payload_set_err(err, errlen, "Qwen3.8 snapshot requires sync or eval after rewind");
-@@ -64329,10 +64462,7 @@ static int qwen4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_
+@@ -64333,10 +64466,7 @@ static int qwen4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_
  
  static int qwen4_session_load_payload(ds4_session *s, FILE *fp, const uint32_t *h, uint64_t *remaining,
                                        char *err, size_t errlen) {
@@ -197,6 +197,3 @@ index 2767594..6ce4293 100644
      if (!s->qwen4_graph_ready) {
          payload_set_err(err, errlen, "Qwen3.8 graph is not ready for restore");
          return 1;
--- 
-2.49.0
-

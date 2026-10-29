@@ -1,7 +1,7 @@
-From 4dd4131dcd12906331d85db6acd37c59a8bbd599 Mon Sep 17 00:00:00 2001
+From 1e19559e0b098eeb0341b80cefb3b5028018ab01 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 13:24:13 +0900
-Subject: [PATCH 07/9] qwen35: flash attention for prompt batches
+Subject: [PATCH 7/8] qwen35: flash attention for prompt batches
 
 llama.cpp's packed Q6_K dequantizer and flash-attention tiling for dense qwen35 prompt batches; flash attention is the only prompt-batch attention.
 
@@ -17,7 +17,7 @@ Carried-commits: 334a9a3 6d985f6 dccb545
  5 files changed, 690 insertions(+), 6 deletions(-)
 
 diff --git a/ds4.c b/ds4.c
-index 68417d5..c28fba8 100644
+index 68417d5b..c28fba88 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -60758,7 +60758,11 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
@@ -44,7 +44,7 @@ index 68417d5..c28fba8 100644
                                             NULL, NULL, T <= 2u ? g->attn_part : NULL, T,
                                             DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM, pos0, false, 0u, scale) != 0;
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index a2a50b0..535be48 100644
+index a2a50b0a..535be48a 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -308,6 +308,7 @@ enum {
@@ -84,10 +84,10 @@ index a2a50b0..535be48 100644
          ds4_gpu_tensor *gated, ds4_gpu_tensor *normed, const ds4_gpu_tensor *R,
          const ds4_gpu_tensor *key, const ds4_gpu_tensor *value,
 diff --git a/ds4_metal.m b/ds4_metal.m
-index f3003b3..9ad5b73 100644
+index e1fb9989..7d8915c0 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -20391,7 +20391,10 @@ int ds4_gpu_matmul_q6_K_mm_tensor(
+@@ -20412,7 +20412,10 @@ int ds4_gpu_matmul_q6_K_mm_tensor(
                                                         &inner_offset);
          const bool bc_out = (out_dim % 64u) != 0 || (n_tok % 32u) != 0;
          id<MTLComputePipelineState> pipeline =
@@ -99,7 +99,7 @@ index f3003b3..9ad5b73 100644
          if (!xbuf || !outbuf || !wbuf || !pipeline) return 0;
  
          ds4_gpu_mul_mm_args args = ds4_gpu_make_mm_args(in_dim, out_dim, n_tok, row_bytes);
-@@ -48535,6 +48538,8 @@ enum {
+@@ -48556,6 +48559,8 @@ enum {
      QWEN4_K_VIS_BIAS_ACT,
      QWEN4_K_QWEN35_GDN_OUT,
      QWEN4_K_QWEN35_GDN_HIST_COMMIT,
@@ -108,7 +108,7 @@ index f3003b3..9ad5b73 100644
      QWEN4_K_COUNT,
  };
  
-@@ -48642,6 +48647,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+@@ -48663,6 +48668,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
      "kernel_qwen4_vis_bias_act",
      "kernel_qwen35_gdn_out",
      "kernel_qwen35_gdn_hist_commit",
@@ -117,7 +117,7 @@ index f3003b3..9ad5b73 100644
  };
  
  typedef struct {
-@@ -48664,6 +48671,9 @@ static MTLSize qwen4_moe_mm_grid(uint32_t row_blocks, uint32_t n_expert, uint32_
+@@ -48685,6 +48692,9 @@ static MTLSize qwen4_moe_mm_grid(uint32_t row_blocks, uint32_t n_expert, uint32_
  }
  
  static id<MTLComputePipelineState> g_qwen4_pipelines[QWEN4_K_COUNT];
@@ -127,7 +127,7 @@ index f3003b3..9ad5b73 100644
  #define QWEN4_ATTN_NSG 4
  #define QWEN4_ATTN_MAX_SPLITS 64
  #define QWEN4_ATTN_ROWS_MAX 64     /* decode batch rows the attention rows kernels take */
-@@ -49559,6 +49569,46 @@ int ds4_gpu_qwen35_attn_prep_tensor(
+@@ -49580,6 +49590,46 @@ int ds4_gpu_qwen35_attn_prep_tensor(
                            MTLSizeMake(n_head + n_head_kv, n_tokens, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -174,7 +174,7 @@ index f3003b3..9ad5b73 100644
  int ds4_gpu_qwen4_idx_block_key_tensor(
          ds4_gpu_tensor *block_key, const ds4_gpu_tensor *ik_cache, const ds4_gpu_tensor *pos3,
          const void *model_map, uint64_t model_size, uint64_t g_ik_offset,
-@@ -50734,6 +50784,8 @@ static void qwen4_batch_release_scratch(void) {
+@@ -50755,6 +50805,8 @@ static void qwen4_batch_release_scratch(void) {
      ds4_gpu_tensor_free(g_qwen4_gdn_slots);
      g_qwen4_dense_mm_partials = g_qwen4_gdn_slots = NULL;
      g_qwen4_dense_mm_partials_bytes = 0;
@@ -184,7 +184,7 @@ index f3003b3..9ad5b73 100644
  }
  
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index f43df3d..95b77dc 100644
+index f43df3d4..95b77dc1 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -1095,10 +1095,51 @@ kernel void kernel_qwen35_q6_K_matmul_f32(
@@ -527,7 +527,7 @@ index f43df3d..95b77dc 100644
  
  #define QWEN4_MOE_NSG 4
 diff --git a/tests/test_qwen4_kernels.c b/tests/test_qwen4_kernels.c
-index 1263d8f..ee8fe56 100644
+index 1263d8fd..ee8fe56e 100644
 --- a/tests/test_qwen4_kernels.c
 +++ b/tests/test_qwen4_kernels.c
 @@ -4754,6 +4754,292 @@ static void test_dflash_drafter(arena_t *a) {
@@ -845,6 +845,3 @@ index 1263d8f..ee8fe56 100644
      printf("multi gemv\n");
      test_multi_gemv(&arena, 2560, 2);
      test_multi_gemv(&arena, 64, 3);
--- 
-2.49.0
-
