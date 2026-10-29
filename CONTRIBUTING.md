@@ -4,7 +4,7 @@
 
 ## Design
 
-Read the [design document}(docs/2026-10-24-ds4-patch-series-design.md)
+Read the [design document](docs/specs/2026-10-24-ds4-patch-series-design.md)
 
 ## Development environment
 
@@ -16,7 +16,7 @@ Read the [design document}(docs/2026-10-24-ds4-patch-series-design.md)
 
 ## Workflow
 
-We use a patch git workflow as described in the [design doc](docs/2026-10-24-ds4-patch-series-design.md).
+We use a patch git workflow as described in the [design doc](docs/specs/2026-10-24-ds4-patch-series-design.md).
 
 Next steps:
 - View our Code of Conduct.
