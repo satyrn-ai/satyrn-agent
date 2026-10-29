@@ -29,7 +29,7 @@ jobs:
 
       - name: Bash syntax checks
         run: |
-          for file in tools/*.bash tests/ds4_tools_test.bash; do
+          for file in tools/*.bash tests/ds4_test_helpers.bash tests/ds4_*_test.bash; do
             bash -n "$file"
           done
 
