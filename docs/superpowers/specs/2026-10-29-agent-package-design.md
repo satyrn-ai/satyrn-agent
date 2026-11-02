@@ -17,11 +17,11 @@ and three small runtime capabilities: DFlash selection, native sampling
 defaults, and a soft think budget. It must not fork ds4-py or move downstream
 policy into ds4-py.
 
-The first slice works against the M1/M2 engine facade directly. Harness
-integration is a separate, later slice because ds4-py M3 owns `DS4Model`,
-capability lifecycle, session state, and the TUI registries. This document
-names that later slice **After M3** and does not design around unreleased M3
-APIs.
+The first slice works against the M1/M2 engine facade directly. ds4-py M3 is
+now merged (`3ba827d`) and provides `DS4Model`, capability lifecycle, session
+state, and the TUI extension points. Harness integration remains a separate,
+later slice named **M3 harness integration**; section 13 uses the merged APIs
+rather than anticipating unreleased ones.
 
 The work also tests ds4-py's extension contract against a real downstream
 consumer. Where M1/M2 lacks generic host wiring, ds4-py gets a small companion
@@ -80,7 +80,8 @@ package design.
 7. Measure DFlash behavior with real model E2E tests and reach 100% line and
    branch coverage for the new `satyrn_agent` Python code.
 8. Keep the later harness slice small: an already configured ds4-py session
-   must carry its decode step and hooks into M3 without a second token loop.
+   must carry its decode step and hooks into the M3 harness without a second
+   token loop.
 
 ### Non-goals for the first slice
 
@@ -95,7 +96,7 @@ package design.
 - Native `ds4_spec_stats` marshalling. Python counters and external timing are
   sufficient for this slice.
 - Harness, CLI, TUI, persistence, and session-lifecycle customizations; these
-  are **After M3**.
+  are **M3 harness integration**.
 
 ### Anti-goals
 
@@ -154,7 +155,7 @@ loop. It also makes the new wiring useful to other extensions.
 
 Call `session._worker` and `generate(..., step=...)` from a downstream adapter.
 This avoids a ds4-py change today, but depends on private implementation,
-duplicates round orchestration, and would need replacement when M3 arrives.
+duplicates round orchestration, and would need replacement for M3 integration.
 
 It is rejected because the small generic seam is less total machinery and is
 exactly the extension boundary ds4-py intends to provide.
@@ -165,6 +166,7 @@ Proposed initial layout:
 
 ```text
 satyrn-agent/
+├── AGENTS.md                  # devenv/uv workflow and quality policy
 ├── pyproject.toml
 ├── src/satyrn_agent/
 │   ├── __init__.py             # open, typed config and error exports
@@ -199,8 +201,8 @@ factory wrapper. On its first and only `session()` call it:
    through the generic ds4-py API; and
 5. returns the configured ds4-py `Session`, not a parallel session wrapper.
 
-M3 can pass that same session to `DS4Model`; no Satyrn adapter is needed in the
-model's request loop.
+M3 can pass that same session to `DS4Model(session, sampling=...)`; no Satyrn
+adapter is needed in the model's request loop.
 
 Illustrative typed configuration, with final names left to the builder:
 
@@ -288,7 +290,10 @@ The native adapter converts native return conventions immediately:
 ## 8. Generic ds4-py companion changes
 
 These changes are planned and reviewed in ds4-py, not silently implemented as
-part of the Satyrn package. They contain no DFlash policy.
+part of the Satyrn package. They contain no DFlash policy. Ownership of the
+work in sections 8.1–8.3 is unresolved: the Satyrn and ds4-py implementers must
+decide it with Roché before implementation. This spec does not assign that work
+to either side.
 
 ### 8.1 Decode-step selection
 
@@ -563,23 +568,35 @@ Use a small typed hierarchy rooted at `SatyrnError`:
 Messages name the operation, model/backend capability, and native error where
 available. Exception text is not a stable machine-readable schema.
 
-## 13. After ds4-py M3
+## 13. M3 harness integration
 
-The first slice must leave these integration points, but does not implement
-them:
+M3 is merged, but the first slice leaves these integration points to a later
+slice:
 
-- construct the default harness agent with the already configured ds4-py
-  session;
-- expose DFlash mode, drafter path, draft count, sampling overrides, and think
-  budget through the CLI and project settings;
-- add `/dflash` and think-budget commands through the TUI command registry;
-- publish DFlash state and acceptance rate through the status registry;
-- keep mutable capability settings in `session.state`, including the correct
-  `/new`, `/switch`, and fork behavior;
+- construct `DS4Model(session, sampling=...)` with the already configured ds4-py
+  session, then compose the existing default agent and `AgentRuntime` without a
+  second token loop;
+- extend `agent_cli.parser()` and `open_runtime()` to expose DFlash mode,
+  drafter path, draft count, sampling overrides, and think budget through the
+  CLI and project settings, and to open the configured Satyrn session;
+- add `/dflash` and think-budget commands through `TUI.commands` and
+  `SlashCommandRegistry.register()`;
+- publish DFlash state and acceptance rate with
+  `session.emit("status", key=..., text=...)`, which the M3 footer renders;
+- keep mutable capability settings in `session.state(key, factory)`: M3 closes
+  scoped state on `/new` and `/switch` and retains it on fork;
 - decide whether changing DFlash mode is allowed only between prompts and how
   a paused round is closed first;
-- add payload-support guards with M3/M4 persistence; and
-- integrate metrics with run telemetry only if the team chooses a schema then.
+- add payload-support guards for M3 save/switch and M4's remaining persistence
+  commands;
+- integrate metrics with run telemetry only if the team chooses a schema then;
+  and
+- preserve Roché's accepted tool-policy decision (ds4-py ADR 0002): interactive
+  and noninteractive agents run tools without per-command approval by default,
+  and there is no `--yolo` flag because there is no built-in approval policy to
+  bypass. Do not add an approval prompt or flag in this integration. An
+  extension may add its own policy through capability hooks such as
+  `before_tool_execute`; `--read-only` remains a separate workspace limit.
 
 No second front end or downstream persistence schema is implied by this list.
 
@@ -588,8 +605,18 @@ No second front end or downstream persistence schema is implied by this list.
 - Use current Python 3.14 typing syntax and `typing_extensions` where it
   improves the contract, including precise protocols, `Self`, `override`, and
   narrowed result types as appropriate.
-- Run strict `basedpyright` over `src/` and tests. Native ctypes callables are
-  wrapped immediately behind typed protocols; unchecked `Any` and `cast` are
+- Match ds4-py's quality tooling: use its Ruff lint/format and ty configuration,
+  pre-commit-compatible hooks run through `prek`, and CI quality gate, adjusted
+  only for this repository's paths and extras. Run the static checks over `src/`
+  and tests.
+- Port ds4-py's `AGENTS.md` workflow and policies into this repository, adjusted
+  only for Satyrn's paths, extras, and test suites: enter devenv before project
+  commands, synchronize locked dependencies and install hooks once, keep one
+  Python environment and hook runner, use safe fixes only, require narrow and
+  justified suppressions, and follow its standard-library typing and PEP 695
+  conventions.
+- Use `TypeIs`, never `TypeGuard`, for custom narrowing. Native ctypes callables
+  are wrapped immediately behind typed protocols; unchecked `Any` and `cast` are
   not an acceptable way to silence the native boundary.
 - Prefer frozen, slotted dataclasses for values, enums for closed modes, and
   explicit state types for the decode state machine.
@@ -668,9 +695,9 @@ translation rather than mocking that logic away.
 Run at minimum:
 
 ```bash
-uv run basedpyright src tests
-uv run pytest tests/abnormal
-uv run pytest tests/abnormal tests/e2e \
+uv run --frozen prek run --all-files --show-diff-on-failure
+uv run --frozen pytest tests/abnormal
+uv run --frozen pytest tests/abnormal tests/e2e \
   --cov=satyrn_agent --cov-branch --cov-report=term-missing \
   --cov-fail-under=100
 git diff --check
@@ -701,10 +728,10 @@ normal-path branches.
   think budget works through both plain and DFlash decode.
 - Metrics reconcile with committed streams; no M3 UI or persistence dependency
   has entered the first slice.
-- Strict typing, abnormal tests, the real E2E suite, and 100% line/branch
-  coverage pass on the documented machine.
-- The **After M3** section remains a separate later design/implementation
-  slice.
+- Ruff, ty, the complete pre-commit/prek static gate, abnormal tests, the real
+  E2E suite, and 100% line/branch coverage pass on the documented machine.
+- The **M3 harness integration** section remains a separate later
+  design/implementation slice.
 
 ## 17. Calls made and builder latitude
 
@@ -719,10 +746,10 @@ Calls made in this design, which the reviewer may challenge:
   records.
 - Coverage means both line and branch coverage for the new Satyrn package;
   ds4-py keeps its own test policy.
-- Strict `basedpyright` is the initial type gate.
+- Ruff, ty, and the pre-commit/prek static gate match ds4-py's quality tooling.
 
 The builder may choose exact internal helper names, exception wording,
 configuration keyword names, E2E prompt text and seeds, and small module
 boundaries. The builder may not weaken native/thread confinement, token/KV/RNG
-alignment, real-normal-path testing, or the M3 boundary without a new design
-decision.
+alignment, real-normal-path testing, or the boundary between the first slice and
+M3 harness integration without a new design decision.
