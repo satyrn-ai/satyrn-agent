@@ -291,7 +291,7 @@ The native adapter converts native return conventions immediately:
 
 These changes are planned and reviewed in ds4-py, not silently implemented as
 part of the Satyrn package. They contain no DFlash policy. Ownership of the
-work in sections 8.1–8.3 is unresolved: the Satyrn and ds4-py implementers must
+work in sections 8.1–8.5 is unresolved: the Satyrn and ds4-py implementers must
 decide it with Roché before implementation. This spec does not assign that work
 to either side.
 
@@ -389,11 +389,13 @@ Add a generic fatal-error operation accessible to a decode step through its
 owning `EngineWorker` when a native commit or cleanup failure leaves its state
 uncertain. The exact method name and error wording belong to the ds4-py builder.
 
-Once poisoned, the worker rejects every later operation that could reach native
-code, including rounds, sync/eval/rewind, checkpoints, snapshots, payload jobs,
-and extension callbacks, regardless of whether they arrive through the public
-facade, a submitted job, or `on_worker`. `Session.new()`, reset, switch, and fork
-do not clear the poisoned state or provide an implicit recovery path. The
+Once poisoned, the worker rejects every later ordinary operation that could reach
+native code, including rounds, sync/eval/rewind, checkpoints, snapshots, payload
+jobs, and extension callbacks, regardless of whether they arrive through the
+public facade, a submitted job, or `on_worker`. The only exceptions are the
+owner-driven `Engine.close()` and worker shutdown described below.
+`Session.new()`, reset, switch, and fork do not clear the poisoned state or
+provide an implicit recovery path. The
 original native error and any cleanup error retain their normal exception
 chaining.
 
