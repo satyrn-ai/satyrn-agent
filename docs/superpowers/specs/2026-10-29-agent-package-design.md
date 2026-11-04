@@ -382,6 +382,30 @@ order, including chunk-boundary and control-matcher cases. The Satyrn
 real-engine E2E suite is the downstream acceptance test for the combined
 wiring.
 
+### 8.5 Fatal-state poisoning
+
+Add a generic fatal-error operation accessible to a decode step through its
+`DecodeContext`. Unlike `SessionHandle.invalidate()`, this operation poisons the
+owning `EngineWorker` when a native commit or cleanup failure leaves its state
+uncertain. The exact method name and error wording belong to the ds4-py builder.
+
+Once poisoned, the worker rejects every later operation that could reach native
+code, including rounds, sync/eval/rewind, checkpoints, snapshots, payload jobs,
+and extension callbacks, regardless of whether they arrive through the public
+facade, a submitted job, or `on_worker`. `Session.new()`, reset, switch, and fork
+do not clear the poisoned state or provide an implicit recovery path. The
+original native error and any cleanup error retain their normal exception
+chaining.
+
+`Engine.close()` and worker shutdown remain available and release their owned
+session, snapshots, engine, and thread exactly once. Poisoning adds no second
+worker or native owner and never selects plain decode as recovery.
+
+Add an abnormal-path test that poisons a worker from a multi-token step after a
+simulated native failure. Prove that every later native-capable operation is
+rejected before entering the native double, that the original failure remains
+visible, and that engine cleanup still succeeds exactly once.
+
 ## 9. DFlash policy
 
 `DFlashMode` uses a `match` statement or an equivalent single dispatch point;
@@ -493,10 +517,11 @@ and then finishes or re-raises. A draft/verify setup failure before native
 state advances discards the overlay and restores the block-start RNG.
 
 If native commit or cleanup fails, canonical publication does not pretend to
-succeed. Chain the original and cleanup errors as applicable, invalidate or
-close the session, and forbid further native work on uncertain state. This is
-the explicit exception to alignment claims: a failed native operation is
-reported as unusable rather than as a valid prefix.
+succeed. Chain the original and cleanup errors as applicable and use the generic
+ds4-py poison operation from section 8.5 to forbid further native work on
+uncertain state; owner-driven engine cleanup remains available. This is the
+explicit exception to alignment claims: a failed native operation is reported as
+unusable rather than as a valid prefix.
 
 The ds4-py tentative transaction makes `LogitsView.position`, `think_tokens`,
 `sampled_tokens`, and parser state exact for each staged row. Canonical
@@ -688,7 +713,9 @@ unsupported capabilities. Include faults where an operation performs its side
 effect and then reports failure; a nonzero return must not cause cleanup to
 discard the last valid state or permit another native operation on uncertain
 state. Each test still checks the real Satyrn state-machine cleanup and error
-translation rather than mocking that logic away.
+translation rather than mocking that logic away. The native-failure cases
+exercise the section 8.5 poison contract and prove that cleanup remains possible
+without admitting any later native operation.
 
 ### 15.3 Gates
 
