@@ -5,6 +5,7 @@
 # Tests for tools/ds4-sync.sh.
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/ds4_test_helpers.sh
 source "$TEST_DIR/ds4_test_helpers.sh"
 
 # --- sync tests ---------------------------------------------------------------
@@ -27,13 +28,13 @@ test_sync_defaults_to_all_models() {
     want_alpha="$(_tree_id "$DS4_TREE_DIR" $'line1\ncommon\nalpha\n')"
     want_zebra="$(_tree_id "$DS4_TREE_DIR" $'line1\ncommon\nalpha\nzebra\n')"
     assert_eq "$want_common" \
-        "$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/common^{tree})" \
+        "$(git -C "$DS4_TREE_DIR" rev-parse "refs/ds4/common^{tree}")" \
         "all-models common boundary tree"
     assert_eq "$want_alpha" \
-        "$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/model/alpha^{tree})" \
+        "$(git -C "$DS4_TREE_DIR" rev-parse "refs/ds4/model/alpha^{tree}")" \
         "all-models alpha boundary tree"
     assert_eq "$want_zebra" \
-        "$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/model/zebra^{tree})" \
+        "$(git -C "$DS4_TREE_DIR" rev-parse "refs/ds4/model/zebra^{tree}")" \
         "all-models zebra boundary tree"
     assert_eq "$want_zebra" \
         "$(git -C "$DS4_TREE_DIR" rev-parse 'HEAD^{tree}')" \
@@ -70,7 +71,7 @@ test_sync_common_only() {
     local want_common
     want_common="$(_tree_id "$DS4_TREE_DIR" $'line1\ncommon\n')"
     assert_eq "$want_common" \
-        "$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/common^{tree})" \
+        "$(git -C "$DS4_TREE_DIR" rev-parse "refs/ds4/common^{tree}")" \
         "common-only boundary tree"
     assert_eq "$want_common" \
         "$(git -C "$DS4_TREE_DIR" rev-parse 'HEAD^{tree}')" \
@@ -113,10 +114,10 @@ test_sync_model_stops_at_editable_prefix() {
     want_common="$(_tree_id "$DS4_TREE_DIR" $'line1\ncommon\n')"
     want_alpha="$(_tree_id "$DS4_TREE_DIR" $'line1\ncommon\nalpha\n')"
     assert_eq "$want_common" \
-        "$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/common^{tree})" \
+        "$(git -C "$DS4_TREE_DIR" rev-parse "refs/ds4/common^{tree}")" \
         "alpha-prefix common boundary tree"
     assert_eq "$want_alpha" \
-        "$(git -C "$DS4_TREE_DIR" rev-parse refs/ds4/model/alpha^{tree})" \
+        "$(git -C "$DS4_TREE_DIR" rev-parse "refs/ds4/model/alpha^{tree}")" \
         "alpha-prefix alpha boundary tree"
     assert_eq "$want_alpha" \
         "$(git -C "$DS4_TREE_DIR" rev-parse 'HEAD^{tree}')" \
@@ -366,6 +367,8 @@ EOF
         "interrupted old-tree move preserved notes.txt bytes"
 }
 
+# The runner reads this registry after sourcing the module.
+# shellcheck disable=SC2034
 DS4_MODULE_TESTS=(
     test_sync_defaults_to_all_models
     test_sync_common_only

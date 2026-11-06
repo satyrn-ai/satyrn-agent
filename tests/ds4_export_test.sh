@@ -5,6 +5,7 @@
 # Tests for tools/ds4-export.sh.
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/ds4_test_helpers.sh
 source "$TEST_DIR/ds4_test_helpers.sh"
 
 # --- export tests --------------------------------------------------------------
@@ -584,6 +585,8 @@ test_export_help_prints_usage_without_changes() {
     }
 }
 
+# The runner reads this registry after sourcing the module.
+# shellcheck disable=SC2034
 DS4_MODULE_TESTS=(
     test_export_common_renumbers_real_range
     test_export_empty_model_list_fails_cleanly

@@ -12,6 +12,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     # ds4-check re-applies the patch series with `git am` inside pristine
     # clones. Git refuses to create those commits without a committer identity,
     # and GitHub-hosted runners ship no user.name/user.email configuration.
@@ -33,8 +34,9 @@ jobs:
         run: nix profile install --accept-flake-config nixpkgs#devenv
 
       - name: Bash syntax checks
-        run: |
-          devenv shell -- bash -c "for file in tools/*.sh tests/ds4_test_helpers.sh tests/ds4_*_test.sh; do bash -n \"\$file\"; done"
+        run: >-
+          devenv shell -- bash -c
+          "for file in tools/*.sh tests/ds4_test_helpers.sh tests/ds4_*_test.sh; do bash -n \"\$file\"; done"
 
       - name: Run shell suite
         run: devenv shell -- bash tests/ds4_tools_test.sh

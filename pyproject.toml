@@ -9,6 +9,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "prek==0.5.7",
   "pytest>=9.1.1",
   "ruff>=0.17.3",
   "ty==0.0.95",
@@ -78,9 +79,9 @@ lint.per-file-ignores."tests/**/*.py" = [
   "RUF002",  # Protocol examples require fullwidth vertical bars in docstrings.
   "S",       # Tests intentionally exercise subprocesses and unsafe boundaries.
   "SLF001",  # Tests can inspect private implementation state.
-  "TC001",    # Test fixtures can keep first-party runtime imports.
-  "TC002",    # Test fixtures can keep third-party runtime imports.
-  "TC003",    # Test fixtures can keep standard-library runtime imports.
+  "TC001",   # Test fixtures can keep first-party runtime imports.
+  "TC002",   # Test fixtures can keep third-party runtime imports.
+  "TC003",   # Test fixtures can keep standard-library runtime imports.
   "TID251",  # Dynamic test doubles can import Any; TypeGuard has a separate ban.
 ]
 lint.flake8-tidy-imports.banned-api."typing.Any".msg = "Use a precise type; Any requires an approved dynamic boundary."
