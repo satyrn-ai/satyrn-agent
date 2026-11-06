@@ -137,15 +137,17 @@ input = "tests/e2e/scenarios/schema.json"
 output = "tests/e2e/_generated/scenarios.py"
 input-file-type = "jsonschema"
 output-model-type = "typing.TypedDict"
-preset = "standard-py314-20261104"
+preset = "practical-py314-20261104"
 formatters = ["ruff-check", "ruff-format"]
 extra-fields = "forbid"
 ```
 
-The immutable preset is the latest Python 3.14 preset in the researched 0.90.0
-release. Run the recommender against the actual schema, review class-name and
-constraint effects, and record additional options rather than enabling every
-possible rule. Use Ruff for generated-code formatting and a prek
+The immutable practical preset is the latest Python 3.14 preset in the
+researched 0.90.0 release. It preserves schema-authored names, reuses models,
+and embeds schema descriptions, which are useful for a growing scenario DSL.
+Run the recommender from this practical preset against the actual schema, review
+class-name and constraint effects, and record additional options rather than
+enabling every possible rule. Use Ruff for generated-code formatting and a prek
 generation/check command to reject stale generated files.
 
 The checked-in JSON Schema provides the external document contract and prek
