@@ -146,7 +146,13 @@ class CtypesDFlashNative:
         top_k = C.c_int()
         function(engine_raw, C.byref(temperature), C.byref(top_k), C.byref(top_p), C.byref(min_p))
         values = (temperature.value, top_p.value, min_p.value)
-        if top_k.value < 0 or not all(math.isfinite(value) for value in values):
+        if (
+            top_k.value < 0
+            or not all(math.isfinite(value) for value in values)
+            or temperature.value < 0
+            or not 0 <= top_p.value <= 1
+            or not 0 <= min_p.value <= 1
+        ):
             raise DFlashError("ds4_engine_sampling_defaults", "invalid sampling defaults")
         return NativeSampling(float(temperature.value), int(top_k.value), float(top_p.value), float(min_p.value))
 

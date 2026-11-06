@@ -191,11 +191,26 @@ def test_sampling_defaults_return_immutable_python_values() -> None:
     assert result.min_p == 0.0
 
 
-def test_sampling_defaults_reject_invalid_native_values() -> None:
+@pytest.mark.parametrize(
+    ("index", "value"),
+    [
+        (0, -0.1),
+        (0, float("nan")),
+        (1, -1),
+        (2, -0.1),
+        (2, 1.1),
+        (3, -0.1),
+        (3, 1.1),
+    ],
+)
+def test_sampling_defaults_reject_invalid_native_values(index: int, value: float) -> None:
     bindings = FakeBindings()
 
     def defaults(raw: int, temperature: Any, top_k: Any, top_p: Any, min_p: Any) -> None:
-        C.cast(temperature, C.POINTER(C.c_float))[0] = float("nan")
+        pointers = [temperature, top_k, top_p, min_p]
+        for item, valid in zip(pointers, [0.6, 20, 0.95, 0.0], strict=True):
+            C.cast(item, C.POINTER(C.c_float if item is not top_k else C.c_int))[0] = valid
+        C.cast(pointers[index], C.POINTER(C.c_float if index != 1 else C.c_int))[0] = value
 
     bindings.functions["ds4_engine_sampling_defaults"] = defaults
     native = CtypesDFlashNative(bindings)

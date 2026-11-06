@@ -9,9 +9,7 @@ alignment assertion in `tests/conftest.py`.
 
 ```bash
 export SATYRN_TEST_MODEL=/path/to/dense-qwen35.gguf
-export SATYRN_TEST_MODEL_SHA256=<full target SHA-256>
 export SATYRN_TEST_DRAFTER=/path/to/matching-dflash.gguf
-export SATYRN_TEST_DRAFTER_SHA256=<full drafter SHA-256>
 export SATYRN_TEST_LIB=/path/to/patched/libds4.dylib
 ```
 
@@ -21,11 +19,16 @@ For the build/check workflow, also set:
 export SATYRN_TEST_DS4_SRC=/path/to/patched/ds4
 ```
 
-`tests/e2e/corpus.json` pins prompts, seeds, and the required model/drafter identity
-variables. It also maps each corpus case to the normal decode branches it is meant
-to reach. If a required branch is not reached on the documented machine, adjust the
-corpus and record the result; do not replace that branch with a mock or a coverage
-exclusion.
+`tests/e2e/corpus.json` pins prompts, seeds, expected native sampling defaults,
+and approved model/drafter SHA-256 and quantization values. The approved values
+are currently `null` because no model was available for this implementation run;
+fill them from the reviewed GGUFs before enabling live acceptance. An external
+hash environment variable cannot substitute for this repository identity check.
+
+The corpus also maps each case to normal decode branches and expected terminal
+reasons. Tests load it through typed validators and fail with corpus-adjustment
+diagnostics when a required branch is not reached. Do not replace that branch
+with a mock, a coverage exclusion, or a post-round skip.
 
 ## Run
 

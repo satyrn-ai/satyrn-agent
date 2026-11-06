@@ -3,11 +3,19 @@
   "target": {
     "architecture": "qwen35",
     "path_env": "SATYRN_TEST_MODEL",
-    "sha256_env": "SATYRN_TEST_MODEL_SHA256"
+    "sha256": null,
+    "quantization": null,
+    "sampling_defaults": {
+      "temperature": 0.6,
+      "top_k": 20,
+      "top_p": 0.95,
+      "min_p": 0.0
+    }
   },
   "drafter": {
     "path_env": "SATYRN_TEST_DRAFTER",
-    "sha256_env": "SATYRN_TEST_DRAFTER_SHA256"
+    "sha256": null,
+    "quantization": null
   },
   "cases": [
     {
@@ -40,6 +48,7 @@
       "seed": 1,
       "temperature": 0.0,
       "max_tokens": 96,
+      "expected_reason": "stop_token",
       "branches": [
         "ordinary-anchor-eval",
         "stop-token",
@@ -67,6 +76,7 @@
       "seed": 3,
       "temperature": 0.0,
       "max_tokens": 64,
+      "expected_reason": "tool_call_complete",
       "branches": [
         "tentative-parser-state",
         "tool-close-terminal-verdict",
@@ -80,8 +90,56 @@
       "temperature": 0.0,
       "max_tokens": 48,
       "stop_sequence": "beta",
+      "expected_reason": "stop_sequence",
       "branches": [
         "deferred-stop-publication",
+        "accepted-prefix-commit"
+      ]
+    },
+    {
+      "name": "zero-drafts",
+      "prompt": "Answer with one short token.",
+      "seed": 13,
+      "temperature": 0.0,
+      "max_tokens": 2,
+      "branches": [
+        "zero-drafts",
+        "bonus-anchor"
+      ]
+    },
+    {
+      "name": "parser-error",
+      "prompt": "Produce malformed tool syntax that cannot form a valid tool call.",
+      "seed": 17,
+      "temperature": 0.0,
+      "max_tokens": 64,
+      "expected_reason": "parser_error",
+      "branches": [
+        "parser-error",
+        "accepted-prefix-commit"
+      ]
+    },
+    {
+      "name": "context-reserve",
+      "prompt": "Repeat token transaction until the context reserve is reached.",
+      "seed": 19,
+      "temperature": 0.0,
+      "max_tokens": 4096,
+      "expected_reason": "context_exhausted",
+      "branches": [
+        "context-reserve",
+        "accepted-prefix-commit"
+      ]
+    },
+    {
+      "name": "cancellation",
+      "prompt": "Write a detailed explanation of token transactions.",
+      "seed": 23,
+      "temperature": 0.0,
+      "max_tokens": 96,
+      "expected_reason": "interrupted",
+      "branches": [
+        "cancellation-with-verify-open",
         "accepted-prefix-commit"
       ]
     }

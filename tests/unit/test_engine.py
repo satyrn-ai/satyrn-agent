@@ -163,6 +163,14 @@ def test_auto_with_zero_rows_uses_plain_step() -> None:
     assert isinstance(step, PlainStep)
 
 
+def test_on_without_drafter_is_rejected_by_policy_dispatch() -> None:
+    config = SatyrnConfig()
+    object.__setattr__(config, "dflash", DFlashMode.ON)
+
+    with pytest.raises(DFlashUnavailable, match="configured drafter"):
+        _select_step(PolicyNative(), config, 10, 20, "metal")
+
+
 def test_on_missing_binding_names_requirement() -> None:
     native = PolicyNative()
     native.missing = ("ds4_session_verify",)
@@ -243,6 +251,18 @@ def test_open_configures_public_session_and_close_once(monkeypatch: pytest.Monke
     assert fake_engine.fake_session.closed == 1
     wrapper.close()
     assert fake_engine.close_calls == 1
+
+
+def test_closed_wrapper_rejects_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = PolicyNative()
+    fake_engine = FakeEngine(cast("Native", FakeNative()))
+    monkeypatch.setattr(ds4py, "open", lambda *args, **kwargs: cast("Engine", fake_engine))
+    monkeypatch.setattr(engine_module, "CtypesDFlashNative", lambda native: policy)
+    wrapper = engine_module.open("target.gguf")
+    wrapper.close()
+
+    with pytest.raises(EngineError, match="closed"):
+        wrapper.session()
 
 
 def test_plain_session_has_no_dflash_metrics(monkeypatch: pytest.MonkeyPatch) -> None:

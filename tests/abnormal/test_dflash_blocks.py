@@ -6,6 +6,7 @@ from ds4py.engine.events import Event, Token
 
 from satyrn_agent.dflash import DFlashStep
 from tests.abnormal._decode_helpers import FakeDFlashNative, make_decode
+from tests.conftest import MetadataRecorder, SampleMetadata
 
 
 def test_anchor_stop_has_no_native_movement_or_staged_event() -> None:
@@ -82,6 +83,22 @@ def test_mismatch_keeps_only_accepted_prefix_and_replacement(
     assert fixture.transcript.tokens == expected
     assert fixture.session.position == len(expected)
     assert step.metrics.replacement_anchors == 1
+
+
+def test_later_rows_see_canonical_plus_staged_hook_metadata() -> None:
+    recorder = MetadataRecorder()
+    fixture = make_decode([10, 11, 12, 13], max_tokens=4, logits_hooks=[recorder])
+    native = FakeDFlashNative(fixture.session, [11, 12])
+    step = DFlashStep(native)
+
+    step.run(cast("SessionHandle", fixture.session), fixture.ctx)
+
+    assert recorder.calls == [
+        SampleMetadata(0, 0, (), None),
+        SampleMetadata(1, 0, (10,), None),
+        SampleMetadata(2, 0, (10, 11), None),
+        SampleMetadata(3, 0, (10, 11, 12), None),
+    ]
 
 
 def test_every_token_event_follows_its_native_commit() -> None:

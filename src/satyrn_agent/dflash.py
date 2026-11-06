@@ -121,10 +121,10 @@ class DFlashStep:
             try:
                 block.drafts = tuple(self._native.draft(session.raw, block.anchor, self._maximum))
                 self._native.verify(session.raw, block.anchor, block.drafts)
-            except BaseException:
+            except BaseException as error:  # noqa: BLE001 - Native graph failure can invalidate the checkpoint.
                 ctx.discard()
                 ctx.rng.value = block_start_rng
-                raise
+                ctx.poison(error)
             block.phase = _Phase.VERIFY_OPEN
             try:
                 outcome = self._scan_rows(session, ctx, block)

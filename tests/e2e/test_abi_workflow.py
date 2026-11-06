@@ -1,12 +1,15 @@
 import subprocess
 import sys
+import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from ds4py.abi.manifest import Manifest, manifest_path
 
 from satyrn_agent.bindings import BINDINGS
-from tests.conftest import LiveSettings
+from satyrn_agent.config import SatyrnConfig
+from tests.conftest import LiveSettings, assert_alignment, configured_session, observe_round, prepare_chat
 
 pytestmark = [pytest.mark.build, pytest.mark.live]
 
@@ -43,3 +46,12 @@ def test_build_check_manifest_and_load_workflow(live_settings: LiveSettings, tmp
         assert record.source == "satyrn"
         assert record.ok, f"{binding.name}: {record.message}"
         assert not record.required
+
+    built = replace(live_settings, lib=library)
+    config = SatyrnConfig(drafter_path=built.drafter)
+    with configured_session(built, config) as (wrapper, session):
+        assert wrapper.dflash_metrics is not None
+        for prompt in ("Say hello briefly.", "Say goodbye briefly."):
+            prepare_chat(session, prompt)
+            observation = observe_round(session, max_tokens=16, started=time.perf_counter())
+            assert_alignment(session, observation)

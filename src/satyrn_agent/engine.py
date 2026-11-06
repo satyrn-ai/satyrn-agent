@@ -37,6 +37,8 @@ def _select_step(  # noqa: PLR0911 - One policy dispatch keeps each capability r
     if config.dflash is DFlashMode.OFF:
         return PlainStep()
     if config.drafter_path is None:
+        if config.dflash is DFlashMode.ON:
+            raise DFlashUnavailable("DFlash requires a configured drafter")
         return PlainStep()
     if missing := native.missing_dflash:
         if config.dflash is DFlashMode.ON:
@@ -71,6 +73,8 @@ class SatyrnEngine:
         self._closed = False
 
     def session(self) -> Session:
+        if self._closed:
+            raise EngineError("engine is closed")
         if self._session is not None:
             raise EngineError("one session per engine")
         session = self._engine.session()

@@ -14,7 +14,7 @@ def run(fixture: DecodeFixture, native: FakeDFlashNative) -> None:
 
 
 @pytest.mark.parametrize("operation", ["draft", "verify"])
-def test_unadvanced_setup_failure_discards_overlay_and_restores_rng(operation: str) -> None:
+def test_setup_failure_poisons_without_publication(operation: str) -> None:
     poisoned: list[BaseException] = []
     fixture = make_decode([10], poisoned=poisoned)
     native = FakeDFlashNative(fixture.session, [11])
@@ -32,7 +32,7 @@ def test_unadvanced_setup_failure_discards_overlay_and_restores_rng(operation: s
     assert fixture.events == []
     assert fixture.ctx.staging is False
     assert fixture.ctx.rng.value == 1
-    assert poisoned == []
+    assert poisoned == [error]
 
 
 def test_select_failure_closes_verify_and_publishes_valid_prefix() -> None:
