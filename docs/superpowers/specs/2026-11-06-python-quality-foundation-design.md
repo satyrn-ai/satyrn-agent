@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Date | 2026-11-06 |
-| Status | Draft for review |
+| Status | Approved, with review amendments |
 | Branch | `build/python-quality-foundation` |
 | Stacked successor | `feat/agent-package` |
 | Related | `docs/superpowers/specs/2026-10-29-agent-package-design.md`; ds4-py PRs #8, #9, and #10 |
@@ -29,7 +29,7 @@ separate stacked branch, governed by the existing agent-package design.
 - Run Ruff, ty, ShellCheck, configuration validation, and repository hygiene
   checks through prek with a checked-in `.pre-commit-config.yaml`.
 - Add a frozen-lockfile CI quality job and retain the existing ds4 tools tests
-  and native build checks as separate jobs.
+  and native build checks in their existing `test` job, separate from `quality`.
 - Add timeouts, full-SHA Action pins, least-privilege permissions, and disabled
   persisted checkout credentials to `.github/workflows/ds4-tools.yml`.
 - Expand `AGENTS.md` and add focused development documentation without
@@ -55,7 +55,9 @@ separate stacked branch, governed by the existing agent-package design.
   quality branch.
 - Keep devenv + uv canonical on macOS and Linux. Enter devenv for project
   commands and prevent uv from downloading another interpreter.
-- Use Python 3.14 as the minimum version for type analysis.
+- Use Python 3.14 as the minimum version for type analysis. Pin
+  `languages.python.package = pkgs.python314` in `devenv.nix`; the locked
+  nixpkgs revision provides Python 3.14.7.
 - Keep mechanical formatting separate from behavioral fixes within the PR's
   commit history.
 - Preserve patch bytes, generated lockfiles, and existing ds4 command
@@ -94,7 +96,10 @@ rather than publishing an empty `satyrn_agent` package. `feat/agent-package`
 will add the actual `src/` package build configuration and public entry points.
 
 Use a development dependency group matching ds4-py's tool versions where
-applicable: Ruff, ty, prek, and pytest. Commit the resulting `uv.lock`. Use
+applicable: Ruff, ty, prek, and pytest. The configuration source is pinned to
+ds4-py commit `c93babb2bb7d4da6575c9a7c1f975f7aefe3b620`, the head of its
+quality-gates stack; the implementation plan copies the concrete settings rather
+than resolving a moving branch. Commit the resulting `uv.lock`. Use
 `uv sync --frozen` and `uv run --frozen` after the lockfile is created; dependency
 updates are deliberate lockfile changes, not side effects of checks.
 
@@ -105,15 +110,17 @@ preview-rule policy, formatter-conflict ignores, McCabe limit, safe fixes, and
 narrow per-file exceptions. Apply Ruff format and safe lint fixes to
 `tools/ds4-gguf-arch.py`. Do not use `--unsafe-fixes`.
 
-Configure ty for `tools`, `tests`, and `src` so the later package is covered
-without relaxing the gate. Set Python 3.14, warnings as errors, strict equality
-and generic narrowing, and ds4-py's explicit strict rules. Avoid enabling ty's
-known false-positive-prone rules wholesale.
+Configure ty initially for `tools` and `tests`. Add `src` in
+`feat/agent-package` when that directory exists, expanding rather than relaxing
+the gate; do not create a placeholder package in the quality PR. Set Python 3.14,
+warnings as errors, strict equality and generic narrowing, and ds4-py's explicit
+strict rules. Avoid enabling ty's known false-positive-prone rules wholesale.
 
 Adopt these typing policies in `AGENTS.md` and implementation:
 
 - Use standard-library `TypeIs` on Python 3.14; ban `TypeGuard` in both stdlib
-  and typing_extensions forms through a dedicated prek `pygrep` hook.
+  and typing_extensions forms through a dedicated prek `pygrep` hook scoped with
+  `types: [python]`, so documentation can name the prohibited API.
 - Prefer precise domain types, `TypedDict`, `Protocol`, generics, and `object`
   with runtime narrowing. Confine `Any` to reviewed dynamic boundaries.
 - Use lowercase `typing_extensions.sentinel`; use the sentinel object itself in
@@ -143,12 +150,13 @@ for project-locked Python commands. Include:
   general whitespace/hygiene checks;
 - GitHub workflow schema, required-timeout checks, and actionlint.
 
-Run ShellCheck over executable shell sources and shell test files. Use source
-annotations only where dynamic repository-root paths prevent ShellCheck from
-resolving a real sourced file. Do not globally disable source following or a
-whole warning category. If a finding exposes a runtime bug, reproduce it with a
-focused shell test before changing behavior; otherwise keep the correction
-mechanical.
+Run ShellCheck over executable shell sources and shell test files. Add
+`# shellcheck shell=bash` to the sourced, shebang-less `tools/ds4-lib.sh` so its
+Bash constructs are not misdiagnosed as POSIX `sh`. Use source annotations only
+where dynamic repository-root paths prevent ShellCheck from resolving a real
+sourced file. Do not globally disable source following or a whole warning
+category. If a finding exposes a runtime bug, reproduce it with a focused shell
+test before changing behavior; otherwise keep the correction mechanical.
 
 Exclude patch content and generated lockfiles from rewriting. Keep one prek
 entry point locally and in CI:
@@ -161,16 +169,21 @@ uv run --frozen prek run --all-files --show-diff-on-failure
 
 Add `.github/workflows/ci.yml` with a read-only, time-bounded `quality` job on
 Ubuntu. Use a full-SHA `actions/checkout` pin with `persist-credentials: false`,
-a full-SHA `astral-sh/setup-uv` pin with Python 3.14, and the frozen prek command.
+the same full-SHA `cachix/install-nix-action` and pinned devenv installation as
+the ds4 tools workflow, and run the frozen prek command through
+`devenv shell -- ...`. Do not use setup-uv to install a second interpreter.
+Install the devenv CLI from the exact NixOS/nixpkgs revision recorded in
+`devenv.lock`, rather than the ambient moving `nixpkgs` flake registry.
 
 Update `.github/workflows/ds4-tools.yml` without changing its test scope:
 
 - add `timeout-minutes` to every job;
 - pin every Action to a full commit SHA while retaining human-readable version
   comments;
+- pin the devenv CLI installation to the NixOS/nixpkgs revision in `devenv.lock`;
 - disable persisted checkout credentials for repository and ds4-py checkouts;
 - keep the existing shell syntax checks, 49-test shell suite, actionlint, ds4-py
-  checkout, and CPU build checks.
+  checkout, and CPU build checks in the existing single `test` job.
 
 The Python quality job is additive. Native builds and model-backed checks keep
 their current ownership and limitations.
