@@ -3,10 +3,15 @@ name = "satyrn-agent"
 version = "0.1.0"
 description = "Downstream Satyrn agent and ds4 patch tooling"
 requires-python = ">=3.14"
+dependencies = [
+  "typing-extensions>=4.16.0,<5",
+]
 
 [dependency-groups]
 dev = [
+  "pytest>=9.1.1",
   "ruff>=0.17.3",
+  "ty==0.0.95",
 ]
 
 [tool.uv]
@@ -14,5 +19,93 @@ package = false
 
 [tool.ruff]
 line-length = 120
+lint.select = [
+  "ANN",
+  "ASYNC",
+  "BLE",
+  "C90",
+  "complexity",
+  "correctness",
+  "DTZ",
+  "FBT",
+  "FURB",
+  "G",
+  "LOG",
+  "performance",
+  "PGH",
+  "PIE",
+  "PL",
+  "PT",
+  "PTH",
+  "PYI",
+  "RET",
+  "RSE",
+  "RUF",
+  "S",
+  "SIM",
+  "SLOT",
+  "style",
+  "suspicious",
+  "TC",
+  "TID",
+  "TRY",
+  "UP",
+  "YTT",
+]
+lint.ignore = [
+  "COM812", # The formatter owns trailing commas.
+  "E501",   # The formatter owns line wrapping.
+  "ISC001", # The formatter owns string concatenation layout.
+  "TRY003", # Domain exceptions carry their useful context at raise sites.
+]
 lint.explicit-preview-rules = true
+lint.per-file-ignores."tests/**/*.py" = [
+  "ANN401",  # Dynamic test doubles can require Any.
+  "DTZ001",  # Naive local-time fixtures are intentional.
+  "FBT",     # Boolean test fixtures are intentional.
+  "INP001",  # pytest does not require packages for test directories.
+  "N806",    # Model and class names can be uppercase in tests.
+  "PLC0415", # Local imports isolate optional test dependencies.
+  "PLC2701", # Tests can exercise private third-party imports.
+  "PLR0904", # Test classes can expose many test methods.
+  "PLR0913", # Test helpers can need many fixtures.
+  "PLR0915", # Scenario tests can be longer than production functions.
+  "PLR0917", # Test helpers can need many positional fixtures.
+  "PLR2004", # Expected protocol and payload values can be literals.
+  "PLR6301", # Test methods do not need to use self.
+  "PT018",   # Composite assertions keep protocol scenarios readable.
+  "RUF001",  # Fullwidth vertical bars are required protocol fixtures.
+  "RUF002",  # Protocol examples require fullwidth vertical bars in docstrings.
+  "S",       # Tests intentionally exercise subprocesses and unsafe boundaries.
+  "SLF001",  # Tests can inspect private implementation state.
+  "TC001",    # Test fixtures can keep first-party runtime imports.
+  "TC002",    # Test fixtures can keep third-party runtime imports.
+  "TC003",    # Test fixtures can keep standard-library runtime imports.
+  "TID251",  # Dynamic test doubles can import Any; TypeGuard has a separate ban.
+]
+lint.flake8-tidy-imports.banned-api."typing.Any".msg = "Use a precise type; Any requires an approved dynamic boundary."
+lint.mccabe.max-complexity = 15
 lint.preview = true
+
+[tool.ty]
+src.include = [ "tests", "tools" ]
+environment.python-version = "3.14"
+rules.blanket-ignore-comment = "error"
+rules.disjoint-cast = "error"
+rules.dynamic-function-decorator-return = "error"
+rules.invalid-legacy-positional-parameter = "error"
+rules.mismatched-sentinel-name = "error"
+rules.missing-override-decorator = "error"
+rules.missing-type-argument = "error"
+rules.possibly-unresolved-reference = "error"
+rules.redundant-cast = "error"
+rules.redundant-condition-strict = "error"
+rules.truthiness-test-of-none-union = "error"
+rules.unsound-assignment = "error"
+rules.unsound-return-statement = "error"
+rules.unsound-yield = "error"
+rules.unsupported-dynamic-base = "error"
+rules.unused-ignore-comment = "error"
+terminal.error-on-warning = true
+analysis.strict-equality-semantics = true
+analysis.strict-generic-narrowing = true
