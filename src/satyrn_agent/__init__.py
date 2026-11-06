@@ -1,6 +1,7 @@
 """Satyrn's downstream configuration for ds4-py."""
 
 from .config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
+from .engine import SatyrnEngine, open
 from .errors import ConfigurationError, DFlashError, DFlashUnavailable, SatyrnError
 
 __all__ = [
@@ -10,6 +11,8 @@ __all__ = [
     "DFlashUnavailable",
     "SamplingOverrides",
     "SatyrnConfig",
+    "SatyrnEngine",
     "SatyrnError",
     "ThinkBudgetConfig",
+    "open",
 ]
