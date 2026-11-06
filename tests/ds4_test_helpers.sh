@@ -8,6 +8,7 @@
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/.." && pwd)"
 
+# shellcheck source=tools/ds4-lib.sh
 source "$REPO_ROOT/tools/ds4-lib.sh"
 
 # Run every test module in a private temp tree and keep Git isolated from user

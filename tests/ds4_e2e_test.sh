@@ -19,6 +19,7 @@ set -euo pipefail
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$E2E_DIR/.." && pwd)"
 
+# shellcheck source=tools/ds4-lib.sh
 source "$REPO_ROOT/tools/ds4-lib.sh"
 
 # The gate materializes and builds inside an isolated scratch root so it can

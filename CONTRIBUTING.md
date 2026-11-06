@@ -22,4 +22,3 @@ Next steps:
 - View our Code of Conduct.
 - Follow issues on the repo.
 - Communicate with us on Discord.
-

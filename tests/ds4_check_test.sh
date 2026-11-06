@@ -5,6 +5,7 @@
 # Tests for tools/ds4-check.sh.
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/ds4_test_helpers.sh
 source "$TEST_DIR/ds4_test_helpers.sh"
 
 # --- check tests --------------------------------------------------------------
@@ -308,6 +309,8 @@ test_check_rejects_invalid_arguments() {
     }
 }
 
+# The runner reads this registry after sourcing the module.
+# shellcheck disable=SC2034
 DS4_MODULE_TESTS=(
     test_check_default_covers_common_every_prefix_and_full_tree
     test_check_selected_target

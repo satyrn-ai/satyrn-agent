@@ -7,6 +7,7 @@
 # not require a real model or a ds4-py checkout.
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/ds4_test_helpers.sh
 source "$TEST_DIR/ds4_test_helpers.sh"
 
 # --- devenv entry-point tests -------------------------------------------------
@@ -246,6 +247,8 @@ EOF
     }
 }
 
+# The runner reads this registry after sourcing the module.
+# shellcheck disable=SC2034
 DS4_MODULE_TESTS=(
     test_devenv_entry_points_show_help
     test_e2e_requires_external_ds4py

@@ -6,6 +6,7 @@
 # boundaries and stop-model selection, plus offline cache and state helpers.
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/ds4_test_helpers.sh
 source "$TEST_DIR/ds4_test_helpers.sh"
 
 # --- discovery and pin tests --------------------------------------------------
@@ -20,9 +21,13 @@ test_load_pin_requires_exact_url_and_commit() {
     # kept verbatim and never executed.
     local pin="$TMP_ROOT/malicious.pin"
     local marker="$TMP_ROOT/pin-executed"
+    # The fixture must contain literal command-substitution text.
+    # shellcheck disable=SC2016
     local want_commit="1234567890abcdef\$(touch $marker)"
     {
         printf 'UPSTREAM_URL=https://example.invalid/ds4.git\n'
+        # This line writes the same literal non-executing fixture.
+        # shellcheck disable=SC2016
         printf 'UPSTREAM_COMMIT=1234567890abcdef$(touch %s)\n' "$marker"
     } > "$pin"
 
@@ -157,15 +162,15 @@ test_apply_target_builds_common_and_ordered_prefix() {
 
     local want_tree
     want_tree="$(_tree_id "$tree" $'line1\ncommon\n')"
-    assert_eq "$want_tree" "$(git -C "$tree" rev-parse refs/ds4/common^{tree})" \
+    assert_eq "$want_tree" "$(git -C "$tree" rev-parse "refs/ds4/common^{tree}")" \
         "common boundary tree"
     want_tree="$(_tree_id "$tree" $'line1\ncommon\nalpha\n')"
     assert_eq "$want_tree" \
-        "$(git -C "$tree" rev-parse refs/ds4/model/alpha^{tree})" \
+        "$(git -C "$tree" rev-parse "refs/ds4/model/alpha^{tree}")" \
         "alpha boundary tree"
     want_tree="$(_tree_id "$tree" $'line1\ncommon\nalpha\nzebra\n')"
     assert_eq "$want_tree" \
-        "$(git -C "$tree" rev-parse refs/ds4/model/zebra^{tree})" \
+        "$(git -C "$tree" rev-parse "refs/ds4/model/zebra^{tree}")" \
         "zebra boundary tree"
     assert_eq "$want_tree" "$(git -C "$tree" rev-parse 'HEAD^{tree}')" \
         "final HEAD tree"
@@ -210,7 +215,7 @@ test_apply_target_stops_at_common() {
     local want_tree
     want_tree="$(_tree_id "$TMP_ROOT/stop-common-tree" $'line1\ncommon\n')"
     assert_eq "$want_tree" \
-        "$(git -C "$TMP_ROOT/stop-common-tree" rev-parse refs/ds4/common^{tree})" \
+        "$(git -C "$TMP_ROOT/stop-common-tree" rev-parse "refs/ds4/common^{tree}")" \
         "common boundary tree"
     assert_eq "$want_tree" \
         "$(git -C "$TMP_ROOT/stop-common-tree" rev-parse 'HEAD^{tree}')" \
@@ -241,11 +246,11 @@ test_apply_target_stops_at_model() {
     local want_common want_alpha
     want_common="$(_tree_id "$TMP_ROOT/stop-model-tree" $'line1\ncommon\n')"
     assert_eq "$want_common" \
-        "$(git -C "$TMP_ROOT/stop-model-tree" rev-parse refs/ds4/common^{tree})" \
+        "$(git -C "$TMP_ROOT/stop-model-tree" rev-parse "refs/ds4/common^{tree}")" \
         "common boundary tree"
     want_alpha="$(_tree_id "$TMP_ROOT/stop-model-tree" $'line1\ncommon\nalpha\n')"
     assert_eq "$want_alpha" \
-        "$(git -C "$TMP_ROOT/stop-model-tree" rev-parse refs/ds4/model/alpha^{tree})" \
+        "$(git -C "$TMP_ROOT/stop-model-tree" rev-parse "refs/ds4/model/alpha^{tree}")" \
         "alpha boundary tree"
     assert_eq "$want_alpha" \
         "$(git -C "$TMP_ROOT/stop-model-tree" rev-parse 'HEAD^{tree}')" \
@@ -278,7 +283,7 @@ test_apply_target_uses_global_stop_model() {
     local want_alpha
     want_alpha="$(_tree_id "$TMP_ROOT/global-stop-tree" $'line1\ncommon\nalpha\n')"
     assert_eq "$want_alpha" \
-        "$(git -C "$TMP_ROOT/global-stop-tree" rev-parse refs/ds4/model/alpha^{tree})" \
+        "$(git -C "$TMP_ROOT/global-stop-tree" rev-parse "refs/ds4/model/alpha^{tree}")" \
         "global stop alpha boundary tree"
 
     if _ref_exists "$TMP_ROOT/global-stop-tree" refs/ds4/model/zebra; then
@@ -290,6 +295,8 @@ test_apply_target_uses_global_stop_model() {
 test_target_stop_model_valid_empty_common_unknown() {
     local patches="$TMP_ROOT/stop-model-cases-patches"
     mkdir -p "$patches/common" "$patches/alpha" "$patches/zebra"
+    # The sourced library reads this fixture path.
+    # shellcheck disable=SC2034
     DS4_PATCHES_DIR="$patches"
     ds4_model_names
 
@@ -394,6 +401,8 @@ test_state_write_accepts_explicit_exported_head() {
         "explicit EXPORTED_HEAD override"
 }
 
+# The runner reads this registry after sourcing the module.
+# shellcheck disable=SC2034
 DS4_MODULE_TESTS=(
     test_load_pin_requires_exact_url_and_commit
     test_model_names_use_c_locale_order

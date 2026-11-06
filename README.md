@@ -39,6 +39,9 @@ three tool entry points. After cloning:
 direnv allow    # or: devenv shell
 ```
 
+See [docs/development.md](docs/development.md) for locked Python dependencies,
+the prek quality gate, ShellCheck, and portable regression tests.
+
 The commands below are available inside the devenv shell and through
 `devenv shell -- <command>`.
 

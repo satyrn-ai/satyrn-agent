@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # tools/ds4-lib.sh
 #
 # Shared primitives for the ds4 patch-series tools (ds4-sync, ds4-export,
@@ -287,6 +288,8 @@ ds4_state_write() {
     mv -f "$tmp" "$state_file" || ds4_die "failed to move state file into place"
 }
 
+# State values are outputs consumed by this library's callers.
+# shellcheck disable=SC2034
 ds4_state_read() {
     local tree="$1"
     local state_file="$tree/.git/ds4-state"

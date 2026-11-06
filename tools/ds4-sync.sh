@@ -18,6 +18,7 @@
 set -euo pipefail
 
 _DS4_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/ds4-lib.sh
 source "$_DS4_LIB_DIR/ds4-lib.sh"
 
 DS4_TREE_DIR="${DS4_TREE_DIR:-$DS4_REPO_ROOT/.ds4/tree}"

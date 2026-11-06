@@ -8,33 +8,50 @@ It parses the GGUF metadata keys and prints the architecture string on stdout.
 Usage: ds4-gguf-arch.py MODEL.gguf
 """
 
+from __future__ import annotations
+
 import struct
 import sys
+from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _UINT8, _INT8, _UINT16, _INT16, _UINT32, _INT32 = range(6)
 _FLOAT32, _BOOL, _STRING, _ARRAY = 6, 7, 8, 9
 _UINT64, _INT64, _FLOAT64 = 10, 11, 12
 
+_EXPECTED_ARGC = 2
+
 _TYPE_SIZES = {
-    _UINT8: 1, _INT8: 1, _UINT16: 2, _INT16: 2,
-    _UINT32: 4, _INT32: 4, _FLOAT32: 4, _BOOL: 1,
-    _UINT64: 8, _INT64: 8, _FLOAT64: 8,
+    _UINT8: 1,
+    _INT8: 1,
+    _UINT16: 2,
+    _INT16: 2,
+    _UINT32: 4,
+    _INT32: 4,
+    _FLOAT32: 4,
+    _BOOL: 1,
+    _UINT64: 8,
+    _INT64: 8,
+    _FLOAT64: 8,
 }
 
 
-def _read_exact(fp, n):
+def _read_exact(fp: BinaryIO, n: int) -> bytes:
     data = fp.read(n)
     if len(data) != n:
         raise ValueError("truncated GGUF file")
     return data
 
 
-def _read_string(fp):
+def _read_string(fp: BinaryIO) -> str:
     (length,) = struct.unpack("<Q", _read_exact(fp, 8))
     return _read_exact(fp, length).decode("utf-8", "replace")
 
 
-def _skip_value(fp, value_type):
+def _skip_value(fp: BinaryIO, value_type: int) -> None:
     if value_type == _STRING:
         (length,) = struct.unpack("<Q", _read_exact(fp, 8))
         _read_exact(fp, length)
@@ -56,11 +73,11 @@ def _skip_value(fp, value_type):
         _read_exact(fp, size)
 
 
-def main(argv):
-    if len(argv) != 2:
+def main(argv: Sequence[str]) -> int:
+    if len(argv) != _EXPECTED_ARGC:
         print("usage: ds4-gguf-arch.py MODEL.gguf", file=sys.stderr)
         return 2
-    with open(argv[1], "rb") as fp:
+    with Path(argv[1]).open("rb") as fp:
         if _read_exact(fp, 4) != b"GGUF":
             raise ValueError("not a GGUF file")
         _read_exact(fp, 4)  # version
