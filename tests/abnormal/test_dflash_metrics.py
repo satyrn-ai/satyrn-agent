@@ -1,11 +1,11 @@
 from typing import cast
 
 import pytest
-from _decode_helpers import FakeDFlashNative, make_decode
 from ds4py._native.protocol import SessionHandle
 
 from satyrn_agent.dflash import DFlashMetrics, DFlashStep
 from satyrn_agent.errors import DFlashError
+from tests.abnormal._decode_helpers import FakeDFlashNative, make_decode
 
 
 def test_empty_metrics_have_zero_acceptance_rate() -> None:

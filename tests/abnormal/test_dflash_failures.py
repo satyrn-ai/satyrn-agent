@@ -1,12 +1,12 @@
 from typing import cast
 
 import pytest
-from _decode_helpers import DecodeFixture, FakeDFlashNative, make_decode
 from ds4py._native.protocol import SessionHandle
 from ds4py.engine.logits import LogitsView
 
 from satyrn_agent.dflash import DFlashStep
 from satyrn_agent.errors import DFlashError
+from tests.abnormal._decode_helpers import DecodeFixture, FakeDFlashNative, make_decode
 
 
 def run(fixture: DecodeFixture, native: FakeDFlashNative) -> None:

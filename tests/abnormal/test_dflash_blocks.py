@@ -1,11 +1,11 @@
 from typing import cast
 
 import pytest
-from _decode_helpers import FakeDFlashNative, make_decode
 from ds4py._native.protocol import SessionHandle
 from ds4py.engine.events import Event, Token
 
 from satyrn_agent.dflash import DFlashStep
+from tests.abnormal._decode_helpers import FakeDFlashNative, make_decode
 
 
 def test_anchor_stop_has_no_native_movement_or_staged_event() -> None:

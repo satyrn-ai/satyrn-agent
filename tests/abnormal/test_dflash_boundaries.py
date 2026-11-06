@@ -2,11 +2,11 @@ from collections.abc import Callable
 from typing import cast
 
 import pytest
-from _decode_helpers import DecodeFixture, FakeDFlashNative, make_decode
 from ds4py._native.protocol import SessionHandle
 from ds4py.engine.decode import Verdict
 
 from satyrn_agent.dflash import DFlashStep
+from tests.abnormal._decode_helpers import DecodeFixture, FakeDFlashNative, make_decode
 
 
 def cancel_at(true_calls: set[int]) -> Callable[[], bool]:

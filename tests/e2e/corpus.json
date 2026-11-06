@@ -1,0 +1,89 @@
+{
+  "format_version": 1,
+  "target": {
+    "architecture": "qwen35",
+    "path_env": "SATYRN_TEST_MODEL",
+    "sha256_env": "SATYRN_TEST_MODEL_SHA256"
+  },
+  "drafter": {
+    "path_env": "SATYRN_TEST_DRAFTER",
+    "sha256_env": "SATYRN_TEST_DRAFTER_SHA256"
+  },
+  "cases": [
+    {
+      "name": "greedy-parity",
+      "prompt": "Explain speculative decoding in two concise sentences.",
+      "seed": 1,
+      "temperature": 0.0,
+      "max_tokens": 32,
+      "branches": [
+        "anchor",
+        "matching-draft",
+        "mismatch-or-bonus",
+        "native-commit-publication"
+      ]
+    },
+    {
+      "name": "seeded-parity",
+      "prompt": "List three properties of a reliable token transaction.",
+      "seed": 7,
+      "temperature": 0.6,
+      "max_tokens": 40,
+      "branches": [
+        "seeded-rng-continuation",
+        "canonical-plus-staged-sampling"
+      ]
+    },
+    {
+      "name": "limit-and-stop",
+      "prompt": "Write a short answer and finish normally.",
+      "seed": 1,
+      "temperature": 0.0,
+      "max_tokens": 96,
+      "branches": [
+        "ordinary-anchor-eval",
+        "stop-token",
+        "max-tokens"
+      ]
+    },
+    {
+      "name": "think-budget",
+      "prompt": "Think briefly about why native commit must precede token publication.",
+      "seed": 11,
+      "temperature": 0.0,
+      "max_tokens": 64,
+      "think_budget": {
+        "max_tokens": 2,
+        "bias": 5.0
+      },
+      "branches": [
+        "think-budget-every-row",
+        "soft-bias-without-injection"
+      ]
+    },
+    {
+      "name": "tool-close",
+      "prompt": "Call the weather tool for Tokyo, then stop after the tool call.",
+      "seed": 3,
+      "temperature": 0.0,
+      "max_tokens": 64,
+      "branches": [
+        "tentative-parser-state",
+        "tool-close-terminal-verdict",
+        "discarded-tail"
+      ]
+    },
+    {
+      "name": "stop-sequence",
+      "prompt": "Output alpha then beta.",
+      "seed": 5,
+      "temperature": 0.0,
+      "max_tokens": 48,
+      "stop_sequence": "beta",
+      "branches": [
+        "deferred-stop-publication",
+        "accepted-prefix-commit"
+      ]
+    }
+  ]
+}
