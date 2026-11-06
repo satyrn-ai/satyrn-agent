@@ -64,6 +64,10 @@ lint.ignore = [
   "TRY003", # Domain exceptions carry their useful context at raise sites.
 ]
 lint.explicit-preview-rules = true
+lint.per-file-ignores."src/satyrn_agent/_native.py" = [
+  "ANN401", # ctypes signatures remain dynamic at the native boundary.
+  "TID251", # Any is isolated to reviewed native signatures.
+]
 lint.per-file-ignores."tests/**/*.py" = [
   "ANN401",  # Dynamic test doubles can require Any.
   "DTZ001",  # Naive local-time fixtures are intentional.
