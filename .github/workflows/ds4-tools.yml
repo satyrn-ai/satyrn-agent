@@ -21,17 +21,21 @@ jobs:
       GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
     steps:
       - name: Check out satyrn-agent
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771 # v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
 
       - name: Install devenv
-        run: nix profile install --accept-flake-config nixpkgs#devenv
+        run: >-
+          nix profile add --accept-flake-config
+          "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30#devenv"
 
       - name: Bash syntax checks
         run: >-
@@ -45,8 +49,9 @@ jobs:
         run: devenv shell -- actionlint .github/workflows/ds4-tools.yml
 
       - name: Check out ds4-py at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           repository: rochecompaan/ds4-py
           ref: f0e2118629c315e835435c82c973638e6f9e49bc
           path: .ds4/ds4-py
