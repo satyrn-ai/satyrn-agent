@@ -79,6 +79,7 @@ class _RowOutcome:
     pending: _PendingAnchor | None = None
     replacement: bool = False
     stop: _PendingAnchor | None = None
+    interrupted: bool = False
 
 
 class DFlashStep:
@@ -109,9 +110,11 @@ class DFlashStep:
             ctx.begin_staging()
             verdict = ctx.stage(block.anchor, ctx.accept(block.anchor))
             if verdict is Verdict.STOP_AFTER:
-                session.eval(block.anchor)
-                ctx.publish()
-                self._metrics.committed(0, 0, replacement=False, discarded=0)
+                self._eval_and_publish(session, ctx, block)
+                return
+            if ctx.cancelled():
+                self._eval_and_publish(session, ctx, block)
+                ctx.finish("interrupted")
                 return
 
             block.drafts = tuple(self._native.draft(session.raw, block.anchor, self._maximum))
@@ -123,6 +126,11 @@ class DFlashStep:
             if outcome.stop is not None:
                 ctx.accept(outcome.stop.token)
                 return
+            if outcome.interrupted:
+                if pending is not None:
+                    ctx.rng.value = pending.before_rng
+                ctx.finish("interrupted")
+                return
 
             if ctx.reason is not None:
                 if pending is not None:
@@ -131,6 +139,14 @@ class DFlashStep:
 
         if pending is not None and ctx.cancelled() and not ctx.finalized:
             ctx.rng.value = pending.before_rng
+        if ctx.cancelled() and ctx.reason is None:
+            ctx.finish("interrupted")
+
+    def _eval_and_publish(self, session: SessionHandle, ctx: DecodeContext, block: _BlockState) -> None:
+        session.eval(block.anchor)
+        ctx.publish()
+        block.phase = _Phase.IDLE
+        self._metrics.committed(0, 0, replacement=False, discarded=0)
 
     def _anchor(self, session: SessionHandle, ctx: DecodeContext) -> _PendingAnchor:
         before = ctx.rng.value
@@ -154,15 +170,19 @@ class DFlashStep:
         block: _BlockState,
     ) -> _RowOutcome:
         for row, draft in enumerate((*block.drafts, None)):
+            if ctx.cancelled():
+                return _RowOutcome(interrupted=True)
             self._native.select(session.raw, row)
             candidate = self._sample_row(session, ctx)
             if ctx.is_stop(candidate.token):
                 return _RowOutcome(stop=candidate)
+            if ctx.cancelled():
+                return _RowOutcome(candidate, interrupted=True)
             if draft is None or candidate.token != draft:
                 return _RowOutcome(candidate, replacement=draft is not None)
             verdict = ctx.stage(candidate.token, ctx.accept(candidate.token))
             block.accepted_drafts += 1
-            if verdict is Verdict.STOP_AFTER:
+            if verdict is Verdict.STOP_AFTER or ctx.reason is not None:
                 return _RowOutcome()
         return _RowOutcome()
 
