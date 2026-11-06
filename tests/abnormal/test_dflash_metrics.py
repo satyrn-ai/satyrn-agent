@@ -8,6 +8,15 @@ from satyrn_agent.errors import DFlashError
 from tests.abnormal._decode_helpers import FakeDFlashNative, make_decode
 
 
+def test_step_rejects_invalid_constructor_bounds() -> None:
+    fixture = make_decode([])
+    native = FakeDFlashNative(fixture.session)
+    with pytest.raises(ValueError, match="draft_tokens"):
+        DFlashStep(native, draft_tokens=-1)
+    with pytest.raises(ValueError, match="verify_rows"):
+        DFlashStep(native, verify_rows=0)
+
+
 def test_empty_metrics_have_zero_acceptance_rate() -> None:
     fixture = make_decode([])
     native = FakeDFlashNative(fixture.session)

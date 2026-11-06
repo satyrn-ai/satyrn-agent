@@ -143,6 +143,16 @@ def test_auto_with_non_metal_backend_uses_plain_step() -> None:
     assert isinstance(step, PlainStep)
 
 
+def test_auto_without_loaded_drafter_uses_plain_step() -> None:
+    native = PolicyNative()
+    native.available = False
+    config = SatyrnConfig(drafter_path=Path("draft.gguf"))
+
+    step = _select_step(native, config, 10, 20, "metal")
+
+    assert isinstance(step, PlainStep)
+
+
 def test_auto_with_zero_rows_uses_plain_step() -> None:
     native = PolicyNative()
     native.rows = 0

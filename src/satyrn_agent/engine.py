@@ -37,8 +37,6 @@ def _select_step(  # noqa: PLR0911 - One policy dispatch keeps each capability r
     if config.dflash is DFlashMode.OFF:
         return PlainStep()
     if config.drafter_path is None:
-        if config.dflash is DFlashMode.ON:
-            raise DFlashUnavailable("DFlash requires a configured drafter")
         return PlainStep()
     if missing := native.missing_dflash:
         if config.dflash is DFlashMode.ON:

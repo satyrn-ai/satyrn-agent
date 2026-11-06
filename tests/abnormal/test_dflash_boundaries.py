@@ -4,6 +4,8 @@ from typing import cast
 import pytest
 from ds4py._native.protocol import SessionHandle
 from ds4py.engine.decode import Verdict
+from ds4py.engine.logits import LogitsView
+from ds4py.errors import EngineError
 
 from satyrn_agent.dflash import DFlashStep
 from tests.abnormal._decode_helpers import DecodeFixture, FakeDFlashNative, make_decode
@@ -104,6 +106,69 @@ def test_cancellation_after_unused_candidate_restores_its_rng(
     assert fixture.transcript.tokens == expected_tokens
     assert fixture.ctx.rng.value == expected_rng
     assert fixture.ctx.reason == "interrupted"
+
+
+def test_pre_finalized_context_is_a_noop() -> None:
+    fixture = make_decode([])
+    native = FakeDFlashNative(fixture.session)
+    fixture.ctx.finish("done")
+
+    run(fixture, native)
+
+    assert fixture.ctx.reason == "done"
+    assert native.calls == []
+
+
+def test_cancellation_before_first_anchor_finishes_without_pending() -> None:
+    fixture = make_decode([], cancelled=lambda: True)
+    native = FakeDFlashNative(fixture.session)
+
+    run(fixture, native)
+
+    assert fixture.ctx.reason == "interrupted"
+    assert fixture.transcript.tokens == ()
+    assert native.calls == []
+
+
+def test_negative_anchor_sample_fails_before_native_work() -> None:
+    fixture = make_decode([-1])
+    native = FakeDFlashNative(fixture.session, [11])
+
+    with pytest.raises(EngineError, match="cannot sample DFlash anchor"):
+        run(fixture, native)
+
+    assert fixture.transcript.tokens == ()
+    assert native.calls == []
+
+
+def test_cancellation_after_commit_restores_unused_pending_anchor() -> None:
+    fixture = make_decode([10, 99], cancelled=cancel_at({5, 6, 7}))
+    native = FakeDFlashNative(fixture.session, [11])
+
+    run(fixture, native)
+
+    assert fixture.transcript.tokens == (10,)
+    assert fixture.ctx.rng.value == 2
+    assert fixture.ctx.reason == "interrupted"
+
+
+def test_terminal_reason_during_mismatch_restores_pending_rng() -> None:
+    calls = 0
+
+    def hook(view: LogitsView) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            fixture.ctx.finish("budget")
+
+    fixture = make_decode([10, 99], logits_hooks=[hook])
+    native = FakeDFlashNative(fixture.session, [11])
+
+    run(fixture, native)
+
+    assert fixture.transcript.tokens == (10,)
+    assert fixture.ctx.rng.value == 2
+    assert fixture.ctx.reason == "budget"
 
 
 def test_staged_terminal_verdict_prevents_later_row_sampling() -> None:

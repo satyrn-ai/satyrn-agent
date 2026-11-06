@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -73,6 +74,13 @@ def test_think_budget_rejects_non_positive_or_boolean_tokens(value: int | bool) 
 def test_think_budget_rejects_non_positive_non_finite_or_boolean_bias(value: float | bool) -> None:
     with pytest.raises((TypeError, ValueError), match="bias"):
         ThinkBudgetConfig(max_tokens=10, bias=value)
+
+
+def test_config_rejects_wrong_enum_and_path_types() -> None:
+    with pytest.raises(ValueError, match="DFlashMode"):
+        SatyrnConfig(dflash=cast("DFlashMode", object()))
+    with pytest.raises(TypeError, match="drafter_path"):
+        SatyrnConfig(drafter_path=cast("Path", object()))
 
 
 def test_on_requires_drafter_before_native_open() -> None:

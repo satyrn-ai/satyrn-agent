@@ -147,9 +147,9 @@ class DFlashStep:
                     ctx.rng.value = pending.before_rng
                 return
 
-        if pending is not None and ctx.cancelled() and not ctx.finalized:
-            ctx.rng.value = pending.before_rng
-        if ctx.cancelled() and ctx.reason is None:
+        if ctx.cancelled():
+            if pending is not None:
+                ctx.rng.value = pending.before_rng
             ctx.finish("interrupted")
 
     def _eval_and_publish(self, session: SessionHandle, ctx: DecodeContext, block: _BlockState) -> None:
@@ -170,23 +170,19 @@ class DFlashStep:
             raise EngineError("cannot sample DFlash anchor: the session state is not valid; sync first")
         return _PendingAnchor(token, before, ctx.rng.value)
 
-    def _sample_row(self, session: SessionHandle, ctx: DecodeContext) -> _PendingAnchor:
-        candidate = self._anchor(session, ctx)
-        if candidate.token < 0:
-            raise EngineError("cannot sample DFlash verify row")
-        return candidate
-
     def _scan_rows(
         self,
         session: SessionHandle,
         ctx: DecodeContext,
         block: _BlockState,
     ) -> _RowOutcome:
-        for row, draft in enumerate((*block.drafts, None)):
+        row = 0
+        while True:
+            draft = block.drafts[row] if row < len(block.drafts) else None
             if ctx.cancelled():
                 return _RowOutcome(interrupted=True)
             self._native.select(session.raw, row)
-            candidate = self._sample_row(session, ctx)
+            candidate = self._anchor(session, ctx)
             if ctx.is_stop(candidate.token):
                 return _RowOutcome(stop=candidate)
             if ctx.cancelled():
@@ -197,7 +193,7 @@ class DFlashStep:
             block.accepted_drafts += 1
             if verdict is Verdict.STOP_AFTER or ctx.reason is not None:
                 return _RowOutcome()
-        return _RowOutcome()
+            row += 1
 
     def _commit_and_publish(
         self,
