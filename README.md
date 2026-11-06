@@ -8,7 +8,13 @@ decode).
 
 ## Development status
 
-Current status: patch-series tooling. `ds4-sync`, `ds4-export`, and
+Current status: patch-series tooling and the initial typed `satyrn_agent`
+package. The package implements optional DFlash bindings, session policy,
+native sampling defaults, a soft think budget, and host-driven speculative
+decode. Real Metal/GGUF acceptance is a separate explicit gate; portable tests
+do not establish live parity.
+
+`ds4-sync`, `ds4-export`, and
 `ds4-check` are registered as devenv commands and also run standalone from
 `tools/`. The patch series is now the per-model layout: `patches/common/`
 (model-independent host extensions and Metal language-version pins) plus
@@ -17,8 +23,46 @@ series reconstructs the same Git tree and filesystem bytes as the former flat
 ten-patch bootstrap series, and the tools are exercised against the repo's own
 series in addition to the test suite.
 
+## Agent package
+
+The package uses the ds4-py companion APIs at commit
+`02562e51589d1db75ba96c23cd05603bf2a248dd`. Installing it registers eight
+optional bindings through `ds4py.bindings`. Rebuild the ds4 ABI manifest after
+installing or updating the package so the new probes are recorded.
+
+```python
+from pathlib import Path
+
+import satyrn_agent
+
+config = satyrn_agent.SatyrnConfig(
+    dflash=satyrn_agent.DFlashMode.AUTO,
+    drafter_path=Path("dflash.gguf"),
+    think_budget=satyrn_agent.ThinkBudgetConfig(max_tokens=256, bias=2.0),
+)
+
+with satyrn_agent.open(
+    "qwen35.gguf",
+    config=config,
+    lib="out/libds4.dylib",
+    seed=1,
+) as engine:
+    session = engine.session()
+    session.start_chat()
+    session.append_user("Explain speculative decoding briefly.")
+    events = list(session.run_round(max_tokens=64))
+```
+
+The first and only `session()` call applies native sampling defaults, explicit
+overrides, the optional think hook, and one resolved `auto`/`on`/`off` decode
+policy. It returns ds4-py's real `Session`. See `tests/e2e/README.md` for the
+real patched-engine environment and acceptance commands. M3 CLI, TUI, and
+persistence integration are not part of this package slice.
+
 ## Layout
 
+- `src/satyrn_agent/` — typed downstream engine factory, optional native
+  adapter, DFlash decode step, and runtime capabilities.
 - `patches/` — the ds4 patch series against `antirez/ds4` at the commit in
   `upstream.pin`. Split into `common/` plus one directory per model; apply
   `common/` first, then model directories in name order.

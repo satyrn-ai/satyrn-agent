@@ -47,6 +47,17 @@ Run the portable shell regression suite:
 bash tests/ds4_tools_test.sh
 ```
 
+Run the portable Python suite and its coverage gate:
+
+```bash
+uv run --frozen pytest tests/unit tests/abnormal \
+  --cov=satyrn_agent --cov-branch --cov-report=term-missing \
+  --cov-fail-under=100
+```
+
+See `tests/e2e/README.md` for the separate real patched-engine suite. Portable
+coverage does not prove live DFlash parity.
+
 For workflow changes, also run:
 
 ```bash

@@ -103,6 +103,30 @@ Those workflows require the relevant external ds4-py checkout, patched ds4 tree,
 or dense qwen35 GGUF. Portable quality and shell checks do not establish native
 inference correctness, live replay parity, or DFlash correctness.
 
-The distributable `src/satyrn_agent` package and its Python test suites arrive in
-the stacked `feat/agent-package` branch. The quality PR intentionally manages
-only the existing tools project.
+## Agent package checks
+
+Run the portable Python suite with the line and branch coverage gate:
+
+```bash
+devenv shell -- uv run --frozen pytest tests/unit tests/abnormal \
+  --cov=satyrn_agent --cov-branch --cov-report=term-missing \
+  --cov-fail-under=100
+```
+
+Build and inspect the wheel:
+
+```bash
+devenv shell -- uv build --wheel
+unzip -l dist/*.whl | grep 'satyrn_agent/'
+```
+
+The package pins ds4-py companion commit
+`02562e51589d1db75ba96c23cd05603bf2a248dd`, including tentative decode
+transactions and fatal-state poisoning. Rebuild the ds4 ABI manifest after
+installing or updating `satyrn_agent`; optional symbols still need a fresh probe
+record.
+
+The real patched-engine suite and its required model, drafter, library, and
+SHA-256 inputs are documented in `tests/e2e/README.md`. Run it before claiming
+native DFlash correctness or live parity. Its 100% coverage requirement is
+separate from the portable coverage result, even when both commands report 100%.
