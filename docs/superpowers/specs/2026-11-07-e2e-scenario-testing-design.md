@@ -220,3 +220,14 @@ model-free E2E normal-path gate from real-engine acceptance. Document scenario
 addition, generated-code refresh, coverage commands, and the narrow unit-test
 role. Preserve the original native/thread/token invariants and the explicit live
 acceptance boundary.
+
+## 11. Production typing hardening
+
+Use stdlib `TypeIs` for scenario and other focused runtime narrowing. Use
+lowercase `typing_extensions.sentinel` for a real internal marker where it
+improves the state contract, including DFlash's bonus-row marker; use the
+sentinel object itself in the union and identity narrowing, not
+`Literal[sentinel]`. Keep `Any` confined to the reviewed ctypes boundary and
+replace loosely typed event/config payloads with TypedDicts, frozen slotted
+values, protocols, or explicit unions where this clarifies behavior. Do not add
+sentinels or validators merely for novelty.

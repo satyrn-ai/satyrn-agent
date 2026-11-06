@@ -19,6 +19,7 @@
 - Model-free E2E must independently reach 100% line and branch coverage; auxiliary tests cannot fill missing branches.
 - Model-free results never substitute for real ds4/GGUF/Metal acceptance.
 - Preserve all native/thread/token invariants and the existing shell suite.
+- Use stdlib `TypeIs` for focused runtime narrowing and lowercase `typing_extensions.sentinel` for the real DFlash bonus-row marker; keep `Any` confined to ctypes.
 
 ## Review Focus
 
@@ -100,7 +101,9 @@ Run `basic_round`, all schema tests, Ruff, and ty. Commit as `test(e2e): run pub
 
 Cover full acceptance, partial acceptance, first/middle mismatch, zero drafts, bonus/pending anchors, anchor stop, max tokens, tool close, parser error, stop sequence, and native commit-before-publication. Assert exact tokens, per-round transcript suffixes, native positions, events, metrics, reasons, and reached branches.
 
-- [ ] **Step 2: Add cancellation/RNG and metadata scenarios**
+- [ ] **Step 2: Harden production types while adding cancellation/RNG and metadata scenarios**
+
+Replace the DFlash bonus-row `None` marker with lowercase `typing_extensions.sentinel`, using the sentinel object itself in the row union and identity narrowing. Add cancellation/RNG and metadata scenarios without weakening native or scenario types; do not introduce markers without a real contract.
 
 Cover cancellation before verify/before rows/after unused candidates, unused replacement/bonus restoration, pre-finalized/no-pending exits, canonical-plus-staged metadata, and no duplicate sample/hook execution. Assert exact RNG and metadata sequences.
 
