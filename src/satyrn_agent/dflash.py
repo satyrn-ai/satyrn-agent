@@ -74,6 +74,13 @@ class _BlockState:
     accepted_drafts: int = 0
 
 
+@dataclass(slots=True)
+class _RowOutcome:
+    pending: _PendingAnchor | None = None
+    replacement: bool = False
+    stop: _PendingAnchor | None = None
+
+
 class DFlashStep:
     hooks_every_sample = True
 
@@ -110,8 +117,12 @@ class DFlashStep:
             block.drafts = tuple(self._native.draft(session.raw, block.anchor, self._maximum))
             self._native.verify(session.raw, block.anchor, block.drafts)
             block.phase = _Phase.VERIFY_OPEN
-            pending, replacement = self._scan_rows(session, ctx, block)
-            self._commit_and_publish(session, ctx, block, replacement=replacement)
+            outcome = self._scan_rows(session, ctx, block)
+            pending = outcome.pending
+            self._commit_and_publish(session, ctx, block, replacement=outcome.replacement)
+            if outcome.stop is not None:
+                ctx.accept(outcome.stop.token)
+                return
 
             if ctx.reason is not None:
                 if pending is not None:
@@ -141,21 +152,19 @@ class DFlashStep:
         session: SessionHandle,
         ctx: DecodeContext,
         block: _BlockState,
-    ) -> tuple[_PendingAnchor | None, bool]:
+    ) -> _RowOutcome:
         for row, draft in enumerate((*block.drafts, None)):
             self._native.select(session.raw, row)
             candidate = self._sample_row(session, ctx)
             if ctx.is_stop(candidate.token):
-                self._commit_and_publish(session, ctx, block, replacement=False)
-                ctx.accept(candidate.token)
-                return None, False
+                return _RowOutcome(stop=candidate)
             if draft is None or candidate.token != draft:
-                return candidate, draft is not None
+                return _RowOutcome(candidate, replacement=draft is not None)
             verdict = ctx.stage(candidate.token, ctx.accept(candidate.token))
             block.accepted_drafts += 1
             if verdict is Verdict.STOP_AFTER:
-                return None, False
-        return None, False
+                return _RowOutcome()
+        return _RowOutcome()
 
     def _commit_and_publish(
         self,
