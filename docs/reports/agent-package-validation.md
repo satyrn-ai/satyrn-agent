@@ -4,7 +4,7 @@ Date: 2026-11-06
 
 ## Revisions
 
-- Agent implementation at validation: `cc5a9bcb71c001fdeff96337b75b085d7029f284`
+- Agent implementation at validation: `feat/agent-package` worktree before publication
 - Quality-foundation base: `60baa62151fdfdd6f1b62ef955bfd6e7b4456ee0`
 - ds4-py companion: `02562e51589d1db75ba96c23cd05603bf2a248dd`
 - ds4 upstream pin: `antirez/ds4` at `5379c1c9ac315f1540371b06a3db88491d4059ff`
