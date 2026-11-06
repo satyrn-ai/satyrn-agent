@@ -98,9 +98,10 @@ class DFlashStep:
     def metrics(self) -> DFlashMetrics:
         return self._metrics.snapshot()
 
-    def run(self, session: SessionHandle, ctx: DecodeContext) -> None:
+    def run(self, session: SessionHandle, ctx: DecodeContext) -> None:  # noqa: PLR0912 - Keep each native/decode exit explicit.
         pending: _PendingAnchor | None = None
         while not ctx.finalized and not ctx.cancelled():
+            block_start_rng = ctx.rng.value
             pending = self._anchor(session, ctx) if pending is None else pending
             if ctx.is_stop(pending.token):
                 ctx.accept(pending.token)
@@ -117,10 +118,19 @@ class DFlashStep:
                 ctx.finish("interrupted")
                 return
 
-            block.drafts = tuple(self._native.draft(session.raw, block.anchor, self._maximum))
-            self._native.verify(session.raw, block.anchor, block.drafts)
+            try:
+                block.drafts = tuple(self._native.draft(session.raw, block.anchor, self._maximum))
+                self._native.verify(session.raw, block.anchor, block.drafts)
+            except BaseException:
+                ctx.discard()
+                ctx.rng.value = block_start_rng
+                raise
             block.phase = _Phase.VERIFY_OPEN
-            outcome = self._scan_rows(session, ctx, block)
+            try:
+                outcome = self._scan_rows(session, ctx, block)
+            except BaseException:
+                self._commit_and_publish(session, ctx, block, replacement=False)
+                raise
             pending = outcome.pending
             self._commit_and_publish(session, ctx, block, replacement=outcome.replacement)
             if outcome.stop is not None:
@@ -143,8 +153,11 @@ class DFlashStep:
             ctx.finish("interrupted")
 
     def _eval_and_publish(self, session: SessionHandle, ctx: DecodeContext, block: _BlockState) -> None:
-        session.eval(block.anchor)
-        ctx.publish()
+        try:
+            session.eval(block.anchor)
+            ctx.publish()
+        except BaseException as error:  # noqa: BLE001 - Native/publication uncertainty must poison the worker.
+            ctx.poison(error)
         block.phase = _Phase.IDLE
         self._metrics.committed(0, 0, replacement=False, discarded=0)
 
@@ -194,9 +207,12 @@ class DFlashStep:
         *,
         replacement: bool,
     ) -> None:
-        self._native.commit(session.raw, 1 + block.accepted_drafts)
+        try:
+            self._native.commit(session.raw, 1 + block.accepted_drafts)
+            ctx.publish()
+        except BaseException as error:  # noqa: BLE001 - Never publish or continue after uncertain native commit.
+            ctx.poison(error)
         block.phase = _Phase.IDLE
-        ctx.publish()
         self._metrics.committed(
             len(block.drafts),
             block.accepted_drafts,

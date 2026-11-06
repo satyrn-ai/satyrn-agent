@@ -6,6 +6,7 @@ from typing import cast
 from ds4py._native.protocol import EngineHandle, EngineInfo, SessionHandle
 from ds4py.engine.decode import DecodeContext, GenerateJob
 from ds4py.engine.events import Event
+from ds4py.engine.logits import LogitsView
 from ds4py.engine.sampling import Rng, SamplingPolicy
 from ds4py.engine.transcript import Transcript
 
@@ -40,16 +41,23 @@ class FakeSession:
         self.evaluated: list[int] = []
         self.position = 0
         self.sampling_calls: list[tuple[float, int, float, float]] = []
+        self.eval_error: Exception | None = None
+        self.sample_error: Exception | None = None
+        self.sample_error_at = 1
 
     def pos(self) -> int:
         return self.position
 
     def eval(self, token: int) -> None:
+        if self.eval_error is not None:
+            raise self.eval_error
         self.evaluated.append(token)
         self.position += 1
 
     def sample(self, temperature: float, top_k: int, top_p: float, min_p: float, rng: C.c_uint64) -> int:
         self.sampling_calls.append((temperature, top_k, top_p, min_p))
+        if self.sample_error is not None and len(self.sampling_calls) == self.sample_error_at:
+            raise self.sample_error
         token = self.samples.pop(0)
         self.sampled.append(token)
         rng.value += 1
@@ -63,6 +71,10 @@ class FakeDFlashNative:
         self.verify_open = False
         self.calls: list[tuple[str, int]] = []
         self.commit_error: Exception | None = None
+        self.commit_side_effect = False
+        self.draft_error: Exception | None = None
+        self.verify_error: Exception | None = None
+        self.select_error: Exception | None = None
 
     @property
     def missing_dflash(self) -> tuple[str, ...]:
@@ -79,18 +91,27 @@ class FakeDFlashNative:
 
     def draft(self, session_raw: int, anchor: int, maximum: int) -> list[int]:
         self.calls.append(("draft", anchor))
+        if self.draft_error is not None:
+            raise self.draft_error
         return self.drafts[:maximum]
 
     def verify(self, session_raw: int, anchor: int, drafts: Sequence[int]) -> None:
         self.calls.append(("verify", anchor))
+        if self.verify_error is not None:
+            raise self.verify_error
         self.verify_open = True
 
     def select(self, session_raw: int, row: int) -> None:
         self.calls.append(("select", row))
+        if self.select_error is not None:
+            raise self.select_error
 
     def commit(self, session_raw: int, rows: int) -> None:
         self.calls.append(("commit", rows))
         if self.commit_error is not None:
+            if self.commit_side_effect:
+                self.session.position += rows
+                self.verify_open = False
             raise self.commit_error
         self.session.position += rows
         self.verify_open = False
@@ -114,6 +135,8 @@ def make_decode(
     stops: set[int] | None = None,
     max_tokens: int = 50,
     cancelled: Callable[[], bool] = lambda: False,
+    logits_hooks: Sequence[Callable[[LogitsView], None]] = (),
+    poisoned: list[BaseException] | None = None,
 ) -> DecodeFixture:
     engine = FakeEngine(stops)
     session = FakeSession(samples)
@@ -125,6 +148,7 @@ def make_decode(
         rng=rng,
         max_tokens=max_tokens,
         transcript=transcript,
+        logits_hooks=tuple(logits_hooks),
     )
     ctx = DecodeContext(
         cast("EngineHandle", engine),
@@ -134,5 +158,6 @@ def make_decode(
         cancelled=cancelled,
         emit=events.append,
         session=cast("SessionHandle", session),
+        poison=None if poisoned is None else poisoned.append,
     )
     return DecodeFixture(ctx, engine, session, transcript, events)
