@@ -56,8 +56,8 @@ and metrics must not depend on unit-only mock flows.
   against observed behavior.
 - Preserve auxiliary tests for their narrower purposes without using them to
   inflate the main E2E coverage claim.
-- Keep generated scenario models and all new dependencies out of the production
-  package's runtime dependencies.
+- Generate scenario TypedDicts with a development-only code generator and keep
+  Pydantic models and TypeAdapter out of the implementation.
 - Keep real-engine acceptance visibly separate.
 
 ## 4. Non-goals and anti-goals
@@ -65,10 +65,12 @@ and metrics must not depend on unit-only mock flows.
 - Do not call model-free doubles evidence of native inference or live parity.
 - Do not generate the public `SatyrnConfig` or other handwritten runtime domain
   objects from JSON Schema.
-- Do not add Pydantic to production dependencies.
+- Do not use Pydantic BaseModel or TypeAdapter and do not add Pydantic as a
+  direct dependency. A development-only datamodel-code-generator dependency and
+  its transitive packages are allowed.
 - Do not create a second public session/token loop or a Satyrn-specific worker.
-- Do not retain parallel handwritten scenario validators, generated models, and
-  ad hoc dictionaries for the same JSON documents.
+- Do not retain generated models and ad hoc dictionaries for the same JSON
+  documents. Keep one generated typed boundary and one schema.
 - Do not hide unreached branches with skips, broad expected outcomes, or
   scenario-specific exceptions in the runner.
 - Do not move exception-oriented unit tests into scenarios when fault injection
@@ -82,29 +84,26 @@ Use handwritten frozen dataclasses for scenario definitions. This avoids JSON
 Schema and generation but duplicates schema maintenance as scenario shapes grow
 and does not provide declarative validation for JSON-authored scenarios.
 
-### B. JSON scenarios, generated Pydantic models, shared runner — selected
+### B. JSON scenarios, generated TypedDict, handwritten validation — selected
 
-Use JSON Schema as the external scenario contract, generate Pydantic v2
-BaseModels with datamodel-code-generator, and execute every scenario through one
-public-flow runner. Pydantic and datamodel-code-generator are development-only
-dependencies. This provides runtime validation, typed scenario access, and a
-small addition path for future cases.
+Use JSON Schema as the external scenario contract, generate TypedDicts with
+`datamodel-code-generator`, and parse `object` input with focused `TypeIs`
+validators and explicit conversion functions. Execute every scenario through one
+public-flow runner. The generator is a development-only dependency. No Pydantic
+BaseModel or TypeAdapter is used; runtime validation remains explicit Python
+logic.
 
-### C. JSON scenarios, TypedDict, and TypeAdapter
+### C. JSON scenarios, generated Pydantic models
 
-Generate TypedDict/std-library dataclasses and validate them through a separate
-adapter. Rejected because it adds a second validation layer while Pydantic is
-already being introduced. BaseModel generation keeps validation in the generated
-boundary model.
+Rejected for this change. The project has decided not to use Pydantic models.
 
-### D. Handwritten TypedDict and TypeIs validators
+### D. Handwritten TypedDict only
 
-Keep the current small validators. Rejected for the larger scenario DSL because
-schema and handwritten narrowing would grow together and invite divergence.
-TypeIs remains appropriate for focused custom runtime narrowing elsewhere, not
-as a duplicate scenario schema.
+Rejected because a growing scenario DSL would duplicate every type definition
+between JSON Schema and handwritten Python. Generating the TypedDict boundary
+keeps the schema authoritative while handwritten runtime checks enforce it.
 
-## 6. Scenario schema and generated models
+## 6. Scenario schema and generated TypedDict boundary
 
 Create a versioned JSON Schema for model-free scenarios. The schema includes:
 
@@ -120,21 +119,24 @@ Create a versioned JSON Schema for model-free scenarios. The schema includes:
 - expected sampling metadata, parser state, and metrics; and
 - `expected_branches`, matched against the shared runner's observed branch set.
 
-Generate test-only Pydantic v2 BaseModels. Generated files are reviewed and
-committed. Scenario loading constructs the generated root model directly; no
-TypeAdapter or parallel handwritten TypedDict validator is used. Handwritten
-checks are limited to cross-field invariants JSON Schema cannot express and to
-converting validated scenario data into the handwritten public `SatyrnConfig`.
+Generate test-only TypedDicts with `closed=True`, `Required`, and `NotRequired`
+as appropriate. Scenario loading parses JSON into `object`, then uses focused
+`TypeIs` validators and explicit conversion functions before any field access.
+The validators check required fields, scalar types including boolean/integer
+ambiguity, unions, nested operation records, and cross-field invariants. No
+TypeAdapter, BaseModel, or generated validation layer is used.
 
-Pin `datamodel-code-generator==0.90.0`. Start from this configuration and then
-apply schema-specific results from `--recommend-options`:
+Pin `datamodel-code-generator==0.90.0` in the `dev` dependency group. Its
+transitive packages are allowed, but the implementation does not import or use
+Pydantic models. Start from this configuration and then apply schema-specific
+results from `--recommend-options`:
 
 ```toml
 [tool.datamodel-codegen]
 input = "tests/e2e/scenarios/schema.json"
 output = "tests/e2e/_generated/scenarios.py"
 input-file-type = "jsonschema"
-output-model-type = "pydantic_v2.BaseModel"
+output-model-type = "typing.TypedDict"
 preset = "standard-py314-20261104"
 formatters = ["ruff-check", "ruff-format"]
 extra-fields = "forbid"
@@ -143,11 +145,13 @@ extra-fields = "forbid"
 The immutable preset is the latest Python 3.14 preset in the researched 0.90.0
 release. Run the recommender against the actual schema, review class-name and
 constraint effects, and record additional options rather than enabling every
-possible rule. Consider strict scalar handling and generated schema validators
-only when the report shows they are needed. Use Ruff for generated-code
-formatting and a prek generation/check command to reject stale generated files.
+possible rule. Use Ruff for generated-code formatting and a prek
+generation/check command to reject stale generated files.
 
-Pydantic and datamodel-code-generator remain in the `dev` dependency group.
+The checked-in JSON Schema provides the external document contract and prek
+schema validation. Generated TypedDicts provide the static Python contract.
+Focused valid and invalid fixtures prove that the schema and handwritten runtime
+checks accept and reject the same inputs.
 
 ## 7. Shared E2E runner
 
@@ -177,7 +181,7 @@ new branch is introduced, updating the expected-branch registry.
 tests/e2e/
   schema/                 # versioned scenario JSON Schema
   scenarios/              # independent scenario documents
-  _generated/             # checked-in Pydantic models
+  _generated/             # checked-in TypedDict models
   model_free/             # shared runner and scenario acceptance tests
   live/                   # real patched-engine acceptance, moved as a group
   corpus.json             # live model identities/prompts during migration
@@ -202,10 +206,10 @@ Run auxiliary unit/abnormal tests separately; their results must not be used to
 fill missing E2E branches. Run real-engine acceptance separately with its
 required inputs. The final PR reports the three results independently.
 
-Add schema validation tests for malformed scenarios and generated-model drift,
-plus a registry completeness check proving every runner branch is claimed by at
-least one scenario. These are test-infrastructure checks, not substitutes for
-behavioral scenarios.
+Add schema validation tests for malformed scenarios, schema/TypedDict parity,
+and generated-model drift, plus a registry completeness check proving every
+runner branch is claimed by at least one scenario. These are test-infrastructure
+checks, not substitutes for behavioral scenarios.
 
 ## 10. Documentation and design update
 
