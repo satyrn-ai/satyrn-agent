@@ -16,9 +16,17 @@ _FLOAT32, _BOOL, _STRING, _ARRAY = 6, 7, 8, 9
 _UINT64, _INT64, _FLOAT64 = 10, 11, 12
 
 _TYPE_SIZES = {
-    _UINT8: 1, _INT8: 1, _UINT16: 2, _INT16: 2,
-    _UINT32: 4, _INT32: 4, _FLOAT32: 4, _BOOL: 1,
-    _UINT64: 8, _INT64: 8, _FLOAT64: 8,
+    _UINT8: 1,
+    _INT8: 1,
+    _UINT16: 2,
+    _INT16: 2,
+    _UINT32: 4,
+    _INT32: 4,
+    _FLOAT32: 4,
+    _BOOL: 1,
+    _UINT64: 8,
+    _INT64: 8,
+    _FLOAT64: 8,
 }
 
 
