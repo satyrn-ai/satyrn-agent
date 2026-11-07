@@ -142,6 +142,14 @@ def test_collection_constraints_are_enforced(tmp_path: Path, field: str) -> None
         load_scenario(write_document(tmp_path / f"{field}.json", document))
 
 
+def test_on_without_drafter_is_rejected_by_scenario_schema(tmp_path: Path) -> None:
+    document = valid_document()
+    document["config"] = {"dflash": "on"}
+
+    with pytest.raises(ValueError, match="scenario does not match"):
+        load_scenario(write_document(tmp_path / "on-without-drafter.json", document))
+
+
 def test_duplicate_scenario_ids_are_rejected(tmp_path: Path) -> None:
     first = write_document(tmp_path / "first.json", valid_document())
     second = write_document(tmp_path / "second.json", valid_document())

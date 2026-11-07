@@ -24,7 +24,11 @@ def _integer(value: int, name: str, *, minimum: int) -> None:
 def _finite(value: float, name: str) -> None:
     if not isinstance(value, int | float) or isinstance(value, bool):
         raise TypeError(f"{name} must be a real number")
-    if not math.isfinite(value):
+    try:
+        finite = math.isfinite(value)
+    except OverflowError as error:
+        raise ConfigurationError(f"{name} must be finite") from error
+    if not finite:
         raise ConfigurationError(f"{name} must be finite")
 
 

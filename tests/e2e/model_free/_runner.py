@@ -68,6 +68,8 @@ def _config(config: ConfigDocument) -> SatyrnConfig:
 def _raw_value(value: object) -> object:
     if value == "nonfinite":
         return float("nan")
+    if value == "large-int":
+        return 10**1000
     if isinstance(value, Mapping):
         return {key: _raw_value(item) for key, item in value.items()}
     if isinstance(value, list):

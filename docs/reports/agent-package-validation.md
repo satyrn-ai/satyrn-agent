@@ -26,8 +26,8 @@ All commands ran from the repository root through devenv.
   including Ruff, ty, ShellCheck, configuration, and workflow checks.
 - `uv run --frozen pytest tests/e2e/model_free --cov=satyrn_agent
   --cov-branch --cov-report=term-missing --cov-fail-under=100 -q` —
-  **122 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
-  including 76 JSON scenarios and production config-boundary tests through the
+  **133 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
+  including 77 JSON scenarios and production config-boundary tests through the
   shared public-flow runner.
 - `uv run --frozen --no-sync pytest tests/unit tests/abnormal -q` — **64 passed**
   in the separate auxiliary unit/exception suite.
@@ -40,10 +40,11 @@ All commands ran from the repository root through devenv.
 - `bash tests/ds4_tools_test.sh` — **49 passed, 0 failed**.
 - `git diff --check` — passed.
 
-The 122 model-free E2E tests use public `satyrn_agent.open()` and real ds4-py
-worker/session/decode code. Only the external native library is scripted. The
-100% result does not convert those doubles into normal-path real-engine evidence
-or use auxiliary unit tests to fill missing branches.
+The 133 model-free tests combine public-flow scenarios with direct parser,
+schema, and generation checks. Public scenarios use `satyrn_agent.open()` and
+real ds4-py worker/session/decode code; only the external native library is
+scripted. The 100% result does not convert those doubles into normal-path
+real-engine evidence or use auxiliary unit tests to fill missing branches.
 
 ## Live acceptance boundary
 
@@ -101,6 +102,15 @@ The scenario schema references the production schema rather than duplicating it.
 logic and converts it to the existing frozen, slotted `SatyrnConfig`. Existing
 ordinary scenarios use this production parser. No Pydantic BaseModel or
 TypeAdapter is used.
+
+## Production config review remediation
+
+The second Kimi/DeepSeek review led to additional fixes: reject empty drafter
+paths for `on`, use `ConfigurationError` for external value failures, accept
+read-only mappings, normalize oversized-number failures, align the scenario
+validator with the production drafter rule, and test that conversion failures do
+not open native code. The report distinguishes direct parser/schema/generation
+checks from public-flow scenarios.
 
 ## Scenario-driven E2E migration
 

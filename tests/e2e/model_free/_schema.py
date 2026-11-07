@@ -149,7 +149,7 @@ def _native(value: object) -> TypeIs[Native]:  # noqa: PLR0911 - Each optional n
     return (defaults := value.get("sampling_defaults")) is None or _sampling_defaults(defaults)
 
 
-def _config(value: object) -> TypeIs[ConfigDocument]:
+def _config(value: object) -> TypeIs[ConfigDocument]:  # noqa: PLR0911 - Each config field has an independent proof.
     if not is_string_key_mapping(value) or not _allowed(
         value,
         {"dflash", "drafter_path", "draft_tokens", "sampling", "think_budget"},
@@ -157,7 +157,10 @@ def _config(value: object) -> TypeIs[ConfigDocument]:
         return False
     if value.get("dflash", "auto") not in {"auto", "on", "off"}:
         return False
-    if (path := value.get("drafter_path", "drafter.gguf")) is not None and not isinstance(path, str):
+    path = value.get("drafter_path")
+    if path is not None and not isinstance(path, str):
+        return False
+    if value.get("dflash") == "on" and (path is None or path == ""):
         return False
     if "draft_tokens" in value and (type(value["draft_tokens"]) is not int or value["draft_tokens"] < 0):
         return False

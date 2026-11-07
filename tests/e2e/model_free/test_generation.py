@@ -10,4 +10,4 @@ def test_production_config_dto_is_generated() -> None:
 
 
 def test_named_generation_jobs_are_current() -> None:
-    subprocess.run(["datamodel-codegen", "--all-jobs", "--check"], check=True)
+    subprocess.run(["uv", "run", "--frozen", "datamodel-codegen", "--all-jobs", "--check"], check=True)
