@@ -48,6 +48,86 @@
           "Token",
           "Token",
           "Stopped"
+        ],
+        "transcript": [
+          1,
+          10,
+          11
+        ],
+        "native_calls": [
+          {
+            "op": "draft",
+            "anchor": 10,
+            "maximum": 7
+          },
+          {
+            "op": "verify",
+            "anchor": 10,
+            "drafts": [
+              11
+            ]
+          },
+          {
+            "op": "select",
+            "row": 0
+          },
+          {
+            "op": "commit",
+            "rows": 2
+          }
+        ],
+        "token_positions": [
+          3,
+          3
+        ],
+        "events": [
+          {
+            "type": "Prefill",
+            "payload": {
+              "done": 0,
+              "total": 1,
+              "cached_prefix": 0,
+              "tps": 0.0
+            }
+          },
+          {
+            "type": "Synced",
+            "payload": {
+              "pos": 1,
+              "plan": {
+                "kind": "rebuild",
+                "reused": 0,
+                "to_prefill": 1,
+                "fits": true,
+                "checkpoint": null
+              },
+              "prefilled": 1
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 10,
+              "text_bytes": [
+                9
+              ]
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 11,
+              "text_bytes": [
+                10
+              ]
+            }
+          },
+          {
+            "type": "Stopped",
+            "payload": {
+              "reason": "max_tokens"
+            }
+          }
         ]
       }
     },
@@ -75,13 +155,91 @@
           "Synced",
           "Token",
           "Stopped"
+        ],
+        "transcript": [
+          1,
+          10,
+          11,
+          1,
+          12
+        ],
+        "native_calls": [
+          {
+            "op": "draft",
+            "anchor": 12,
+            "maximum": 7
+          },
+          {
+            "op": "verify",
+            "anchor": 12,
+            "drafts": []
+          },
+          {
+            "op": "select",
+            "row": 0
+          },
+          {
+            "op": "commit",
+            "rows": 1
+          }
+        ],
+        "token_positions": [
+          5
+        ],
+        "events": [
+          {
+            "type": "Prefill",
+            "payload": {
+              "done": 0,
+              "total": 1,
+              "cached_prefix": 3,
+              "tps": 0.0
+            }
+          },
+          {
+            "type": "Synced",
+            "payload": {
+              "pos": 4,
+              "plan": {
+                "kind": "extend",
+                "reused": 3,
+                "to_prefill": 1,
+                "fits": true,
+                "checkpoint": null
+              },
+              "prefilled": 1
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 12,
+              "text_bytes": [
+                11
+              ]
+            }
+          },
+          {
+            "type": "Stopped",
+            "payload": {
+              "reason": "stop_token"
+            }
+          }
         ]
       }
     }
   ],
   "expected_branches": [
+    "anchor",
+    "commit",
     "dflash-step",
+    "draft",
     "full-acceptance",
-    "max_tokens"
+    "max_tokens",
+    "row",
+    "select",
+    "stop_token",
+    "verify",
+    "zero-drafts"
   ]
 }

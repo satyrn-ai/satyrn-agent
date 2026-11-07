@@ -60,7 +60,9 @@
     }
   ],
   "expected_branches": [
+    "anchor",
     "dflash-step",
+    "eval",
     "max_tokens"
   ]
 }

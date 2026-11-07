@@ -25,6 +25,19 @@
     "description": {
       "type": "string"
     },
+    "snapshot_parity": {
+      "type": "boolean",
+      "default": false
+    },
+    "think": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "ds4 ThinkMode used by public open; zero disables thinking."
+    },
+    "raw_config": {
+      "type": "object",
+      "description": "Optional raw Python config mapping for public constructor validation scenarios."
+    },
     "backend": {
       "type": "string",
       "enum": [
@@ -218,7 +231,10 @@
             "commit",
             "eval",
             "sample",
-            "mode"
+            "mode",
+            "has_dflash",
+            "verify_rows",
+            "sampling_defaults"
           ]
         },
         "tokens": {
@@ -232,6 +248,24 @@
           "type": "integer",
           "minimum": 0,
           "description": "Zero-based sample index for a sample fault."
+        },
+        "value": {
+          "type": "integer"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "nonfinite": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "integer"
+        },
+        "count": {
+          "type": "integer"
         },
         "error": {
           "type": [
@@ -316,6 +350,25 @@
           "type": "integer",
           "minimum": 1
         },
+        "finish_at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "finish_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cancel_after_accept": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolDefinition"
+          },
+          "default": []
+        },
         "expect": {
           "$ref": "#/$defs/Expectation"
         }
@@ -371,6 +424,104 @@
         },
         "sampling_defaults": {
           "$ref": "#/$defs/SamplingDefaults"
+        },
+        "transcript": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventExpectation"
+          }
+        },
+        "native_calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NativeCallExpectation"
+          }
+        },
+        "token_positions": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "ToolDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "parameters"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object"
+        }
+      }
+    },
+    "EventExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    },
+    "NativeCallExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op"
+      ],
+      "properties": {
+        "op": {
+          "type": "string"
+        },
+        "anchor": {
+          "type": "integer"
+        },
+        "drafts": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "maximum": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "row": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "token": {
+          "type": "integer"
         }
       }
     },

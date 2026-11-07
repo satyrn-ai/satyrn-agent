@@ -49,6 +49,10 @@
     }
   ],
   "expected_branches": [
-    "native-error"
+    "anchor",
+    "dflash-step",
+    "draft",
+    "native-error",
+    "verify"
   ]
 }

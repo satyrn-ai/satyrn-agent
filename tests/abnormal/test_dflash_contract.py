@@ -1,21 +1,11 @@
 from typing import cast
 
-import pytest
 from ds4py._native.protocol import SessionHandle
 from ds4py.engine.decode import Verdict
 from ds4py.engine.logits import LogitsView
 
 from satyrn_agent.dflash import DFlashStep
 from tests.abnormal._decode_helpers import FakeDFlashNative, make_decode
-
-
-def test_step_rejects_invalid_constructor_bounds() -> None:
-    fixture = make_decode([])
-    native = FakeDFlashNative(fixture.session)
-    with pytest.raises(ValueError, match="draft_tokens"):
-        DFlashStep(native, draft_tokens=-1)
-    with pytest.raises(ValueError, match="verify_rows"):
-        DFlashStep(native, verify_rows=0)
 
 
 def test_staged_terminal_verdict_prevents_later_row_sampling() -> None:
@@ -83,15 +73,4 @@ def test_pre_finalized_context_is_a_noop() -> None:
     DFlashStep(native).run(cast("SessionHandle", fixture.session), fixture.ctx)
 
     assert fixture.ctx.reason == "done"
-    assert native.calls == []
-
-
-def test_cancellation_before_first_anchor_finishes_without_pending() -> None:
-    fixture = make_decode([], cancelled=lambda: True)
-    native = FakeDFlashNative(fixture.session)
-
-    DFlashStep(native).run(cast("SessionHandle", fixture.session), fixture.ctx)
-
-    assert fixture.ctx.reason == "interrupted"
-    assert fixture.transcript.tokens == ()
     assert native.calls == []

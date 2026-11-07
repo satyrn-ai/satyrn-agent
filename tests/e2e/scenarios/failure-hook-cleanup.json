@@ -39,7 +39,20 @@
           "replacement_anchors": 0,
           "discarded_tails": 1
         },
-        "metadata": [],
+        "metadata": [
+          {
+            "position": 1,
+            "think_tokens": 0,
+            "sampled_tokens": []
+          },
+          {
+            "position": 2,
+            "think_tokens": 0,
+            "sampled_tokens": [
+              10
+            ]
+          }
+        ],
         "event_types": [
           "Prefill",
           "Synced",
@@ -49,6 +62,14 @@
     }
   ],
   "expected_branches": [
-    "discarded-tail"
+    "anchor",
+    "commit",
+    "dflash-step",
+    "discarded-tail",
+    "draft",
+    "metadata",
+    "partial-acceptance",
+    "select",
+    "verify"
   ]
 }

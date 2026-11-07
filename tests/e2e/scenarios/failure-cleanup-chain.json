@@ -41,7 +41,20 @@
           "replacement_anchors": 0,
           "discarded_tails": 0
         },
-        "metadata": [],
+        "metadata": [
+          {
+            "position": 1,
+            "think_tokens": 0,
+            "sampled_tokens": []
+          },
+          {
+            "position": 2,
+            "think_tokens": 0,
+            "sampled_tokens": [
+              10
+            ]
+          }
+        ],
         "event_types": [
           "Prefill",
           "Synced"
@@ -50,6 +63,13 @@
     }
   ],
   "expected_branches": [
-    "native-error"
+    "anchor",
+    "commit",
+    "dflash-step",
+    "draft",
+    "metadata",
+    "native-error",
+    "select",
+    "verify"
   ]
 }

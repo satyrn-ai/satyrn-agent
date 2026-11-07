@@ -14,8 +14,6 @@ from ds4py.errors import MissingBinding
 
 from .errors import DFlashError
 
-VERIFY_MODE_OFF = 0
-VERIFY_MODE_MMA = 1
 _ERROR_BYTES = 256
 _DFLASH_NAMES = (
     "ds4_engine_has_dflash",
@@ -86,14 +84,10 @@ class CtypesDFlashNative:
         return rows
 
     def set_verify_mode(self, session_raw: int, mode: int) -> None:
-        if mode not in (VERIFY_MODE_OFF, VERIFY_MODE_MMA):
-            raise ValueError(f"unknown verify mode {mode}")
         status = self._bind("ds4_session_set_verify_mode")(session_raw, mode)
         _check_status("ds4_session_set_verify_mode", status)
 
     def draft(self, session_raw: int, anchor: int, maximum: int) -> list[int]:
-        if maximum < 0:
-            raise ValueError("maximum draft count must be non-negative")
         output = (C.c_int * max(maximum, 1))()
         error = C.create_string_buffer(_ERROR_BYTES)
         count = int(
@@ -131,8 +125,6 @@ class CtypesDFlashNative:
         _check_status("ds4_session_verify_select", status)
 
     def commit(self, session_raw: int, rows: int) -> None:
-        if rows <= 0:
-            raise ValueError("rows must be positive")
         error = C.create_string_buffer(_ERROR_BYTES)
         status = self._bind("ds4_session_verify_commit")(session_raw, rows, error, len(error))
         _check_status("ds4_session_verify_commit", status, error)

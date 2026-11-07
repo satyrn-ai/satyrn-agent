@@ -18,4 +18,4 @@ def test_every_supported_branch_has_a_scenario() -> None:
     declared = set().union(*(scenario["expected_branches"] for scenario in scenarios))
 
     assert observed >= SUPPORTED_BRANCHES
-    assert declared <= SUPPORTED_BRANCHES
+    assert declared >= SUPPORTED_BRANCHES

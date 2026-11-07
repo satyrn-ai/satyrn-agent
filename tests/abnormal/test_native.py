@@ -59,13 +59,6 @@ def test_negative_verify_rows_are_rejected() -> None:
         native.verify_rows(11)
 
 
-def test_verify_mode_rejects_invalid_python_mode() -> None:
-    native = CtypesDFlashNative(FakeBindings())
-
-    with pytest.raises(ValueError, match="verify mode"):
-        native.set_verify_mode(1, 2)
-
-
 def test_verify_mode_converts_native_status() -> None:
     bindings = FakeBindings()
     bindings.functions["ds4_session_set_verify_mode"] = lambda raw, mode: 1
@@ -108,13 +101,6 @@ def test_draft_rejects_invalid_native_counts(count: int) -> None:
 
     with pytest.raises(DFlashError, match="invalid draft count"):
         native.draft(1, 40, 1)
-
-
-def test_draft_rejects_negative_maximum_before_native_call() -> None:
-    native = CtypesDFlashNative(FakeBindings())
-
-    with pytest.raises(ValueError, match="maximum"):
-        native.draft(1, 40, -1)
 
 
 def test_draft_minus_one_uses_native_error_message() -> None:
@@ -162,13 +148,6 @@ def test_select_and_commit_convert_status_and_native_message() -> None:
     with pytest.raises(DFlashError, match="ds4_session_verify_commit: commit exploded") as caught:
         native.commit(1, 1)
     assert caught.value.operation == "ds4_session_verify_commit"
-
-
-def test_commit_rejects_non_positive_rows_before_native_call() -> None:
-    native = CtypesDFlashNative(FakeBindings())
-
-    with pytest.raises(ValueError, match="rows"):
-        native.commit(1, 0)
 
 
 def test_sampling_defaults_return_immutable_python_values() -> None:

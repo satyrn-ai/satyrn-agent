@@ -13,7 +13,7 @@ from ds4py._native.protocol import EngineInfo
 
 from satyrn_agent._native import NativeSampling
 from satyrn_agent.errors import DFlashError
-from tests.e2e.scenarios._generated.scenario_types import Native, NativeCall, SamplingDefaults
+from tests.e2e.scenarios._generated.scenario_types import Native, NativeCall
 
 
 class ScenarioFakeNative(FakeNative):
@@ -27,6 +27,9 @@ class ScenarioFakeNative(FakeNative):
         self.last_anchor = 0
         self.last_drafts: list[int] = []
         self.operations: list[str] = []
+        self.call_log: list[dict[str, object]] = []
+        self.draft_results: list[int] = []
+        self.verify_open = False
         self.sample_count = 0
         self.current_token = 0
         self.cancel_after_samples: int | None = None
@@ -117,10 +120,12 @@ class ScenarioFakeNative(FakeNative):
         return responses.pop(0)
 
     def _has_dflash(self, raw: int) -> bool:
-        return self.config.get("has_dflash", True)
+        call = self._response("has_dflash")
+        return bool(call["value"]) if call is not None and "value" in call else self.config.get("has_dflash", True)
 
     def _verify_rows(self, raw: int) -> int:
-        return self.config.get("verify_rows", 8)
+        call = self._response("verify_rows")
+        return call["value"] if call is not None and "value" in call else self.config.get("verify_rows", 8)
 
     def _set_verify_mode(self, raw: int, mode: int) -> int:
         call = self._response("mode")
@@ -131,14 +136,18 @@ class ScenarioFakeNative(FakeNative):
     def _draft(self, raw: int, anchor: int, maximum: int, output: Any, error: Any, error_length: int) -> int:
         call = self._response("draft")
         if call is not None and (message := call.get("error")) is not None:
-            raise DFlashError("ds4_session_dflash_draft", message)
+            encoded = message.encode()
+            C.memmove(error, encoded, len(encoded) + 1)
+            return -1
         self.operations.append("draft")
         tokens = [] if call is None else call.get("tokens", [])[:maximum]
+        self.call_log.append({"op": "draft", "anchor": anchor, "maximum": maximum})
+        self.draft_results.append(len(tokens))
         self.last_anchor = anchor
         self.last_drafts = list(tokens)
         for index, token in enumerate(tokens):
             output[index] = token
-        return len(tokens)
+        return call["count"] if call is not None and "count" in call else len(tokens)
 
     def _verify(self, raw: int, anchor: int, drafts: Any, count: int, error: Any, error_length: int) -> int:
         self.operations.append("verify")
@@ -147,26 +156,31 @@ class ScenarioFakeNative(FakeNative):
             raise DFlashError("ds4_session_verify", message)
         self.last_anchor = anchor
         self.last_drafts = list(drafts[:count])
-        return 0
+        self.call_log.append({"op": "verify", "anchor": anchor, "drafts": self.last_drafts.copy()})
+        self.verify_open = True
+        return call["status"] if call is not None and "status" in call else 0
 
     def _select(self, raw: int, row: int) -> int:
         self.operations.append("select")
+        self.call_log.append({"op": "select", "row": row})
         if self.cancel_after_samples == -1 and self.cancel_event is not None:
             self.cancel_event.set()
         self.session(raw)._logits = None
         call = self._response("select")
         if call is not None and (message := call.get("error")) is not None:
             raise DFlashError("ds4_session_verify_select", message)
-        return 0
+        return call["status"] if call is not None and "status" in call else 0
 
     def _eval(self, token: int) -> None:
         self.operations.append("eval")
+        self.call_log.append({"op": "eval", "token": token})
         call = self._response("eval")
         if call is not None and (message := call.get("error")) is not None:
             raise RuntimeError(message)
 
     def _commit(self, raw: int, rows: int, error: Any, error_length: int) -> int:
         self.operations.append("commit")
+        self.call_log.append({"op": "commit", "rows": rows})
         if self.cancel_after_samples == -2 and self.cancel_event is not None:
             self.cancel_event.set()
         call = self._response("commit")
@@ -177,12 +191,24 @@ class ScenarioFakeNative(FakeNative):
             session._logits = None
         if call is not None and (message := call.get("error")) is not None:
             raise DFlashError("ds4_session_verify_commit", message)
-        return 0
+        self.verify_open = False
+        return call["status"] if call is not None and "status" in call else 0
 
     def _sampling_defaults(self, raw: int, temperature: Any, top_k: Any, top_p: Any, min_p: Any) -> None:
         defaults = self.config.get("sampling_defaults")
-        if defaults is None:
-            values: SamplingDefaults = {"temperature": 1.0, "top_k": 0, "top_p": 1.0, "min_p": 0.05}
+        call = self._response("sampling_defaults")
+        if call is not None:
+            raw_values = call.get("values", [1.0, 0.0, 1.0, 0.0])
+            values = {
+                "temperature": raw_values[0],
+                "top_k": raw_values[1],
+                "top_p": raw_values[2],
+                "min_p": raw_values[3],
+            }
+            if call.get("nonfinite", False):
+                values["temperature"] = float("nan")
+        elif defaults is None:
+            values = {"temperature": 1.0, "top_k": 0, "top_p": 1.0, "min_p": 0.05}
         else:
             values = defaults
         C.cast(temperature, C.POINTER(C.c_float))[0] = values["temperature"]
@@ -199,6 +225,7 @@ class ScenarioFakeSession(FakeSession):
     @override
     def sample(self, temperature: float, top_k: int, top_p: float, min_p: float, rng: C.c_uint64) -> int:
         result = super().sample(temperature, top_k, top_p, min_p, rng)
+        self.scenario_native.operations.append("row" if self.scenario_native.verify_open else "anchor")
         return self.scenario_native.current_token if self.scenario_native.current_token < 0 else result
 
     @override
@@ -236,4 +263,15 @@ class ScenarioFakeEngine(FakeEngine):
         return super().tokenize(text, rendered=rendered)
 
 
-_OPERATIONS = ("draft", "verify", "select", "commit", "eval", "sample", "mode")
+_OPERATIONS = (
+    "draft",
+    "verify",
+    "select",
+    "commit",
+    "eval",
+    "sample",
+    "mode",
+    "has_dflash",
+    "verify_rows",
+    "sampling_defaults",
+)

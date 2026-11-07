@@ -89,10 +89,6 @@ class DFlashStep:
     hooks_every_sample = True
 
     def __init__(self, native: DFlashNative, *, draft_tokens: int = 0, verify_rows: int = 8) -> None:
-        if draft_tokens < 0:
-            raise ValueError("draft_tokens must be non-negative")
-        if verify_rows <= 0:
-            raise ValueError("verify_rows must be positive")
         self._native = native
         self._maximum = verify_rows - 1 if draft_tokens == 0 else min(draft_tokens, verify_rows - 1)
         self._metrics = _MetricsRecorder()
@@ -101,7 +97,7 @@ class DFlashStep:
     def metrics(self) -> DFlashMetrics:
         return self._metrics.snapshot()
 
-    def run(self, session: SessionHandle, ctx: DecodeContext) -> None:  # noqa: PLR0912 - Keep each native/decode exit explicit.
+    def run(self, session: SessionHandle, ctx: DecodeContext) -> None:
         pending: _PendingAnchor | None = None
         while not ctx.finalized and not ctx.cancelled():
             block_start_rng = ctx.rng.value
@@ -150,9 +146,8 @@ class DFlashStep:
                     ctx.rng.value = pending.before_rng
                 return
 
-        if ctx.cancelled():
-            if pending is not None:
-                ctx.rng.value = pending.before_rng
+        if ctx.cancelled() and pending is not None:
+            ctx.rng.value = pending.before_rng
             ctx.finish("interrupted")
 
     def _eval_and_publish(self, session: SessionHandle, ctx: DecodeContext, block: _BlockState) -> None:

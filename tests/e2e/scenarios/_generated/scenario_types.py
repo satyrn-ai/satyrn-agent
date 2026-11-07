@@ -19,10 +19,26 @@ class ThinkBudget(TypedDict, closed=True):
 
 
 class NativeCall(TypedDict, closed=True):
-    op: Literal["draft", "verify", "select", "commit", "eval", "sample", "mode"]
+    op: Literal[
+        "draft",
+        "verify",
+        "select",
+        "commit",
+        "eval",
+        "sample",
+        "mode",
+        "has_dflash",
+        "verify_rows",
+        "sampling_defaults",
+    ]
     tokens: NotRequired[list[int]]
     index: NotRequired[int]
     """Zero-based sample index for a sample fault."""
+    value: NotRequired[int]
+    values: NotRequired[list[float]]
+    nonfinite: NotRequired[bool]
+    status: NotRequired[int]
+    count: NotRequired[int]
     error: NotRequired[str | None]
     side_effect: NotRequired[bool]
 
@@ -32,6 +48,27 @@ class SamplingDefaults(TypedDict, closed=True):
     top_k: int
     top_p: float
     min_p: float
+
+
+class ToolDefinition(TypedDict, closed=True):
+    name: str
+    description: str
+    parameters: dict[str, object]
+
+
+class EventExpectation(TypedDict, closed=True):
+    type: str
+    payload: dict[str, object]
+
+
+class NativeCallExpectation(TypedDict, closed=True):
+    op: str
+    anchor: NotRequired[int]
+    drafts: NotRequired[list[int]]
+    maximum: NotRequired[int]
+    row: NotRequired[int]
+    rows: NotRequired[int]
+    token: NotRequired[int]
 
 
 class Metrics(TypedDict, closed=True):
@@ -78,6 +115,10 @@ class Expectation(TypedDict, closed=True):
     metadata: list[SampleMetadata]
     event_types: list[str]
     sampling_defaults: NotRequired[SamplingDefaults]
+    transcript: NotRequired[list[int]]
+    events: NotRequired[list[EventExpectation]]
+    native_calls: NotRequired[list[NativeCallExpectation]]
+    token_positions: NotRequired[list[int]]
 
 
 class Round(TypedDict, closed=True):
@@ -88,6 +129,10 @@ class Round(TypedDict, closed=True):
     cancel_after_samples: NotRequired[int]
     """Sample index to cancel at; -1 selects before a row sample, -2 cancels during native commit, and -3 cancels before the round."""
     hook_error_at: NotRequired[int]
+    finish_at: NotRequired[int]
+    finish_reason: NotRequired[str]
+    cancel_after_accept: NotRequired[int]
+    tools: NotRequired[list[ToolDefinition]]
     expect: Expectation
 
 
@@ -97,6 +142,11 @@ class Scenario(TypedDict, closed=True):
     version: Literal[1]
     id: str
     description: NotRequired[str]
+    snapshot_parity: NotRequired[bool]
+    think: NotRequired[int]
+    """ds4 ThinkMode used by public open; zero disables thinking."""
+    raw_config: NotRequired[dict[str, object]]
+    """Optional raw Python config mapping for public constructor validation scenarios."""
     backend: Literal["metal", "cpu"]
     native: Native
     config: ScenarioConfig

@@ -181,11 +181,17 @@ def observe_round(
     )
 
 
-def assert_alignment(session: Session, observation: RoundObservation) -> None:
+def assert_alignment(
+    session: Session,
+    observation: RoundObservation,
+    scripted_native: ScenarioFakeNative | None = None,
+) -> None:
     generated = observation.token_ids
     assert observation.assistant_tokens[observation.assistant_start :] == generated
-    unevaluated_eos = sum(
-        segment.end - segment.start for segment in session.transcript.segments if segment.kind == "eos"
+    unevaluated_eos = (
+        sum(segment.end - segment.start for segment in session.transcript.segments if segment.kind == "eos")
+        if scripted_native is not None
+        else 0
     )
     assert observation.native_position == len(observation.transcript) - unevaluated_eos
 
@@ -229,7 +235,8 @@ def serial_then_speculative(
         pytest.fail("the parity fixture requires a configured DFlashStep")
     step = wrapper._step
     prompt_tokens = prepare_chat(session, prompt, tools=tools)
-    session._worker.call(lambda engine, native: native.sync(session.transcript.tokens)).result()
+    if scripted_native is not None:
+        session._worker.call(lambda engine, native: native.sync(session.transcript.tokens)).result()
     if recorder is not None:
         session.add_logits_hook(recorder)
     snapshot = session._worker.call(lambda engine, native: native.save_snapshot()).result()
@@ -238,13 +245,13 @@ def serial_then_speculative(
     started = time.perf_counter()
     try:
         serial = observe_round(session, max_tokens=max_tokens, sampling=sampling, started=started)
-        assert_alignment(session, serial)
+        assert_alignment(session, serial, scripted_native)
         if recorder is not None:
             recorder.serial_count = len(recorder.calls)
         restore_snapshot(session, prompt_tokens, snapshot, rng, step, scripted_native)
         started = time.perf_counter()
         speculative = observe_round(session, max_tokens=max_tokens, sampling=sampling, started=started)
-        assert_alignment(session, speculative)
+        assert_alignment(session, speculative, scripted_native)
     finally:
         snapshot.close()
     return serial, speculative, prompt_tokens

@@ -37,6 +37,7 @@
     }
   ],
   "expected_branches": [
+    "dflash-step",
     "interrupted"
   ]
 }

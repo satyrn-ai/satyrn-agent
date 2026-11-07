@@ -57,8 +57,17 @@
     }
   ],
   "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "discarded-tail",
+    "draft",
+    "eval",
+    "max_tokens",
     "partial-acceptance",
     "replacement-anchor",
-    "discarded-tail"
+    "row",
+    "select",
+    "verify"
   ]
 }

@@ -51,7 +51,9 @@
     }
   ],
   "expected_branches": [
-    "plain-step",
-    "max_tokens"
+    "anchor",
+    "eval",
+    "max_tokens",
+    "plain-step"
   ]
 }

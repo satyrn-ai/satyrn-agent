@@ -53,6 +53,13 @@
     }
   ],
   "expected_branches": [
-    "discarded-tail"
+    "anchor",
+    "commit",
+    "dflash-step",
+    "discarded-tail",
+    "draft",
+    "partial-acceptance",
+    "select",
+    "verify"
   ]
 }

@@ -51,7 +51,15 @@
     }
   ],
   "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "discarded-tail",
+    "draft",
     "interrupted",
-    "discarded-tail"
+    "partial-acceptance",
+    "row",
+    "select",
+    "verify"
   ]
 }

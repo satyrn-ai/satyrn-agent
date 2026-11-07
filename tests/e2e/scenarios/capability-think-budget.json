@@ -80,8 +80,16 @@
     }
   ],
   "expected_branches": [
+    "anchor",
+    "commit",
     "dflash-step",
+    "draft",
+    "eval",
     "max_tokens",
-    "metadata"
+    "metadata",
+    "row",
+    "select",
+    "verify",
+    "zero-drafts"
   ]
 }

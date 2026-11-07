@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "id": "native-select-status",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      },
+      {
+        "op": "select",
+        "status": 1
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "DFlashError: ds4_session_verify_select: native status 1",
+        "token_ids": [
+          10
+        ],
+        "native_position": 2,
+        "rng": 10451216379200822465,
+        "metrics": {
+          "committed_blocks": 1,
+          "drafts_offered": 1,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 1
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "discarded-tail",
+    "draft",
+    "native-error",
+    "partial-acceptance",
+    "select",
+    "verify"
+  ]
+}

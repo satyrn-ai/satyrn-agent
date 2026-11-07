@@ -16,11 +16,13 @@ class RoundResult:
     native_position: int
     rng: int
     token_ids: tuple[int, ...]
+    token_positions: list[int]
     reason: str | None
     error: Exception | None
     sampling: SamplingPolicy
     metrics: DFlashMetrics
     metadata: list[SampleMetadata]
+    native_calls: list[dict[str, object]]
 
 
 @dataclass(slots=True)

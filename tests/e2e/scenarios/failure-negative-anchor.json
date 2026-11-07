@@ -38,6 +38,8 @@
     }
   ],
   "expected_branches": [
+    "anchor",
+    "dflash-step",
     "engine-error"
   ]
 }

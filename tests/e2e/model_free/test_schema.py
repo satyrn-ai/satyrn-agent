@@ -97,6 +97,51 @@ def test_invalid_nested_call_is_rejected(tmp_path: Path) -> None:
         load_scenario(write_document(tmp_path / "nested.json", document))
 
 
+def test_version_rejects_boolean(tmp_path: Path) -> None:
+    document = valid_document()
+    document["version"] = True
+
+    with pytest.raises(ValueError, match="scenario does not match"):
+        load_scenario(write_document(tmp_path / "version.json", document))
+
+
+def test_explicit_null_sampling_override_is_rejected(tmp_path: Path) -> None:
+    document = valid_document()
+    document["config"]["sampling"] = {"temperature": None}
+
+    with pytest.raises(ValueError, match="scenario does not match"):
+        load_scenario(write_document(tmp_path / "null-sampling.json", document))
+
+
+@pytest.mark.parametrize(("name", "value"), [("temperature", -1), ("top_p", 1.1), ("min_p", -0.1), ("top_k", -1)])
+def test_sampling_ranges_are_rejected(tmp_path: Path, name: str, value: float) -> None:
+    document = valid_document()
+    document["config"]["sampling"] = {name: value}
+
+    with pytest.raises(ValueError, match="scenario does not match"):
+        load_scenario(write_document(tmp_path / f"{name}.json", document))
+
+
+def test_unhashable_operation_is_a_validation_error(tmp_path: Path) -> None:
+    document = valid_document()
+    document["native"]["calls"][0]["op"] = []
+
+    with pytest.raises(ValueError, match="op"):
+        load_scenario(write_document(tmp_path / "unhashable.json", document))
+
+
+@pytest.mark.parametrize("field", ["expected_branches", "stop_tokens", "missing"])
+def test_collection_constraints_are_enforced(tmp_path: Path, field: str) -> None:
+    document = valid_document()
+    if field == "expected_branches":
+        document[field] = []
+    else:
+        document["native"][field] = [1, 1]
+
+    with pytest.raises(ValueError, match="scenario does not match"):
+        load_scenario(write_document(tmp_path / f"{field}.json", document))
+
+
 def test_duplicate_scenario_ids_are_rejected(tmp_path: Path) -> None:
     first = write_document(tmp_path / "first.json", valid_document())
     second = write_document(tmp_path / "second.json", valid_document())

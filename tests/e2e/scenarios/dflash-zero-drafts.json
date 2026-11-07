@@ -50,6 +50,15 @@
     }
   ],
   "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "draft",
+    "eval",
+    "max_tokens",
+    "row",
+    "select",
+    "verify",
     "zero-drafts"
   ]
 }

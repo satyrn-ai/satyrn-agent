@@ -89,7 +89,16 @@
     }
   ],
   "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "draft",
+    "eval",
     "full-acceptance",
-    "metadata"
+    "max_tokens",
+    "metadata",
+    "row",
+    "select",
+    "verify"
   ]
 }

@@ -69,7 +69,15 @@
     }
   ],
   "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "draft",
+    "engine-error",
     "native-error",
-    "poison"
+    "poison",
+    "row",
+    "select",
+    "verify"
   ]
 }

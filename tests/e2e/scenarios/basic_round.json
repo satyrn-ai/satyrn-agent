@@ -68,11 +68,100 @@
           "Token",
           "Token",
           "Stopped"
+        ],
+        "transcript": [
+          1,
+          11,
+          12
+        ],
+        "native_calls": [
+          {
+            "op": "draft",
+            "anchor": 11,
+            "maximum": 7
+          },
+          {
+            "op": "verify",
+            "anchor": 11,
+            "drafts": [
+              12
+            ]
+          },
+          {
+            "op": "select",
+            "row": 0
+          },
+          {
+            "op": "commit",
+            "rows": 2
+          }
+        ],
+        "token_positions": [
+          3,
+          3
+        ],
+        "events": [
+          {
+            "type": "Prefill",
+            "payload": {
+              "done": 0,
+              "total": 1,
+              "cached_prefix": 0,
+              "tps": 0.0
+            }
+          },
+          {
+            "type": "Synced",
+            "payload": {
+              "pos": 1,
+              "plan": {
+                "kind": "rebuild",
+                "reused": 0,
+                "to_prefill": 1,
+                "fits": true,
+                "checkpoint": null
+              },
+              "prefilled": 1
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 11,
+              "text_bytes": [
+                10
+              ]
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 12,
+              "text_bytes": [
+                11
+              ]
+            }
+          },
+          {
+            "type": "Stopped",
+            "payload": {
+              "reason": "max_tokens"
+            }
+          }
         ]
       }
     }
   ],
   "expected_branches": [
-    "anchor"
+    "anchor",
+    "commit",
+    "dflash-step",
+    "draft",
+    "full-acceptance",
+    "max_tokens",
+    "metadata",
+    "row",
+    "select",
+    "verify"
   ]
 }
