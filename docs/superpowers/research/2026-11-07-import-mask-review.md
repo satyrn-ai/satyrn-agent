@@ -7,9 +7,10 @@ rationale, and the backlog entry. Roadmap:
 
 **What is measured:** the cited records below, re-read by the reviewer. The
 484.054 ms figure was recomputed from all 208 retained mask records.
-**What is conjecture:** that a cached, batched import mask would be cheap on
-ds4-py (section 4), and any claim about its benefit. No import mask has been
-built or timed.
+A cost screen on the 27B (section 4) measured about 0.1 ms per masked step
+for a cached, batched mask.
+**What is conjecture:** any claim about the mask's benefit, and the cost of a
+multi-token trie walk, which the screen did not include.
 
 ## The question
 
@@ -79,7 +80,49 @@ a cached, batched mask on ds4-py is unmeasured.
   name can still be the wrong one, so zero `ImportError`s is not the success
   criterion.
 
-## 4. A quick cost test (proposed, not run)
+## 4. Cost screen on the 27B (run 2026-11-07)
+
+**Setup:** `Qwen3.8-27B-Q4_K_M.gguf`, ds4 upstream `5379c1c9` with
+satyrn-agent's qwen35 patches (the e2e-built `libds4.dylib`, Metal), ds4-py
+`5c98c6a`, M5 Max 128 GB. ctx 4096, temperature 0, seed 1, 128 tokens per run,
+a fresh engine per run, one discarded warm-up. Script:
+[`2026-11-07-import-mask-review/mask_cost.py`](2026-11-07-import-mask-review/mask_cost.py).
+Whole run: 36.5 s.
+
+**Arms:** `none` (no hook); `copyset` (hook copies the logits and sets them
+back, the floor for any batched mask); `mask` (hook keeps only a cached
+allowed set and sets everything else to `-inf`, on **every** step, the worst
+case; a real import mask fires only at a few name positions per file).
+
+| Rep | Arm | ms/token | Hook ms/step |
+| --- | --- | ---: | ---: |
+| 0 | none | 33.5 | — |
+| 0 | copyset | 34.0 | 0.084 |
+| 0 | mask | 34.9 | 0.090 |
+| 1 | none | 35.5 | — |
+| 1 | copyset | 37.3 | 0.069 |
+| 1 | mask | 36.7 | 0.108 |
+
+**Allowed set:** 677 exported names from 10 stdlib modules → 649 first
+tokens, built by tokenizing each name in 17.5 ms, once.
+
+**Reading:**
+
+- The hook body costs **about 0.1 ms per masked step**, under 0.3% of a
+  token. P16's 484 ms was the allowed-set construction; caching it removes
+  that cost.
+- Wall time per token differs between arms by less than the 2 ms swing
+  between reps, so any extra cost of running a hook at all is within noise at
+  n = 2.
+- This settles the cost question for this design: a cached, batched mask is
+  cheap on ds4-py. Benefit is still unmeasured.
+
+**Limits:** first-token masking only. A real mask also walks a token trie for
+multi-token names; that adds Python work per masked step, not measured here.
+Larger allowed sets scale the copy loop linearly. ctx 4096 gives 28–30
+tok/s here; the 18.5 tok/s figure elsewhere is from longer contexts.
+
+## 4a. The cost test as proposed (before the run)
 
 From the ds4-py code, not a measurement:
 
@@ -103,8 +146,8 @@ one-off trie build time. n = 3 per arm reads a cost, not a benefit.
 
 - The calibration screen shows no import errors and no repair time: the mask
   stays parked with nothing to fix.
-- The cost test shows a cached mask adds tens of milliseconds per step: cost
-  matters again.
+- A trie-walking mask turns out to add tens of milliseconds per step: cost
+  matters again. (The first-token screen measured about 0.1 ms.)
 
 ## Risks
 

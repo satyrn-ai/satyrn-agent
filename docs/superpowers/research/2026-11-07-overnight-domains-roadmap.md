@@ -94,9 +94,9 @@ What the brainstorm settled:
   keyword argument (`allow_redirects`), which an export index can't see. So
   the index serves packet validation and the skeleton, and the item 1
   calibration measures import errors and their repair cost.
-- **Import mask deferred.** Its benefit under this harness is unmeasured,
-  and the 484 ms figure measured a different implementation (99% was
-  building the allowed set). See
+- **Import mask deferred.** Its benefit under this harness is unmeasured.
+  Cost is not the obstacle: a cached, batched mask measured about 0.1 ms per
+  step on the 27B; the old 484 ms was 99% allowed-set construction. See
   [2026-11-07-import-mask-review.md](2026-11-07-import-mask-review.md).
 - **Pyrefly mid-decode is parked.** tainie's fork (`tainie-fork`, with
   `overlay-check`) exists, but from a Python host it would be a subprocess.
