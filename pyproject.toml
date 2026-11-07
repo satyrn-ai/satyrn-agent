@@ -128,10 +128,16 @@ ini_options.markers = [
 ]
 
 [tool.datamodel-codegen]
-input = "tests/e2e/schema/scenario.schema.json"
-output = "tests/e2e/scenarios/_generated/scenario_types.py"
-input-file-type = "jsonschema"
-output-model-type = "typing.TypedDict"
 preset = "practical-py314-20261104"
 formatters = [ "ruff-check", "ruff-format" ]
 extra-fields = "forbid"
+jobs.agent_config.input = "schemas/satyrn-config.schema.json"
+jobs.agent_config.output = "src/satyrn_agent/_generated/config.py"
+jobs.agent_config.input-file-type = "jsonschema"
+jobs.agent_config.output-model-type = "typing.TypedDict"
+# Allow the trusted shared local schema reference outside the input directory.
+jobs.e2e_scenario.allow-remote-refs = true
+jobs.e2e_scenario.input = "tests/e2e/schema/scenario.schema.json"
+jobs.e2e_scenario.output = "tests/e2e/scenarios/_generated/scenario_types.py"
+jobs.e2e_scenario.input-file-type = "jsonschema"
+jobs.e2e_scenario.output-model-type = "typing.TypedDict"

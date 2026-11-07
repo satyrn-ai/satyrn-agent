@@ -54,7 +54,7 @@ repos:
     hooks:
       - id: scenario-types
         name: check generated scenario types
-        entry: uv run --frozen datamodel-codegen --check
+        entry: uv run --frozen datamodel-codegen --all-jobs --check
         language: system
         pass_filenames: false
         always_run: true

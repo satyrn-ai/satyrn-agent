@@ -9,15 +9,15 @@ from typing import TypeIs, cast
 from ds4py._json import is_string_key_mapping
 
 from tests.e2e.scenarios._generated.scenario_types import (
+    ConfigDocument,
     Expectation,
     Metrics,
     Native,
     NativeCall,
     Round,
     SamplingDefaults,
-    SamplingOverrides,
+    SamplingOverridesDocument,
     Scenario,
-    ScenarioConfig,
 )
 
 SCENARIO_ROOT = Path(__file__).parents[1] / "scenarios"
@@ -55,7 +55,7 @@ def _allowed(value: Mapping[str, object], names: set[str]) -> bool:
     return set(value) <= names
 
 
-def _sampling_overrides(value: object) -> TypeIs[SamplingOverrides]:
+def _sampling_overrides(value: object) -> TypeIs[SamplingOverridesDocument]:
     if not is_string_key_mapping(value) or not _allowed(value, {"temperature", "top_k", "top_p", "min_p"}):
         return False
     for name in ("temperature", "top_p", "min_p"):
@@ -149,7 +149,7 @@ def _native(value: object) -> TypeIs[Native]:  # noqa: PLR0911 - Each optional n
     return (defaults := value.get("sampling_defaults")) is None or _sampling_defaults(defaults)
 
 
-def _config(value: object) -> TypeIs[ScenarioConfig]:
+def _config(value: object) -> TypeIs[ConfigDocument]:
     if not is_string_key_mapping(value) or not _allowed(
         value,
         {"dflash", "drafter_path", "draft_tokens", "sampling", "think_budget"},

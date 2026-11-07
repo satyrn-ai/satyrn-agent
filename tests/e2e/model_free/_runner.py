@@ -29,7 +29,7 @@ from tests.conftest import (
 )
 from tests.e2e.model_free._native import ScenarioFakeNative
 from tests.e2e.model_free._observations import RoundResult, ScenarioResult
-from tests.e2e.scenarios._generated.scenario_types import Expectation, Round, Scenario, ScenarioConfig
+from tests.e2e.scenarios._generated.scenario_types import ConfigDocument, Expectation, Round, Scenario
 
 SUPPORTED_BRANCHES = {
     "anchor",
@@ -61,7 +61,7 @@ SUPPORTED_BRANCHES = {
 }
 
 
-def _config(config: ScenarioConfig) -> SatyrnConfig:
+def _config(config: ConfigDocument) -> SatyrnConfig:
     sampling = config.get("sampling", {})
     budget = config.get("think_budget")
     return SatyrnConfig(

@@ -6,14 +6,14 @@ from typing import Literal, NotRequired
 from typing_extensions import TypedDict
 
 
-class SamplingOverrides(TypedDict, closed=True):
+class SamplingOverridesDocument(TypedDict, closed=True):
     temperature: NotRequired[float]
     top_k: NotRequired[int]
     top_p: NotRequired[float]
     min_p: NotRequired[float]
 
 
-class ThinkBudget(TypedDict, closed=True):
+class ThinkBudgetDocument(TypedDict, closed=True):
     max_tokens: int
     bias: float
 
@@ -87,12 +87,14 @@ class SampleMetadata(TypedDict, closed=True):
     parser_state: NotRequired[str | None]
 
 
-class ScenarioConfig(TypedDict, closed=True):
+class ConfigDocument(TypedDict, closed=True):
+    """External JSON configuration for the Satyrn agent."""
+
     dflash: NotRequired[Literal["auto", "on", "off"]]
     drafter_path: NotRequired[str | None]
     draft_tokens: NotRequired[int]
-    sampling: NotRequired[SamplingOverrides]
-    think_budget: NotRequired[ThinkBudget | None]
+    sampling: NotRequired[SamplingOverridesDocument]
+    think_budget: NotRequired[ThinkBudgetDocument | None]
 
 
 class Native(TypedDict, closed=True):
@@ -149,6 +151,6 @@ class Scenario(TypedDict, closed=True):
     """Optional raw Python config mapping for public constructor validation scenarios."""
     backend: Literal["metal", "cpu"]
     native: Native
-    config: ScenarioConfig
+    config: ConfigDocument
     rounds: list[Round]
     expected_branches: set[str]

@@ -1,6 +1,5 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://satyrn.ai/schemas/e2e-scenario-v1.json",
   "title": "Scenario",
   "description": "A deterministic model-free public-flow E2E scenario.",
   "type": "object",
@@ -49,7 +48,7 @@
       "$ref": "#/$defs/Native"
     },
     "config": {
-      "$ref": "#/$defs/ScenarioConfig"
+      "$ref": "../../../schemas/satyrn-config.schema.json"
     },
     "rounds": {
       "type": "array",
@@ -69,88 +68,6 @@
     }
   },
   "$defs": {
-    "ScenarioConfig": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "dflash": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "on",
-            "off"
-          ],
-          "default": "auto"
-        },
-        "drafter_path": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": "drafter.gguf"
-        },
-        "draft_tokens": {
-          "type": "integer",
-          "minimum": 0,
-          "default": 0
-        },
-        "sampling": {
-          "$ref": "#/$defs/SamplingOverrides"
-        },
-        "think_budget": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/ThinkBudget"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
-    },
-    "SamplingOverrides": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "temperature": {
-          "type": "number",
-          "minimum": 0
-        },
-        "top_k": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "top_p": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        },
-        "min_p": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        }
-      }
-    },
-    "ThinkBudget": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "max_tokens",
-        "bias"
-      ],
-      "properties": {
-        "max_tokens": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "bias": {
-          "type": "number",
-          "exclusiveMinimum": 0
-        }
-      }
-    },
     "Native": {
       "type": "object",
       "additionalProperties": false,

@@ -9,7 +9,7 @@
     "calls": []
   },
   "config": {
-    "dflash": "on",
+    "dflash": "off",
     "drafter_path": null
   },
   "rounds": [
@@ -36,5 +36,9 @@
   ],
   "expected_branches": [
     "policy-error"
-  ]
+  ],
+  "raw_config": {
+    "dflash": "on",
+    "drafter_path": null
+  }
 }
