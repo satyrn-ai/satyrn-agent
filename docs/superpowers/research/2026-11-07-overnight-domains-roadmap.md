@@ -139,6 +139,11 @@ Two more presence checks in the same evening:
   sides of every hole.
 - **Logits on a short question.** Does one forward pass pick the right typed
   choice for a few known cases?
+- **Trie-walk mask cost.** Time a mask that follows multi-token names
+  through a token trie (existing paths and symbols from the index), the same
+  size of screen as the first-token cost screen in the
+  [import-mask review](2026-11-07-import-mask-review.md), which measured about
+  0.1 ms per step.
 *Watch for* the 27B failure shapes already recorded in ds4-engine: probing
 spirals, 12K-token thinks, stale kwargs (`allow_redirects`) and rewrite loops.
 
@@ -201,6 +206,17 @@ decided at plan time, by deterministic analysis first (files present, names in
 the index) and by logits on a short question second. The model writes prose
 only where no choice list exists.
 
+**Design option: masked fields for existing things.** Packet fields that must
+name something that already exists (readable files, consumed interfaces,
+referenced symbols, multi-token choices such as a model name or URL name) are
+decoded under a token-trie mask built from the index, so an invented name
+can't be written at all. Fields that legitimately create something (new files,
+new function names) stay unmasked. Rule: mask only where the valid set is
+closed and complete. QW.2's losses all came from a mask blocking valid output,
+and ds4-engine's grammar masks showed no gain except on Flash
+(`capability-map.md:92`). Cost is not the obstacle (about 0.1 ms per step,
+first-token screen); the trie walk is timed in item 0.
+
 ### 4b. Fast path for routine in-domain work
 
 Fable's proposal from the Jev review: no thinking (or a small budget) plus a
@@ -223,7 +239,8 @@ both mechanical and report-back.
   method failure from a model failure.
 - **Mellum:** reopen when ds4 has a `mellum` architecture port.
 - **Masks / constrained decoding (style):** reopen if style drift survives
-  the examples and the signature prefill.
+  the examples and the signature prefill. (Masks over closed sets of existing
+  names are no longer parked; see item 4.)
 - **Import mask:** reopen when invalid imports impose meaningful failure or
   repair cost after the skeleton and a write-time import check, on any model.
   Benchmark a cached, batched mask before building
