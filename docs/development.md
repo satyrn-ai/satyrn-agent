@@ -103,6 +103,77 @@ Those workflows require the relevant external ds4-py checkout, patched ds4 tree,
 or dense qwen35 GGUF. Portable quality and shell checks do not establish native
 inference correctness, live replay parity, or DFlash correctness.
 
-The distributable `src/satyrn_agent` package and its Python test suites arrive in
-the stacked `feat/agent-package` branch. The quality PR intentionally manages
-only the existing tools project.
+## Agent package checks
+
+Run the model-free public-flow E2E suite with its independent line and branch
+coverage gate:
+
+```bash
+devenv shell -- uv run --frozen pytest tests/e2e/model_free \
+  --cov=satyrn_agent --cov-branch --cov-report=term-missing \
+  --cov-fail-under=100
+```
+
+This is the primary Python verification suite. Auxiliary unit/abnormal tests run
+separately and do not fill missing E2E branches:
+
+```bash
+devenv shell -- uv run --frozen pytest tests/abnormal
+```
+
+### Add a scenario
+
+Add a JSON document to `tests/e2e/scenarios/`. Its `expected_branches` declares
+the behavior the scenario must reach. The shared runner executes public
+`satyrn_agent.open()` and real ds4-py worker/session code; only optional native
+bindings are scripted. Do not add scenario-specific expected values to the
+runner.
+
+`tests/e2e/schema/scenario.schema.json` is the external contract. After editing
+it, regenerate the checked-in TypedDicts:
+
+```bash
+devenv shell -- uv run --frozen datamodel-codegen
+```
+
+The project uses `practical-py314-20261104`. Review `--recommend-options` when
+the schema changes substantially. Generated TypedDicts use no Pydantic models or
+TypeAdapter. Handwritten `TypeIs` validators and conversion logic perform
+runtime validation. prek rejects stale generated files and invalid scenario
+documents.
+
+### Production config schema
+
+`schemas/satyrn-config.schema.json` is the production external config contract,
+and the scenario schema references it. Generate the production DTO and scenario
+DTOs with:
+
+```bash
+devenv shell -- uv run --frozen datamodel-codegen --all-jobs
+```
+
+Use `config_from_dict(data)` to validate a JSON-shaped external mapping and
+construct the frozen, slotted `SatyrnConfig`. The generated DTOs do not replace
+that domain object. The Python boundary deliberately requires actual `int`
+values for integer fields, rather than accepting an integral float such as
+`1.0`. Use `--recommend-options` for schema-specific option review and
+`--generate-cli-command` to inspect effective generation options. Do not use
+Pydantic BaseModel or TypeAdapter.
+
+Build and inspect the wheel:
+
+```bash
+devenv shell -- uv build --wheel
+unzip -l dist/*.whl | grep 'satyrn_agent/'
+```
+
+The package pins ds4-py companion commit
+`02562e51589d1db75ba96c23cd05603bf2a248dd`, including tentative decode
+transactions and fatal-state poisoning. Rebuild the ds4 ABI manifest after
+installing or updating `satyrn_agent`; optional symbols still need a fresh probe
+record.
+
+The real patched-engine suite and its required model, drafter, library, and
+SHA-256 inputs are documented in `tests/e2e/README.md`. Run it before claiming
+native DFlash correctness or live parity. Its 100% coverage requirement is
+separate from the portable coverage result, even when both commands report 100%.

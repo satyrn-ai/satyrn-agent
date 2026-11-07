@@ -34,6 +34,10 @@ repos:
     hooks:
       - id: check-github-workflows
       - id: check-github-workflows-require-timeout
+      - id: check-jsonschema
+        name: validate E2E scenarios
+        args: [--schemafile, tests/e2e/schema/scenario.schema.json]
+        files: ^tests/e2e/scenarios/.*\.json$
 
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.12
@@ -48,6 +52,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: scenario-types
+        name: check generated scenario types
+        entry: uv run --frozen datamodel-codegen --all-jobs --check
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
       - id: forbid-type-guard
         name: TypeGuard is banned; use TypeIs
         entry: \bTypeGuard\b

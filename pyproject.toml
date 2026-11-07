@@ -1,22 +1,27 @@
+[build-system]
+build-backend = "uv_build"
+requires = [ "uv-build>=0.12.22,<0.13.0" ]
+
 [project]
 name = "satyrn-agent"
 version = "0.1.0"
 description = "Downstream Satyrn agent and ds4 patch tooling"
 requires-python = ">=3.14"
 dependencies = [
+  "ds4py @ git+https://github.com/rochecompaan/ds4-py.git@02562e51589d1db75ba96c23cd05603bf2a248dd",
   "typing-extensions>=4.16.0,<5",
 ]
+entry-points."ds4py.bindings".satyrn = "satyrn_agent.bindings:BINDINGS"
 
 [dependency-groups]
 dev = [
+  "datamodel-code-generator==0.90.0",
   "prek==0.5.7",
   "pytest>=9.1.1",
+  "pytest-cov>=7.1.0",
   "ruff>=0.17.3",
   "ty==0.0.95",
 ]
-
-[tool.uv]
-package = false
 
 [tool.ruff]
 line-length = 120
@@ -60,6 +65,10 @@ lint.ignore = [
   "TRY003", # Domain exceptions carry their useful context at raise sites.
 ]
 lint.explicit-preview-rules = true
+lint.per-file-ignores."src/satyrn_agent/_native.py" = [
+  "ANN401", # ctypes signatures remain dynamic at the native boundary.
+  "TID251", # Any is isolated to reviewed native signatures.
+]
 lint.per-file-ignores."tests/**/*.py" = [
   "ANN401",  # Dynamic test doubles can require Any.
   "DTZ001",  # Naive local-time fixtures are intentional.
@@ -89,7 +98,7 @@ lint.mccabe.max-complexity = 15
 lint.preview = true
 
 [tool.ty]
-src.include = [ "tests", "tools" ]
+src.include = [ "src", "tests", "tools" ]
 environment.python-version = "3.14"
 rules.blanket-ignore-comment = "error"
 rules.disjoint-cast = "error"
@@ -110,3 +119,25 @@ rules.unused-ignore-comment = "error"
 terminal.error-on-warning = true
 analysis.strict-equality-semantics = true
 analysis.strict-generic-narrowing = true
+
+[tool.pytest]
+ini_options.testpaths = [ "tests" ]
+ini_options.markers = [
+  "build: builds patched libds4 from an explicit source tree",
+  "live: needs explicit target and drafter GGUFs and a patched library",
+]
+
+[tool.datamodel-codegen]
+preset = "practical-py314-20261104"
+formatters = [ "ruff-check", "ruff-format" ]
+extra-fields = "forbid"
+jobs.agent_config.input = "schemas/satyrn-config.schema.json"
+jobs.agent_config.output = "src/satyrn_agent/_generated/config.py"
+jobs.agent_config.input-file-type = "jsonschema"
+jobs.agent_config.output-model-type = "typing.TypedDict"
+# Allow the trusted shared local schema reference outside the input directory.
+jobs.e2e_scenario.allow-remote-refs = true
+jobs.e2e_scenario.input = "tests/e2e/schema/scenario.schema.json"
+jobs.e2e_scenario.output = "tests/e2e/scenarios/_generated/scenario_types.py"
+jobs.e2e_scenario.input-file-type = "jsonschema"
+jobs.e2e_scenario.output-model-type = "typing.TypedDict"

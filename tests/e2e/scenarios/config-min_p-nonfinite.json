@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "id": "config-min_p-nonfinite",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10
+    ],
+    "calls": []
+  },
+  "config": {
+    "dflash": "off",
+    "drafter_path": null
+  },
+  "raw_config": {
+    "sampling": {
+      "min_p": "nonfinite"
+    }
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 1,
+      "expect": {
+        "reason": "ConfigurationError: min_p must be finite",
+        "token_ids": [],
+        "native_position": 0,
+        "rng": 1,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": []
+      }
+    }
+  ],
+  "expected_branches": [
+    "config-error"
+  ]
+}

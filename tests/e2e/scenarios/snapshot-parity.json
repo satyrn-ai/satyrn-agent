@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "id": "snapshot-parity",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10,
+      11,
+      12
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "Check speculative parity.",
+      "mode": "chat",
+      "max_tokens": 3,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          10,
+          11,
+          12
+        ],
+        "native_position": 524,
+        "rng": 12793040940332582595,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [
+          {
+            "position": 521,
+            "think_tokens": 0,
+            "sampled_tokens": [],
+            "parser_state": "SEARCH"
+          },
+          {
+            "position": 522,
+            "think_tokens": 1,
+            "sampled_tokens": [
+              10
+            ],
+            "parser_state": "SEARCH"
+          },
+          {
+            "position": 523,
+            "think_tokens": 2,
+            "sampled_tokens": [
+              10,
+              11
+            ],
+            "parser_state": "SEARCH"
+          }
+        ],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "TextDelta",
+          "Token",
+          "TextDelta",
+          "Token",
+          "TextDelta",
+          "Stopped"
+        ]
+      }
+    },
+    {
+      "prompt": "Check speculative parity.",
+      "mode": "chat",
+      "max_tokens": 3,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          10,
+          11,
+          12
+        ],
+        "native_position": 524,
+        "rng": 12793040940332582595,
+        "metrics": {
+          "committed_blocks": 2,
+          "drafts_offered": 1,
+          "drafts_accepted": 1,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [
+          {
+            "position": 521,
+            "think_tokens": 0,
+            "sampled_tokens": [],
+            "parser_state": "SEARCH"
+          },
+          {
+            "position": 522,
+            "think_tokens": 1,
+            "sampled_tokens": [
+              10
+            ],
+            "parser_state": "SEARCH"
+          },
+          {
+            "position": 523,
+            "think_tokens": 2,
+            "sampled_tokens": [
+              10,
+              11
+            ],
+            "parser_state": "SEARCH"
+          }
+        ],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "TextDelta",
+          "Token",
+          "TextDelta",
+          "Token",
+          "TextDelta",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "draft",
+    "eval",
+    "full-acceptance",
+    "max_tokens",
+    "metadata",
+    "row",
+    "select",
+    "verify"
+  ],
+  "snapshot_parity": true
+}

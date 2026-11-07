@@ -47,6 +47,22 @@ Run the portable shell regression suite:
 bash tests/ds4_tools_test.sh
 ```
 
+Run the portable Python suite and its coverage gate:
+
+```bash
+uv run --frozen pytest tests/e2e/model_free \
+  --cov=satyrn_agent --cov-branch --cov-report=term-missing \
+  --cov-fail-under=100
+```
+
+See `tests/e2e/README.md` for scenario-driven model-free E2E and the separate
+real patched-engine suite. Model-free coverage does not prove live DFlash parity.
+Unit tests are auxiliary only: parameterized value validation and complex
+doubles required by exceptions or external services. Production external config
+uses `schemas/satyrn-config.schema.json`, generated TypedDicts, and
+`config_from_dict`; regenerate both named jobs after schema edits. Do not use
+Pydantic BaseModel or TypeAdapter.
+
 For workflow changes, also run:
 
 ```bash

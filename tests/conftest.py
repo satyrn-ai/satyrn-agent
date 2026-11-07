@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+import hashlib
+import os
+from collections.abc import Generator, Iterable, Sequence
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from tests.e2e.model_free._native import ScenarioFakeNative
+
+import pytest
+from ds4py import Session
+from ds4py._native.protocol import Snapshot
+from ds4py.engine.decode import PlainStep
+from ds4py.engine.events import Event, ReserveReached, Stopped, Token
+from ds4py.engine.logits import LogitsView
+from ds4py.engine.sampling import SamplingPolicy
+from ds4py.engine.tool_prompt import ToolDefinition
+from ds4py.engine.transcript import TranscriptView
+
+import satyrn_agent
+from satyrn_agent.config import SatyrnConfig
+from satyrn_agent.dflash import DFlashStep
+from satyrn_agent.engine import SatyrnEngine
+from tests.e2e.corpus import load_corpus
+
+
+@dataclass(frozen=True, slots=True)
+class LiveSettings:
+    model: Path
+    drafter: Path
+    lib: Path
+    source: Path | None
+
+
+@dataclass(slots=True)
+class RoundObservation:
+    events: list[Event]
+    transcript: tuple[int, ...]
+    native_position: int
+    rng: int
+    wall_seconds: float
+    assistant_start: int
+    assistant_tokens: tuple[int, ...]
+
+    @property
+    def token_ids(self) -> tuple[int, ...]:
+        return tuple(event.id for event in self.events if isinstance(event, Token))
+
+    @property
+    def reason(self) -> str | None:
+        stopped = [event.reason for event in self.events if isinstance(event, Stopped)]
+        return stopped[-1] if stopped else None
+
+
+def _required(name: str) -> Path:
+    value = os.environ.get(name)
+    if value is None:
+        pytest.skip(f"{name} is required for the real patched-engine gate")
+    return Path(value).expanduser().resolve()
+
+
+def _verify_identity(path: Path, kind: Literal["target", "drafter"]) -> None:
+    corpus = load_corpus()
+    identity = corpus["target"] if kind == "target" else corpus["drafter"]
+    expected = identity["sha256"]
+    if not isinstance(expected, str):
+        pytest.skip(f"approved {kind} SHA-256 and quantization must be pinned in tests/e2e/corpus.json")
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != expected:
+        pytest.fail(f"{path} SHA-256 is {actual}, expected approved {expected}")
+
+
+@pytest.fixture(scope="session")
+def live_settings() -> LiveSettings:
+    source = os.environ.get("SATYRN_TEST_DS4_SRC")
+    settings = LiveSettings(
+        model=_required("SATYRN_TEST_MODEL"),
+        drafter=_required("SATYRN_TEST_DRAFTER"),
+        lib=_required("SATYRN_TEST_LIB"),
+        source=Path(source).resolve() if source is not None else None,
+    )
+    _verify_identity(settings.model, "target")
+    _verify_identity(settings.drafter, "drafter")
+    return settings
+
+
+@contextmanager
+def configured_session(
+    settings: LiveSettings,
+    config: SatyrnConfig,
+    *,
+    seed: int = 1,
+    ctx: int = 100_000,
+) -> Generator[tuple[SatyrnEngine, Session]]:
+    with satyrn_agent.open(
+        settings.model,
+        config=config,
+        ctx=ctx,
+        lib=settings.lib,
+        seed=seed,
+    ) as wrapper:
+        yield wrapper, wrapper.session()
+
+
+@dataclass(frozen=True, slots=True)
+class SampleMetadata:
+    position: int
+    think_tokens: int
+    sampled_tokens: tuple[int, ...]
+    parser_state: str | None
+
+
+class MetadataRecorder:
+    def __init__(self) -> None:
+        self.calls: list[SampleMetadata] = []
+        self.serial_count: int | None = None
+
+    def __call__(self, view: LogitsView) -> None:
+        self.calls.append(SampleMetadata(view.position, view.think_tokens, view.sampled_tokens, view.parser_state))
+
+    @property
+    def serial(self) -> tuple[SampleMetadata, ...]:
+        if self.serial_count is None:
+            return ()
+        return tuple(self.calls[: self.serial_count])
+
+    @property
+    def speculative(self) -> tuple[SampleMetadata, ...]:
+        if self.serial_count is None:
+            return ()
+        return tuple(self.calls[self.serial_count :])
+
+
+def _assistant_tokens(transcript: TranscriptView) -> tuple[int, ...]:
+    tokens = transcript.tokens
+    return tuple(
+        token
+        for segment in transcript.segments
+        if segment.kind == "assistant"
+        for token in tokens[segment.start : segment.end]
+    )
+
+
+def normalized_events(events: Iterable[Event]) -> list[tuple[str, dict[str, object]]]:
+    return [
+        ("ReserveReached", {"needed": event.needed})
+        if isinstance(event, ReserveReached)
+        else (type(event).__name__, dict[str, object](asdict(event)))
+        for event in events
+    ]
+
+
+def observe_round(
+    session: Session,
+    *,
+    max_tokens: int,
+    sampling: SamplingPolicy | None = None,
+    stop_sequences: Sequence[bytes] = (),
+    started: float,
+) -> RoundObservation:
+    import time
+
+    assistant_start = len(_assistant_tokens(session.transcript))
+    events = []
+    for event in session.run_round(max_tokens=max_tokens, sampling=sampling, stop_sequences=stop_sequences):
+        if isinstance(event, ReserveReached):
+            event.fail()
+        events.append(event)
+    return RoundObservation(
+        events=events,
+        transcript=session.transcript.tokens,
+        native_position=session.ctx_used,
+        rng=session._rng.state.value,
+        wall_seconds=time.perf_counter() - started,
+        assistant_start=assistant_start,
+        assistant_tokens=_assistant_tokens(session.transcript),
+    )
+
+
+def assert_alignment(
+    session: Session,
+    observation: RoundObservation,
+    scripted_native: ScenarioFakeNative | None = None,
+) -> None:
+    generated = observation.token_ids
+    assert observation.assistant_tokens[observation.assistant_start :] == generated
+    unevaluated_eos = (
+        sum(segment.end - segment.start for segment in session.transcript.segments if segment.kind == "eos")
+        if scripted_native is not None
+        else 0
+    )
+    assert observation.native_position == len(observation.transcript) - unevaluated_eos
+
+
+def prepare_chat(session: Session, prompt: str, *, tools: Iterable[ToolDefinition] = ()) -> int:
+    session.start_chat(tools=tools)
+    session.append_user(prompt)
+    return len(session.transcript.tokens)
+
+
+def restore_snapshot(
+    session: Session,
+    prompt_tokens: int,
+    snapshot: Snapshot,
+    rng: int,
+    step: DFlashStep,
+    scripted_native: ScenarioFakeNative | None = None,
+) -> None:
+    if scripted_native is not None:
+        scripted_native.reset_script()
+    session.truncate(prompt_tokens)
+    session._worker.call(lambda engine, native: native.load_snapshot(snapshot)).result()
+    session._rng.state.value = rng
+    session.set_decode_step(step)
+
+
+def serial_then_speculative(
+    wrapper: SatyrnEngine,
+    session: Session,
+    prompt: str,
+    *,
+    max_tokens: int,
+    sampling: SamplingPolicy,
+    tools: Iterable[ToolDefinition] = (),
+    recorder: MetadataRecorder | None = None,
+    scripted_native: ScenarioFakeNative | None = None,
+) -> tuple[RoundObservation, RoundObservation, int]:
+    import time
+
+    if not isinstance(wrapper._step, DFlashStep):
+        pytest.fail("the parity fixture requires a configured DFlashStep")
+    step = wrapper._step
+    prompt_tokens = prepare_chat(session, prompt, tools=tools)
+    if scripted_native is not None:
+        session._worker.call(lambda engine, native: native.sync(session.transcript.tokens)).result()
+    if recorder is not None:
+        session.add_logits_hook(recorder)
+    snapshot = session._worker.call(lambda engine, native: native.save_snapshot()).result()
+    rng = session._rng.state.value
+    session.set_decode_step(PlainStep())
+    started = time.perf_counter()
+    try:
+        serial = observe_round(session, max_tokens=max_tokens, sampling=sampling, started=started)
+        assert_alignment(session, serial, scripted_native)
+        if recorder is not None:
+            recorder.serial_count = len(recorder.calls)
+        restore_snapshot(session, prompt_tokens, snapshot, rng, step, scripted_native)
+        started = time.perf_counter()
+        speculative = observe_round(session, max_tokens=max_tokens, sampling=sampling, started=started)
+        assert_alignment(session, speculative, scripted_native)
+    finally:
+        snapshot.close()
+    return serial, speculative, prompt_tokens

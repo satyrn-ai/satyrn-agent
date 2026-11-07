@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "id": "native-over-draft-count",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ],
+        "count": 2
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf",
+    "draft_tokens": 1
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "DFlashError: ds4_session_dflash_draft: invalid draft count 2 for maximum 1",
+        "token_ids": [],
+        "native_position": 1,
+        "rng": 1,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "dflash-step",
+    "draft",
+    "native-error"
+  ]
+}

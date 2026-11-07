@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "id": "failure-verify",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      },
+      {
+        "op": "verify",
+        "error": "boom"
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 4,
+      "expect": {
+        "reason": "DFlashError: ds4_session_verify: boom",
+        "token_ids": [],
+        "native_position": 1,
+        "rng": 1,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "dflash-step",
+    "draft",
+    "native-error",
+    "verify"
+  ]
+}
