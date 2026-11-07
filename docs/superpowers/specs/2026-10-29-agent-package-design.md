@@ -665,11 +665,32 @@ No second front end or downstream persistence schema is implied by this list.
 
 ## 15. Verification
 
-### 15.1 Real-component E2E
+### 15.1 Model-free public-flow E2E
 
-Normal-path coverage uses the actual Satyrn package, the companion ds4-py, a
-patched `libds4`, and real GGUFs. `FakeNative`, scripted native steps, and mock
-models do not count as normal-path coverage.
+Normal-path coverage uses the actual Satyrn package, the companion ds4-py's real
+worker, session, decode context, transcript, and public `satyrn_agent.open()`
+flow. Only the external native library is replaced by deterministic
+`FakeNative` and scripted optional DFlash bindings. These scenarios establish
+Python orchestration and decode correctness, not native inference or live parity.
+
+Versioned JSON scenarios drive one shared runner. JSON Schema is the external
+contract, datamodel-code-generator produces TypedDicts, and handwritten `TypeIs`
+validators and conversion logic provide runtime validation. Pydantic models and
+TypeAdapter are not used. A scenario supplies native script responses, public
+round inputs, expected events/metrics/metadata, and `expected_branches`; the
+runner supplies no scenario-specific expected values or mocks of Satyrn's state
+machine. Every supported branch has at least one scenario, and missing branches
+fail with scenario-specific diagnostics.
+
+Unit tests are auxiliary only: parameterized value validation and complex
+doubles required by exceptions or external services. Other public behavior is
+covered by model-free E2E.
+
+### 15.2 Real-component E2E
+
+The separate real acceptance suite uses the actual Satyrn package, the companion
+ds4-py, a patched `libds4`, and real GGUFs. Its results are not replaced or
+implied by model-free coverage.
 
 The Metal E2E suite covers:
 
@@ -704,9 +725,9 @@ covers every normal-path decode branch. If a required branch is not produced
 by the real corpus, extend or adjust the corpus before implementation is
 accepted; an unreachable required case triggers re-planning, not a mock or a
 coverage exclusion. This mapping is a first-class deliverable because the
-live corpus is the deterministic record of the 100% normal-path gate.
+live corpus is the deterministic record of native acceptance.
 
-### 15.2 Abnormal paths
+### 15.3 Abnormal paths
 
 Mocks are allowed only for failures that are unsafe or impractical to induce
 with the real engine: missing/incompatible bindings, native error returns,
@@ -719,21 +740,22 @@ translation rather than mocking that logic away. The native-failure cases
 exercise the section 8.5 poison contract and prove that cleanup remains possible
 without admitting any later native operation.
 
-### 15.3 Gates
+### 15.4 Gates
 
 Run at minimum:
 
 ```bash
 uv run --frozen prek run --all-files --show-diff-on-failure
 uv run --frozen pytest tests/abnormal
-uv run --frozen pytest tests/abnormal tests/e2e \
+uv run --frozen pytest tests/e2e/model_free \
   --cov=satyrn_agent --cov-branch --cov-report=term-missing \
   --cov-fail-under=100
+uv run --frozen pytest tests/abnormal tests/e2e/live
 git diff --check
 ```
 
-The E2E command requires the target and drafter environment variables and the
-patched tree. Record the command, Mac model, macOS version, Metal backend,
+The live E2E command requires the target and drafter environment variables and the
+patched tree. The model-free command runs in ordinary CI without them. Record the command, Mac model, macOS version, Metal backend,
 GGUF paths/quantization, ds4 tree commit, ds4-py companion commit, coverage
 result, and live parity result in the implementation PR.
 
@@ -749,6 +771,8 @@ normal-path branches.
   ds4-py builds, while stale pre-install manifests still fail closed.
 - The generic ds4-py companion tests pass, with no Satyrn-specific code in
   ds4-py.
+- Model-free public-flow E2E reaches 100% line and branch coverage of new
+  `satyrn_agent` code without using auxiliary unit tests to fill missing branches.
 - Real Metal E2E covers the complete build/check/open/repeated-round workflow
   and proves DFlash/serial parity in DFlash mode, including stops,
   cancellation, parser events, hooks, and seeded RNG continuation.

@@ -59,8 +59,13 @@ jobs:
           nix profile add --accept-flake-config
           "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30#devenv"
 
-      - name: Run portable Python tests
-        run: devenv shell -- uv run --frozen pytest tests/unit tests/abnormal -q
+      - name: Run model-free E2E coverage
+        run: >-
+          devenv shell -- uv run --frozen pytest tests/e2e/model_free
+          --cov=satyrn_agent --cov-branch --cov-report=term-missing --cov-fail-under=100 -q
+
+      - name: Run auxiliary abnormal tests
+        run: devenv shell -- uv run --frozen pytest tests/abnormal -q
 
       - name: Build wheel
         run: devenv shell -- uv build --wheel

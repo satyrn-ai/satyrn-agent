@@ -6,6 +6,8 @@ from ds4py.engine.sampling import SamplingPolicy
 
 import satyrn_agent
 from satyrn_agent.config import DFlashMode, SatyrnConfig
+from satyrn_agent.engine import _select_step
+from satyrn_agent.errors import DFlashUnavailable
 from tests.conftest import MetadataRecorder, normalized_events, serial_then_speculative
 from tests.e2e.model_free._native import ScenarioFakeNative
 
@@ -22,6 +24,15 @@ def test_first_only_session_close_and_closed_error() -> None:
     wrapper.close()
     with pytest.raises(EngineError, match="engine is closed"):
         wrapper.session()
+
+
+def test_on_without_drafter_is_rejected_by_policy_dispatch() -> None:
+    config = SatyrnConfig()
+    object.__setattr__(config, "dflash", DFlashMode.ON)
+    native = ScenarioFakeNative({"script": [], "calls": []})
+
+    with pytest.raises(DFlashUnavailable, match="configured drafter"):
+        _select_step(native, config, 10, 20, "metal")
 
 
 def test_snapshot_serial_speculative_parity() -> None:

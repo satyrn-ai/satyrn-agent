@@ -24,22 +24,25 @@ All commands ran from the repository root through devenv.
 - `uv sync --frozen` — passed.
 - `uv run --frozen prek run --all-files --show-diff-on-failure` — passed,
   including Ruff, ty, ShellCheck, configuration, and workflow checks.
-- `uv run --frozen pytest tests/unit tests/abnormal --cov=satyrn_agent
+- `uv run --frozen pytest tests/e2e/model_free --cov=satyrn_agent
   --cov-branch --cov-report=term-missing --cov-fail-under=100 -q` —
-  **113 passed; 100% line and 100% branch coverage** over `satyrn_agent`.
-- `uv run --frozen --no-sync pytest tests/unit tests/abnormal tests/e2e -q` —
-  **113 passed, 17 skipped**. Every skip is a real patched-engine test whose
-  required model, drafter, library, or approved repository identity is absent.
+  **111 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
+  including 39 JSON scenarios through the shared public-flow runner.
+- `uv run --frozen --no-sync pytest tests/abnormal -q` — **8 passed** in the
+  auxiliary complex-fault suite.
+- `uv run --frozen --no-sync pytest tests/e2e/live -q` — **17 skipped**. Every
+  skip is a real patched-engine test whose required model, drafter, library, or
+  approved repository identity is absent.
 - `uv build --wheel` — passed; the wheel contains the native adapter, DFlash
   step, engine factory, and `ds4py.bindings` entry-point metadata.
 - `actionlint .github/workflows/ci.yml .github/workflows/ds4-tools.yml` — passed.
 - `bash tests/ds4_tools_test.sh` — **49 passed, 0 failed**.
 - `git diff --check` — passed.
 
-The 113 portable tests use real ds4-py decode context/state code and real
-Satyrn state-machine code. Scripted doubles are confined to abnormal native,
-failure, and policy boundaries. This result does not convert those doubles into
-normal-path real-engine evidence.
+The 111 model-free E2E tests use public `satyrn_agent.open()` and real ds4-py
+worker/session/decode code. Only the external native library is scripted. The
+100% result does not convert those doubles into normal-path real-engine evidence
+or use auxiliary unit tests to fill missing branches.
 
 ## Live acceptance boundary
 
@@ -82,5 +85,18 @@ native patch and ds4-py contracts. Changes made after that review include:
 
 The soft think-budget test intentionally does not require the closing marker to
 be absent: the capability is a soft bias, not a guaranteed stop or token
-injection prohibition. Its unit tests separately prove that the hook only biases
+injection prohibition. Its tests separately prove that the hook only biases
 logits and never appends transcript content.
+
+## Scenario-driven E2E migration
+
+The primary suite is now model-free public-flow E2E. A versioned JSON Schema and
+datamodel-code-generator 0.90.0 with `practical-py314-20261104` produce the
+scenario TypedDicts. Handwritten `TypeIs` validators and conversion logic perform
+runtime validation; Pydantic models and TypeAdapter are not used. prek checks
+scenario documents and generated-model drift.
+
+The real acceptance modules moved to `tests/e2e/live`. The governing agent
+package design now distinguishes the model-free normal-path coverage gate from
+real ds4/GGUF/Metal acceptance and limits auxiliary unit tests to parameterized
+values and complex exception/external-service doubles.

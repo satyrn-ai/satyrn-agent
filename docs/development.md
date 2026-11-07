@@ -105,13 +105,42 @@ inference correctness, live replay parity, or DFlash correctness.
 
 ## Agent package checks
 
-Run the portable Python suite with the line and branch coverage gate:
+Run the model-free public-flow E2E suite with its independent line and branch
+coverage gate:
 
 ```bash
-devenv shell -- uv run --frozen pytest tests/unit tests/abnormal \
+devenv shell -- uv run --frozen pytest tests/e2e/model_free \
   --cov=satyrn_agent --cov-branch --cov-report=term-missing \
   --cov-fail-under=100
 ```
+
+This is the primary Python verification suite. Auxiliary unit/abnormal tests run
+separately and do not fill missing E2E branches:
+
+```bash
+devenv shell -- uv run --frozen pytest tests/abnormal
+```
+
+### Add a scenario
+
+Add a JSON document to `tests/e2e/scenarios/`. Its `expected_branches` declares
+the behavior the scenario must reach. The shared runner executes public
+`satyrn_agent.open()` and real ds4-py worker/session code; only optional native
+bindings are scripted. Do not add scenario-specific expected values to the
+runner.
+
+`tests/e2e/schema/scenario.schema.json` is the external contract. After editing
+it, regenerate the checked-in TypedDicts:
+
+```bash
+devenv shell -- uv run --frozen datamodel-codegen
+```
+
+The project uses `practical-py314-20261104`. Review `--recommend-options` when
+the schema changes substantially. Generated TypedDicts use no Pydantic models or
+TypeAdapter. Handwritten `TypeIs` validators and conversion logic perform
+runtime validation. prek rejects stale generated files and invalid scenario
+documents.
 
 Build and inspect the wheel:
 
