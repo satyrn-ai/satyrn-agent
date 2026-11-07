@@ -3,7 +3,8 @@
 Handoff from a long brainstorm (2026-11-07, branch `research/overnight-domains`)
 into Superpowers. Each numbered item below is its own feature cycle:
 brainstorm, spec, plan, execute. This page records the decisions so far and the
-order. It is not a spec.
+order. It is not a spec. The full record, with sources, is
+[2026-11-07-overnight-domains-survey.md](2026-11-07-overnight-domains-survey.md).
 
 **What is measured:** the numbers cited with a source below.
 **What is conjecture:** session lengths, sessions per night, and every claim
@@ -40,6 +41,66 @@ The intended shape, which is 1 + 1 = 3:
 | A reference sample app and roadmap with headroom come first | Paul raised it; Claude agreed |
 | Plans and specs follow Superpowers; packets are compiled from plan tasks | Paul (Superpowers); Claude (compiling) |
 | Masks are not part of this work | Paul |
+| Symbols-not-strings without Pyrefly: an `ast` index that drives the harness, never a model-facing tool | Paul asked; Claude proposed; Fable shrank it |
+| Use the in-process stack where a classic agent can't (below) | Paul |
+
+## What only our stack does
+
+Paul's aim: use the in-process architecture "to do something in a very
+different way than classic agents". A classic agent can do typed packets,
+pytest gates, git restore and a style checker, so those are not the
+difference. These are:
+
+- **KV checkpoints at phase and packet boundaries.** Restore the files with
+  git and the model state with `session.checkpoint` (session.py:608). A retry
+  or a second draw then costs decode only, with no re-prefill. Use the
+  checkpoint, not `rewind` (session.py:410), which is unverified on qwen35.
+- **Paired same-state draws.** Draw arm X and arm Y from one checkpoint (same
+  state, same RNG). This is capability-map item 20, and it turns a night's
+  handful of sessions into many paired comparisons.
+- **Skeleton at prefill speed.** The harness writes imports and typed
+  signatures as prefill, then the model decodes only bodies. tainie proposed
+  this and never tried it.
+- **Logits on a short question.** One forward pass answers a typed choice
+  ("function view or class view?") with no decoding: the Jev-style decision.
+- **Thinking control through the logits hook.** The soft think-budget hook is
+  in satyrn-agent PR #12. The 27B's measured time sinks are thinking: an
+  11-minute think, and 110–126 s saved by thinking only until the first write
+  (ds4-engine `2026-10-03-qwen-thinking-finding.md:52`).
+- **A cached domain prefix.** A checkpointed playbook prefix costs nothing
+  after the first session. The 4.7 s it saves is small overnight (Fable), so
+  its value is the fast path below, not prefill time.
+
+Mentioned in Paul's goals but not explored in this brainstorm: steering and the
+DFlash features ring.
+
+## Symbols, not strings
+
+What the brainstorm settled:
+
+- **No Pyrefly for now.** Python's `ast` indexes definitions, signatures,
+  imports and `type` aliases in the repo and installed packages. Type
+  inference is lost, but annotated parameters (`request: Request`) recover
+  much of it.
+- **Move the symbols up to the plan.** When a packet fixes the names
+  (`Customer`, `CustomerName`, `crm/views.py::list_customers`) and the harness
+  writes the skeleton, most "which symbol?" questions are answered before
+  decoding starts. The packet validator checks the names against the index.
+- **The index drives the harness, never the model.** The `doc(name)` tool and
+  tainie both showed models don't call tools they don't have to.
+- **Shrink it for the 27B** (Fable). Its recorded errors are not wrong imports
+  or invented APIs; those are Mellum's. Its version drift is a stale keyword
+  argument (`allow_redirects`), which an export index can't see. So the index
+  serves packet validation and the skeleton now, and the write-time import
+  check waits for Mellum.
+- **No import mask.** ds4-engine's tool-call grammar masks cost 484.1 ms
+  each and lost on Qwen (QW.2 8/12 vs 12/12; `capability-map.md:92`),
+  `bias()` copies the whole vocabulary, and the 27B shows no import errors to
+  fix.
+- **Pyrefly mid-decode is parked.** tainie's fork (`tainie-fork`, with
+  `overlay-check`) exists, but from a Python host it would be a subprocess.
+  First step if reopened: run Pyrefly over the 27B's bodies and count
+  unresolved names, wrong attributes and type errors.
 
 ## Measured facts this rests on
 
@@ -64,8 +125,19 @@ The intended shape, which is 1 + 1 = 3:
 ### 0. Smoke-test the 27B as a worker (one evening)
 
 Prove that ds4-py's tool loop drives the 27B through a multi-file build with
-read, write and edit tools and a pytest tool, and that a git-checkpoint restore
-works after a failed write. A presence check: n = 1 settles it.
+read, write and edit tools and a pytest tool, and that a failed write restores
+both the files (git) and the model state (`session.checkpoint`) with no
+re-prefill. A presence check: n = 1 settles it.
+
+Two more presence checks in the same evening:
+
+- **FIM.** The 27B's tokenizer (`Qwen3.8-27B-Q4_K_M.gguf`) has
+  `<|fim_prefix|>`, `<|fim_suffix|>` and `<|fim_middle|>`. Whether this
+  instruct/thinking model was trained to use them is untested. If it can fill
+  a body between a signature and the code after it, the harness owns both
+  sides of every hole.
+- **Logits on a short question.** Does one forward pass pick the right typed
+  choice for a few known cases?
 *Watch for* the 27B failure shapes already recorded in ds4-engine: probing
 spirals, 12K-token thinks, stale kwargs (`allow_redirects`) and rewrite loops.
 
@@ -103,8 +175,14 @@ Claude writes one frozen plan, which feeds two arms:
   failure the harness restores and retries, at most twice, feeding back the
   concrete failure.
 
-**Design:** paired same-state draws. Snapshot at each phase boundary and run
-both arms from the same state, so each phase is one comparison. At 18.5 tok/s a
+In arm C the skeleton goes in as prefill (or as FIM prefix and suffix, if
+item 0 shows FIM works), and a retry escalates by reopening thinking rather
+than resending the error. The 27B tends to repeat a failed write when only a
+host message changes (pathologies 102, 103).
+
+**Design:** paired same-state draws from KV checkpoints. Checkpoint at each
+phase or packet boundary and run both arms from the same state, so each one
+is a comparison. At 18.5 tok/s a
 night holds only about 5–10 Hard sessions (conjecture), too few for
 session-level arms. Record serial or DFlash in each run's metadata.
 Preregister the arms, n and the decision rule before the deciding run.
@@ -115,6 +193,22 @@ Given a roadmap item and a domain, can the 27B write packets that pass
 validation, and do the packets work? Compare packets Paul reviewed against
 packets nobody reviewed. *Riskiest item:* local-ai-pi concluded that small
 models "cannot plan".
+
+**Jev-style:** the 27B doesn't write packets as free text. Each typed field is
+decided at plan time, by deterministic analysis first (files present, names in
+the index) and by logits on a short question second. The model writes prose
+only where no choice list exists.
+
+### 4b. Fast path for routine in-domain work
+
+Fable's proposal from the Jev review: no thinking (or a small budget) plus a
+checkpointed domain playbook prefix of about 800 tokens. Its preregistered
+rule: adopt if median time is at most 0.75× the normal path and the fast path
+loses no more than 2 passes. Its pilot stops the idea early if the 0.8× bar
+isn't met on 4 tasks × 2 seeds. A router is worth building only if misrouting
+costs something; for "add a Django view", a regex plus checking that
+`views.py`, `urls.py` and `templates/` exist is near-perfect. *Known risk:*
+pathology 102, where the 27B under no-think wrote the same file 22 times.
 
 ### 5. Domain pack v0
 
@@ -128,8 +222,10 @@ both mechanical and report-back.
 - **Mellum:** reopen when ds4 has a `mellum` architecture port.
 - **Masks / constrained decoding:** reopen if style drift survives the
   examples and the signature prefill.
-- **Thinking budget via `in_think`:** reopen if item 0 or 3 shows thinking
-  runaways. The soft think-budget hook already exists in satyrn-agent PR #12.
+- **Pyrefly mid-decode checks:** reopen if a Pyrefly pass over the 27B's
+  bodies finds unresolved names or wrong attributes often enough to matter.
+- **Steering and the DFlash features ring:** reopen when an item needs them;
+  this brainstorm did not explore them.
 - **Index as a model-facing tool:** dropped; models did not call the
   `doc` tool. The index serves the validator and the harness instead.
 
