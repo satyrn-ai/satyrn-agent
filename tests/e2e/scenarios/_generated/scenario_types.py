@@ -77,6 +77,7 @@ class Expectation(TypedDict, closed=True):
 
 class Round(TypedDict, closed=True):
     prompt: str
+    mode: NotRequired[Literal["raw", "chat"]]
     max_tokens: int
     stop_sequences: NotRequired[list[str]]
     cancel_after_samples: NotRequired[int]

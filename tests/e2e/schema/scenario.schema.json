@@ -271,6 +271,14 @@
         "prompt": {
           "type": "string"
         },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "raw",
+            "chat"
+          ],
+          "default": "raw"
+        },
         "max_tokens": {
           "type": "integer",
           "minimum": 1

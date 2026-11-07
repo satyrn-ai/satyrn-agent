@@ -30,6 +30,7 @@
   "rounds": [
     {
       "prompt": "Say hello.",
+      "mode": "raw",
       "max_tokens": 2,
       "expect": {
         "reason": "max_tokens",
@@ -37,8 +38,8 @@
           11,
           12
         ],
-        "native_position": 2,
-        "rng": 1,
+        "native_position": 3,
+        "rng": 6791897765849424158,
         "metrics": {
           "committed_blocks": 1,
           "drafts_offered": 1,
@@ -48,6 +49,8 @@
         },
         "metadata": [],
         "event_types": [
+          "Prefill",
+          "Synced",
           "Token",
           "Token",
           "Stopped"

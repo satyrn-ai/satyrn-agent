@@ -164,10 +164,10 @@ def _expectation(value: object) -> TypeIs[Expectation]:
 def _round(value: object) -> TypeIs[Round]:
     if not is_string_key_mapping(value) or not _allowed(
         value,
-        {"prompt", "max_tokens", "stop_sequences", "cancel_after_samples", "expect"},
+        {"prompt", "mode", "max_tokens", "stop_sequences", "cancel_after_samples", "expect"},
     ):
         return False
-    if not isinstance(value.get("prompt"), str):
+    if not isinstance(value.get("prompt"), str) or value.get("mode", "raw") not in {"raw", "chat"}:
         return False
     max_tokens = value.get("max_tokens")
     if type(max_tokens) is not int or max_tokens < 1:
