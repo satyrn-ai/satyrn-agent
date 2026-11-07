@@ -237,7 +237,22 @@ both mechanical and report-back.
 
 - **V4 Flash:** reopen if the 27B fails even with compiled packets, to tell a
   method failure from a model failure.
-- **Mellum:** reopen when ds4 has a `mellum` architecture port.
+- **Mellum:** reopen when ds4 has a `mellum` architecture port. First use:
+  Mellum fills FIM holes in harness-written skeletons under the lazy monitor
+  below, with KV-checkpointed retries. Its GGUF has FIM tokens
+  ([prior art](2026-11-07-masks-logits-prior-art.md), idea 2).
+- **Lazy, signature-aware monitor-guided decoding:** mask an identifier slot
+  only when the model's top choice is invalid; the index covers keyword
+  arguments from signatures (pathology 121). Reopen after item 0's trie-walk
+  cost check, if item 1's calibration shows identifier errors worth fixing on
+  the 27B, or with Mellum ([prior art](2026-11-07-masks-logits-prior-art.md),
+  idea 1).
+- **Per-slot counterfactuals:** fork masked and unmasked decodes from one
+  checkpoint at each slot, to measure any mask's benefit. Use it whenever a
+  mask is tested (idea 3).
+- **Thinking exit probe:** at a break in thinking, fork, prefill the
+  skeleton, and exit thinking if the first body tokens are confident. Reopen
+  if item 0 or 3 shows long thinks (pathology 114) (idea 4).
 - **Masks / constrained decoding (style):** reopen if style drift survives
   the examples and the signature prefill. (Masks over closed sets of existing
   names are no longer parked; see item 4.)
