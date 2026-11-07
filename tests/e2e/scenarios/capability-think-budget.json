@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "id": "capability-think-budget",
+  "backend": "metal",
+  "native": {
+    "script": [
+      11,
+      11,
+      11,
+      0
+    ],
+    "calls": []
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf",
+    "think_budget": {
+      "max_tokens": 1,
+      "bias": 2.0
+    }
+  },
+  "rounds": [
+    {
+      "prompt": "think briefly",
+      "mode": "chat",
+      "max_tokens": 3,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          11,
+          258,
+          258
+        ],
+        "native_position": 512,
+        "rng": 12793040940332582595,
+        "metrics": {
+          "committed_blocks": 3,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [
+          {
+            "position": 509,
+            "think_tokens": 0,
+            "sampled_tokens": [],
+            "parser_state": "SEARCH"
+          },
+          {
+            "position": 510,
+            "think_tokens": 1,
+            "sampled_tokens": [
+              11
+            ],
+            "parser_state": "SEARCH"
+          },
+          {
+            "position": 511,
+            "think_tokens": 2,
+            "sampled_tokens": [
+              11,
+              258
+            ],
+            "parser_state": "SEARCH"
+          }
+        ],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "TextDelta",
+          "Token",
+          "TextDelta",
+          "Token",
+          "TextDelta",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "dflash-step",
+    "max_tokens",
+    "metadata"
+  ]
+}

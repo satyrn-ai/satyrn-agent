@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import hashlib
 import os
 from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from tests.e2e.model_free._native import ScenarioFakeNative
 
 import pytest
 from ds4py import Session
@@ -179,7 +184,10 @@ def observe_round(
 def assert_alignment(session: Session, observation: RoundObservation) -> None:
     generated = observation.token_ids
     assert observation.assistant_tokens[observation.assistant_start :] == generated
-    assert observation.native_position == len(observation.transcript)
+    unevaluated_eos = sum(
+        segment.end - segment.start for segment in session.transcript.segments if segment.kind == "eos"
+    )
+    assert observation.native_position == len(observation.transcript) - unevaluated_eos
 
 
 def prepare_chat(session: Session, prompt: str, *, tools: Iterable[ToolDefinition] = ()) -> int:
@@ -188,7 +196,16 @@ def prepare_chat(session: Session, prompt: str, *, tools: Iterable[ToolDefinitio
     return len(session.transcript.tokens)
 
 
-def restore_snapshot(session: Session, prompt_tokens: int, snapshot: Snapshot, rng: int, step: DFlashStep) -> None:
+def restore_snapshot(
+    session: Session,
+    prompt_tokens: int,
+    snapshot: Snapshot,
+    rng: int,
+    step: DFlashStep,
+    scripted_native: ScenarioFakeNative | None = None,
+) -> None:
+    if scripted_native is not None:
+        scripted_native.reset_script()
     session.truncate(prompt_tokens)
     session._worker.call(lambda engine, native: native.load_snapshot(snapshot)).result()
     session._rng.state.value = rng
@@ -204,6 +221,7 @@ def serial_then_speculative(
     sampling: SamplingPolicy,
     tools: Iterable[ToolDefinition] = (),
     recorder: MetadataRecorder | None = None,
+    scripted_native: ScenarioFakeNative | None = None,
 ) -> tuple[RoundObservation, RoundObservation, int]:
     import time
 
@@ -211,6 +229,7 @@ def serial_then_speculative(
         pytest.fail("the parity fixture requires a configured DFlashStep")
     step = wrapper._step
     prompt_tokens = prepare_chat(session, prompt, tools=tools)
+    session._worker.call(lambda engine, native: native.sync(session.transcript.tokens)).result()
     if recorder is not None:
         session.add_logits_hook(recorder)
     snapshot = session._worker.call(lambda engine, native: native.save_snapshot()).result()
@@ -222,7 +241,7 @@ def serial_then_speculative(
         assert_alignment(session, serial)
         if recorder is not None:
             recorder.serial_count = len(recorder.calls)
-        restore_snapshot(session, prompt_tokens, snapshot, rng, step)
+        restore_snapshot(session, prompt_tokens, snapshot, rng, step, scripted_native)
         started = time.perf_counter()
         speculative = observe_round(session, max_tokens=max_tokens, sampling=sampling, started=started)
         assert_alignment(session, speculative)

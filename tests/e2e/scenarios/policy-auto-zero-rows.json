@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "id": "policy-auto-zero-rows",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10
+    ],
+    "calls": [],
+    "verify_rows": 0
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 1,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          10
+        ],
+        "native_position": 2,
+        "rng": 10451216379200822465,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "plain-step",
+    "max_tokens"
+  ]
+}

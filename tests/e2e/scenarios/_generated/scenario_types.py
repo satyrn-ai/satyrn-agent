@@ -19,7 +19,7 @@ class ThinkBudget(TypedDict, closed=True):
 
 
 class NativeCall(TypedDict, closed=True):
-    op: Literal["draft", "verify", "select", "commit", "eval", "sample"]
+    op: Literal["draft", "verify", "select", "commit", "eval", "sample", "mode"]
     tokens: NotRequired[list[int]]
     index: NotRequired[int]
     """Zero-based sample index for a sample fault."""
@@ -66,6 +66,7 @@ class Native(TypedDict, closed=True):
     verify_rows: NotRequired[int]
     missing: NotRequired[set[str]]
     sampling_defaults: NotRequired[SamplingDefaults | None]
+    end_think_tokens: NotRequired[list[int]]
 
 
 class Expectation(TypedDict, closed=True):
@@ -76,6 +77,7 @@ class Expectation(TypedDict, closed=True):
     metrics: Metrics
     metadata: list[SampleMetadata]
     event_types: list[str]
+    sampling_defaults: NotRequired[SamplingDefaults]
 
 
 class Round(TypedDict, closed=True):
@@ -95,7 +97,7 @@ class Scenario(TypedDict, closed=True):
     version: Literal[1]
     id: str
     description: NotRequired[str]
-    backend: Literal["metal"]
+    backend: Literal["metal", "cpu"]
     native: Native
     config: ScenarioConfig
     rounds: list[Round]

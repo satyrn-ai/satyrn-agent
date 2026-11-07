@@ -1,5 +1,6 @@
 """Execute validated scenarios through the real public Satyrn session flow."""
 
+import math
 import threading
 from dataclasses import asdict
 from pathlib import Path
@@ -7,11 +8,12 @@ from pathlib import Path
 from ds4py import EngineError, Session, WorkerPoisonedError
 from ds4py.engine.events import Interrupted, Stopped, Token
 from ds4py.engine.logits import LogitsView
+from ds4py.engine.sampling import SamplingPolicy
 
 import satyrn_agent
 from satyrn_agent.config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
 from satyrn_agent.dflash import DFlashMetrics
-from satyrn_agent.errors import DFlashError
+from satyrn_agent.errors import ConfigurationError, DFlashError, DFlashUnavailable
 from tests.conftest import MetadataRecorder, SampleMetadata
 from tests.e2e.model_free._native import ScenarioFakeNative
 from tests.e2e.model_free._observations import RoundResult, ScenarioResult
@@ -32,6 +34,7 @@ SUPPORTED_BRANCHES = {
     "native-error",
     "partial-acceptance",
     "plain-step",
+    "policy-error",
     "poison",
     "replacement-anchor",
     "select",
@@ -109,41 +112,79 @@ def _observe(
         token_ids=tuple(event.id for event in events if isinstance(event, Token)),
         reason=reason,
         error=error,
+        sampling=session.engine.sampling_defaults,
         metrics=wrapper.dflash_metrics or DFlashMetrics(),
         metadata=list(recorder.calls),
     )
 
 
 def run_scenario(scenario: Scenario) -> ScenarioResult:  # noqa: C901, PLR0912 - Keep branch reporting in one dispatch.
-    native = ScenarioFakeNative(scenario["native"])
+    try:
+        config = _config(scenario["config"])
+    except Exception as error:  # noqa: BLE001 - Preserve setup failure as a scenario observation.
+        return ScenarioResult(
+            [
+                RoundResult(
+                    events=[],
+                    transcript=(),
+                    native_position=0,
+                    rng=1,
+                    token_ids=(),
+                    reason=f"{type(error).__name__}: {error}",
+                    error=error,
+                    sampling=SamplingPolicy(),
+                    metrics=DFlashMetrics(),
+                    metadata=[],
+                )
+            ],
+            reached_branches={"policy-error"},
+        )
+    native = ScenarioFakeNative(scenario["native"], scenario["backend"])
     cancel_event = threading.Event()
     native.cancel_event = cancel_event
     recorder = MetadataRecorder()
     results: list[RoundResult] = []
     with satyrn_agent.open(
         "scenario.gguf",
-        config=_config(scenario["config"]),
+        config=config,
         native=native,
         seed=1,
         cancel=cancel_event,
     ) as wrapper:
-        session = wrapper.session()
-        hook_error_at: int | None = None
-        hook_calls = 0
+        try:
+            session = wrapper.session()
+        except Exception as error:  # noqa: BLE001 - Preserve setup failure as a scenario observation.
+            results.append(
+                RoundResult(
+                    events=[],
+                    transcript=(),
+                    native_position=0,
+                    rng=1,
+                    token_ids=(),
+                    reason=f"{type(error).__name__}: {error}",
+                    error=error,
+                    sampling=wrapper._engine.sampling_defaults,
+                    metrics=DFlashMetrics(),
+                    metadata=[],
+                )
+            )
+        else:
+            hook_error_at: int | None = None
+            hook_calls = 0
 
-        def hook(view: LogitsView) -> None:
-            nonlocal hook_calls
-            hook_calls += 1
-            recorder(view)
-            if hook_error_at == hook_calls:
-                raise RuntimeError("hook injected")
+            def hook(view: LogitsView) -> None:
+                nonlocal hook_calls
+                hook_calls += 1
+                recorder(view)
+                if hook_error_at == hook_calls:
+                    raise RuntimeError("hook injected")
 
-        session.add_logits_hook(hook)
-        for round in scenario["rounds"]:
-            native.cancel_after_samples = round.get("cancel_after_samples")
-            hook_error_at = round.get("hook_error_at")
-            results.append(_observe(session, wrapper, native, round, recorder))
-            recorder.serial_count = len(recorder.calls)
+            session.add_logits_hook(hook)
+            for round in scenario["rounds"]:
+                native.cancel_after_samples = round.get("cancel_after_samples")
+                hook_error_at = round.get("hook_error_at")
+                results.append(_observe(session, wrapper, native, round, recorder))
+                recorder.serial_count = len(recorder.calls)
 
     result = ScenarioResult(results)
     result.reached_branches.update(native.operations)
@@ -173,6 +214,8 @@ def run_scenario(scenario: Scenario) -> ScenarioResult:  # noqa: C901, PLR0912 -
         result.reached_branches.add("poison")
     if any(isinstance(round.error, DFlashError) for round in results):
         result.reached_branches.add("native-error")
+    if any(isinstance(round.error, DFlashUnavailable | ConfigurationError) for round in results):
+        result.reached_branches.add("policy-error")
     if any(isinstance(round.error, EngineError) for round in results):
         result.reached_branches.add("engine-error")
     return result
@@ -194,6 +237,12 @@ def assert_scenario(scenario: Scenario, result: ScenarioResult) -> None:
         assert actual.reason == expected["reason"], prefix
         assert actual.native_position == expected["native_position"], prefix
         assert actual.rng == expected["rng"], prefix
+        if "sampling_defaults" in expected:
+            expected_sampling = expected["sampling_defaults"]
+            assert actual.sampling.top_k == expected_sampling["top_k"], prefix
+            assert math.isclose(actual.sampling.temperature, expected_sampling["temperature"]), prefix
+            assert math.isclose(actual.sampling.top_p, expected_sampling["top_p"]), prefix
+            assert math.isclose(actual.sampling.min_p, expected_sampling["min_p"], rel_tol=1e-6), prefix
         assert asdict(actual.metrics) == {
             name: value for name, value in expected["metrics"].items() if name != "acceptance_rate"
         }, prefix

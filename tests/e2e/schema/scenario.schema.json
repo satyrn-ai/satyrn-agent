@@ -26,7 +26,11 @@
       "type": "string"
     },
     "backend": {
-      "const": "metal"
+      "type": "string",
+      "enum": [
+        "metal",
+        "cpu"
+      ]
     },
     "native": {
       "$ref": "#/$defs/Native"
@@ -189,6 +193,12 @@
             }
           ],
           "default": null
+        },
+        "end_think_tokens": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
         }
       }
     },
@@ -207,7 +217,8 @@
             "select",
             "commit",
             "eval",
-            "sample"
+            "sample",
+            "mode"
           ]
         },
         "tokens": {
@@ -357,6 +368,9 @@
           "items": {
             "type": "string"
           }
+        },
+        "sampling_defaults": {
+          "$ref": "#/$defs/SamplingDefaults"
         }
       }
     },

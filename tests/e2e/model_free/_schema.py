@@ -21,7 +21,7 @@ from tests.e2e.scenarios._generated.scenario_types import (
 )
 
 SCENARIO_ROOT = Path(__file__).parents[1] / "scenarios"
-_OPERATIONS = {"draft", "verify", "select", "commit", "eval", "sample"}
+_OPERATIONS = {"draft", "verify", "select", "commit", "eval", "sample", "mode"}
 
 
 def _integer_list(value: object) -> TypeIs[list[int]]:
@@ -85,7 +85,16 @@ def _native_call(value: object) -> TypeIs[NativeCall]:
 def _native(value: object) -> TypeIs[Native]:  # noqa: PLR0911 - Each optional native field needs its own runtime proof.
     if not is_string_key_mapping(value) or not _allowed(
         value,
-        {"script", "calls", "stop_tokens", "has_dflash", "verify_rows", "missing", "sampling_defaults"},
+        {
+            "script",
+            "calls",
+            "stop_tokens",
+            "has_dflash",
+            "verify_rows",
+            "missing",
+            "sampling_defaults",
+            "end_think_tokens",
+        },
     ):
         return False
     calls = value.get("calls")
@@ -100,6 +109,8 @@ def _native(value: object) -> TypeIs[Native]:  # noqa: PLR0911 - Each optional n
     if "verify_rows" in value and (type(value["verify_rows"]) is not int or value["verify_rows"] < 0):
         return False
     if "missing" in value and not _string_list(value["missing"]):
+        return False
+    if "end_think_tokens" in value and not _integer_list(value["end_think_tokens"]):
         return False
     return (defaults := value.get("sampling_defaults")) is None or _sampling_defaults(defaults)
 
@@ -154,7 +165,11 @@ def _metadata(value: object) -> bool:
 
 def _expectation(value: object) -> TypeIs[Expectation]:  # noqa: PLR0911 - Validate each expected field independently.
     required = {"reason", "token_ids", "native_position", "rng", "metrics", "metadata", "event_types"}
-    if not is_string_key_mapping(value) or set(value) != required:
+    if (
+        not is_string_key_mapping(value)
+        or not required <= set(value)
+        or not _allowed(value, required | {"sampling_defaults"})
+    ):
         return False
     if (reason := value["reason"]) is not None and not isinstance(reason, str):
         return False
@@ -165,6 +180,8 @@ def _expectation(value: object) -> TypeIs[Expectation]:  # noqa: PLR0911 - Valid
     if type(value["rng"]) is not int or value["rng"] < 0:
         return False
     if not _metrics(value["metrics"]) or not isinstance(value["metadata"], list):
+        return False
+    if "sampling_defaults" in value and not _sampling_defaults(value["sampling_defaults"]):
         return False
     return all(_metadata(item) for item in value["metadata"]) and _string_list(value["event_types"])
 
@@ -204,7 +221,7 @@ def is_scenario(value: object) -> TypeIs[Mapping[str, object]]:
         return False
     if "description" in value and not isinstance(value["description"], str):
         return False
-    if value["backend"] != "metal" or not _native(value["native"]) or not _config(value["config"]):
+    if value["backend"] not in {"metal", "cpu"} or not _native(value["native"]) or not _config(value["config"]):
         return False
     if (
         not isinstance(value["rounds"], list)

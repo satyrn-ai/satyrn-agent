@@ -18,8 +18,9 @@ from tests.e2e.scenarios._generated.scenario_types import Native, NativeCall, Sa
 class ScenarioFakeNative(FakeNative):
     backend = "metal"
 
-    def __init__(self, config: Native) -> None:
+    def __init__(self, config: Native, backend: str = "metal") -> None:
         self.config = config
+        self.backend = backend
         self.sessions: dict[int, FakeSession] = {}
         self.responses = {name: [call for call in config["calls"] if call["op"] == name] for name in _OPERATIONS}
         self.last_anchor = 0
@@ -66,6 +67,13 @@ class ScenarioFakeNative(FakeNative):
     def session(self, raw: int) -> FakeSession:
         return self.sessions[raw]
 
+    def reset_script(self) -> None:
+        self.sample_count = 0
+        self.current_token = 0
+        self.last_anchor = 0
+        self.last_drafts = []
+        self.responses = {name: [call for call in self.config["calls"] if call["op"] == name] for name in _OPERATIONS}
+
     def _response(self, operation: str, index: int | None = None) -> NativeCall | None:
         responses = self.responses[operation]
         if not responses:
@@ -81,6 +89,9 @@ class ScenarioFakeNative(FakeNative):
         return self.config.get("verify_rows", 8)
 
     def _set_verify_mode(self, raw: int, mode: int) -> int:
+        call = self._response("mode")
+        if call is not None and (message := call.get("error")) is not None:
+            raise DFlashError("ds4_session_set_verify_mode", message)
         return 0
 
     def _draft(self, raw: int, anchor: int, maximum: int, output: Any, error: Any, error_length: int) -> int:
@@ -184,5 +195,11 @@ class ScenarioFakeEngine(FakeEngine):
             token, mode
         )
 
+    @override
+    def tokenize(self, text: str, *, rendered: bool = False) -> list[int]:
+        if rendered and text == "</think>":
+            return self.scenario_native.config.get("end_think_tokens", [258])
+        return super().tokenize(text, rendered=rendered)
 
-_OPERATIONS = ("draft", "verify", "select", "commit", "eval", "sample")
+
+_OPERATIONS = ("draft", "verify", "select", "commit", "eval", "sample", "mode")

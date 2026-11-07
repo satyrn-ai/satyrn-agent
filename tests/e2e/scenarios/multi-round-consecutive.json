@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "id": "multi-round-consecutive",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10,
+      11,
+      12
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "first",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          10,
+          11
+        ],
+        "native_position": 3,
+        "rng": 6791897765849424158,
+        "metrics": {
+          "committed_blocks": 1,
+          "drafts_offered": 1,
+          "drafts_accepted": 1,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Token",
+          "Stopped"
+        ]
+      }
+    },
+    {
+      "prompt": "second",
+      "mode": "raw",
+      "max_tokens": 3,
+      "expect": {
+        "reason": "stop_token",
+        "token_ids": [
+          12
+        ],
+        "native_position": 5,
+        "rng": 16321491304643971414,
+        "metrics": {
+          "committed_blocks": 2,
+          "drafts_offered": 1,
+          "drafts_accepted": 1,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "dflash-step",
+    "full-acceptance",
+    "max_tokens"
+  ]
+}

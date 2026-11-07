@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 
 from ds4py.engine.events import Event
+from ds4py.engine.sampling import SamplingPolicy
 
 from satyrn_agent.dflash import DFlashMetrics
 from tests.conftest import SampleMetadata
@@ -17,6 +18,7 @@ class RoundResult:
     token_ids: tuple[int, ...]
     reason: str | None
     error: Exception | None
+    sampling: SamplingPolicy
     metrics: DFlashMetrics
     metadata: list[SampleMetadata]
 
