@@ -35,7 +35,7 @@
     }
   ],
   "expected_branches": [
-    "policy-error"
+    "config-error"
   ],
   "raw_config": {
     "dflash": "on",

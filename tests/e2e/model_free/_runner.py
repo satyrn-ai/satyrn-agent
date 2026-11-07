@@ -62,22 +62,7 @@ SUPPORTED_BRANCHES = {
 
 
 def _config(config: ConfigDocument) -> SatyrnConfig:
-    sampling = config.get("sampling", {})
-    budget = config.get("think_budget")
-    return SatyrnConfig(
-        dflash=DFlashMode(config.get("dflash", "auto")),
-        drafter_path=Path(path) if (path := config.get("drafter_path", "drafter.gguf")) is not None else None,
-        draft_tokens=config.get("draft_tokens", 0),
-        sampling=SamplingOverrides(
-            temperature=sampling.get("temperature"),
-            top_k=sampling.get("top_k"),
-            top_p=sampling.get("top_p"),
-            min_p=sampling.get("min_p"),
-        ),
-        think_budget=None
-        if budget is None
-        else ThinkBudgetConfig(max_tokens=budget["max_tokens"], bias=budget["bias"]),
-    )
+    return satyrn_agent.config_from_dict(config)
 
 
 def _raw_value(value: object) -> object:
@@ -95,6 +80,10 @@ def _raw_config(raw: Mapping[str, object]) -> SatyrnConfig:
     if not is_string_key_mapping(converted):
         raise TypeError("raw_config must be a mapping")
     values = dict[str, Any](converted)
+    if isinstance(values.get("dflash"), str) and values["dflash"] in {"auto", "on", "off"}:
+        values["dflash"] = DFlashMode(values["dflash"])
+    if isinstance(values.get("drafter_path"), str):
+        values["drafter_path"] = Path(values["drafter_path"])
     if isinstance(values.get("sampling"), Mapping):
         values["sampling"] = SamplingOverrides(**values["sampling"])
     if isinstance(values.get("think_budget"), Mapping):
