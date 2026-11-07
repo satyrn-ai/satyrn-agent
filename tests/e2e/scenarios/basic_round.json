@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "id": "basic-round",
+  "description": "One full-acceptance DFlash block through the public session.",
+  "backend": "metal",
+  "native": {
+    "script": [
+      11,
+      12
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          12
+        ]
+      }
+    ],
+    "sampling_defaults": {
+      "temperature": 0.6,
+      "top_k": 20,
+      "top_p": 0.95,
+      "min_p": 0.0
+    }
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "Say hello.",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          11,
+          12
+        ],
+        "native_position": 2,
+        "rng": 1,
+        "metrics": {
+          "committed_blocks": 1,
+          "drafts_offered": 1,
+          "drafts_accepted": 1,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Token",
+          "Token",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor"
+  ]
+}

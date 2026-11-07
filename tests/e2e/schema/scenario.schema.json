@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://satyrn.ai/schemas/e2e-scenario-v1.json",
+  "title": "Scenario",
+  "description": "A deterministic model-free public-flow E2E scenario.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "id",
+    "backend",
+    "native",
+    "config",
+    "rounds",
+    "expected_branches"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "backend": {
+      "const": "metal"
+    },
+    "native": {
+      "$ref": "#/$defs/Native"
+    },
+    "config": {
+      "$ref": "#/$defs/ScenarioConfig"
+    },
+    "rounds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Round"
+      }
+    },
+    "expected_branches": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "ScenarioConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dflash": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "default": "auto"
+        },
+        "drafter_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": "drafter.gguf"
+        },
+        "draft_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "sampling": {
+          "$ref": "#/$defs/SamplingOverrides"
+        },
+        "think_budget": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ThinkBudget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SamplingOverrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0
+        },
+        "top_k": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "min_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "ThinkBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_tokens",
+        "bias"
+      ],
+      "properties": {
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bias": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "Native": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "script",
+        "calls"
+      ],
+      "properties": {
+        "script": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NativeCall"
+          }
+        },
+        "stop_tokens": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "has_dflash": {
+          "type": "boolean",
+          "default": true
+        },
+        "verify_rows": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 8
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "sampling_defaults": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SamplingDefaults"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      }
+    },
+    "NativeCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op"
+      ],
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "verify",
+            "select",
+            "commit",
+            "eval"
+          ]
+        },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "default": []
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "side_effect": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "SamplingDefaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "temperature",
+        "top_k",
+        "top_p",
+        "min_p"
+      ],
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0
+        },
+        "top_k": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "min_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "Round": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prompt",
+        "max_tokens",
+        "expect"
+      ],
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "stop_sequences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "cancel_after_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expect": {
+          "$ref": "#/$defs/Expectation"
+        }
+      }
+    },
+    "Expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "token_ids",
+        "native_position",
+        "rng",
+        "metrics",
+        "metadata",
+        "event_types"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "token_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "native_position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rng": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metrics": {
+          "$ref": "#/$defs/Metrics"
+        },
+        "metadata": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SampleMetadata"
+          }
+        },
+        "event_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "committed_blocks",
+        "drafts_offered",
+        "drafts_accepted",
+        "replacement_anchors",
+        "discarded_tails"
+      ],
+      "properties": {
+        "committed_blocks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "drafts_offered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "drafts_accepted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replacement_anchors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "discarded_tails": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "SampleMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "think_tokens",
+        "sampled_tokens"
+      ],
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "think_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sampled_tokens": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "parser_state": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    }
+  }
+}

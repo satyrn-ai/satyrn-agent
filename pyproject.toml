@@ -15,6 +15,7 @@ entry-points."ds4py.bindings".satyrn = "satyrn_agent.bindings:BINDINGS"
 
 [dependency-groups]
 dev = [
+  "datamodel-code-generator==0.90.0",
   "prek==0.5.7",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
@@ -125,3 +126,12 @@ ini_options.markers = [
   "build: builds patched libds4 from an explicit source tree",
   "live: needs explicit target and drafter GGUFs and a patched library",
 ]
+
+[tool.datamodel-codegen]
+input = "tests/e2e/schema/scenario.schema.json"
+output = "tests/e2e/scenarios/_generated/scenario_types.py"
+input-file-type = "jsonschema"
+output-model-type = "typing.TypedDict"
+preset = "practical-py314-20261104"
+formatters = [ "ruff-check", "ruff-format" ]
+extra-fields = "forbid"
