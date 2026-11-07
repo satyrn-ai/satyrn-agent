@@ -12,6 +12,23 @@ them are from earlier projects. Nothing was run on this branch.
 **What is conjecture:** every claim that an idea will help here, session
 lengths, sessions per night, and anything marked *(unverified)*.
 
+**Corrections (2026-11-07, from the
+[import-mask review](2026-11-07-import-mask-review.md)):**
+
+- Pathology 103 is Ornith-1.5-9B, not the 27B.
+- The 27B does make import and API errors, though rarely and mostly in
+  oMLX or fine-tune records (`from collections import frozendict`,
+  `profiling.stats`, `app.post` on `Starlette`).
+- The 484 ms mask cost was measured on Laguna S 2.1; 99% of it was building
+  the allowed set.
+- Mellum's 9/9 wrong imports group `RedirectResponse` and `Jinja2Templates`;
+  seven sessions repaired them.
+- The "bare 27B 6/6 vs Mellum 0/6" claim is wrong: Mellum's bare Jinja build
+  also completed 6/6, and these are phases, not trials.
+
+The sections below keep their original wording; these corrections take
+precedence.
+
 Repository shorthands used below:
 
 | Short | Path |

@@ -88,15 +88,16 @@ What the brainstorm settled:
   decoding starts. The packet validator checks the names against the index.
 - **The index drives the harness, never the model.** The `doc(name)` tool and
   tainie both showed models don't call tools they don't have to.
-- **Shrink it for the 27B** (Fable). Its recorded errors are not wrong imports
-  or invented APIs; those are Mellum's. Its version drift is a stale keyword
-  argument (`allow_redirects`), which an export index can't see. So the index
-  serves packet validation and the skeleton now, and the write-time import
-  check waits for Mellum.
-- **No import mask.** ds4-engine's tool-call grammar masks cost 484.1 ms
-  each and lost on Qwen (QW.2 8/12 vs 12/12; `capability-map.md:92`),
-  `bias()` copies the whole vocabulary, and the 27B shows no import errors to
-  fix.
+- **Shrink it for the 27B** (Fable). Wrong imports and invented APIs are
+  common for Mellum and rarer for the 27B, though not absent (corrected
+  2026-11-07, see the import-mask review). Its version drift is a stale
+  keyword argument (`allow_redirects`), which an export index can't see. So
+  the index serves packet validation and the skeleton, and the item 1
+  calibration measures import errors and their repair cost.
+- **Import mask deferred.** Its benefit under this harness is unmeasured,
+  and the 484 ms figure measured a different implementation (99% was
+  building the allowed set). See
+  [2026-11-07-import-mask-review.md](2026-11-07-import-mask-review.md).
 - **Pyrefly mid-decode is parked.** tainie's fork (`tainie-fork`, with
   `overlay-check`) exists, but from a Python host it would be a subprocess.
   First step if reopened: run Pyrefly over the 27B's bodies and count
@@ -147,7 +148,8 @@ spirals, 12K-token thinks, stale kwargs (`allow_redirects`) and rewrite loops.
   phases and two or three held-out phases. Held-out solutions are written but
   never shown to the model.
 - **Hard calibration screen:** the 27B, unaided, on AgentClinic Hard, n = 3.
-  The score sets how much headroom there is.
+  The score sets how much headroom there is. Also count invalid imports and
+  invented APIs, and the time spent repairing them (import-mask backlog).
 - **Style checker:** tuned on the reference app. It is a proxy, never the
   oracle.
 - **Hard wall:** example phases and held-out phases must not overlap, and a
@@ -178,7 +180,7 @@ Claude writes one frozen plan, which feeds two arms:
 In arm C the skeleton goes in as prefill (or as FIM prefix and suffix, if
 item 0 shows FIM works), and a retry escalates by reopening thinking rather
 than resending the error. The 27B tends to repeat a failed write when only a
-host message changes (pathologies 102, 103).
+host message changes (pathology 102).
 
 **Design:** paired same-state draws from KV checkpoints. Checkpoint at each
 phase or packet boundary and run both arms from the same state, so each one
@@ -220,8 +222,12 @@ both mechanical and report-back.
 - **V4 Flash:** reopen if the 27B fails even with compiled packets, to tell a
   method failure from a model failure.
 - **Mellum:** reopen when ds4 has a `mellum` architecture port.
-- **Masks / constrained decoding:** reopen if style drift survives the
-  examples and the signature prefill.
+- **Masks / constrained decoding (style):** reopen if style drift survives
+  the examples and the signature prefill.
+- **Import mask:** reopen when invalid imports impose meaningful failure or
+  repair cost after the skeleton and a write-time import check, on any model.
+  Benchmark a cached, batched mask before building
+  ([review](2026-11-07-import-mask-review.md)).
 - **Pyrefly mid-decode checks:** reopen if a Pyrefly pass over the 27B's
   bodies finds unresolved names or wrong attributes often enough to matter.
 - **Steering and the DFlash features ring:** reopen when an item needs them;
