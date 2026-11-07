@@ -206,7 +206,8 @@
             "verify",
             "select",
             "commit",
-            "eval"
+            "eval",
+            "sample"
           ]
         },
         "tokens": {
@@ -215,6 +216,11 @@
             "type": "integer"
           },
           "default": []
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based sample index for a sample fault."
         },
         "error": {
           "type": [
@@ -292,7 +298,12 @@
         },
         "cancel_after_samples": {
           "type": "integer",
-          "minimum": 0
+          "minimum": -3,
+          "description": "Sample index to cancel at; -1 selects before a row sample, -2 cancels during native commit, and -3 cancels before the round."
+        },
+        "hook_error_at": {
+          "type": "integer",
+          "minimum": 1
         },
         "expect": {
           "$ref": "#/$defs/Expectation"
@@ -313,7 +324,10 @@
       ],
       "properties": {
         "reason": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "token_ids": {
           "type": "array",
@@ -376,6 +390,11 @@
         "discarded_tails": {
           "type": "integer",
           "minimum": 0
+        },
+        "acceptance_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
         }
       }
     },

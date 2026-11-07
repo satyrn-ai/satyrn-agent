@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "id": "failure-sample-cleanup",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      },
+      {
+        "op": "sample",
+        "error": "boom",
+        "index": 1
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 4,
+      "expect": {
+        "reason": "RuntimeError: boom",
+        "token_ids": [
+          10
+        ],
+        "native_position": 2,
+        "rng": 6791897765849424158,
+        "metrics": {
+          "committed_blocks": 1,
+          "drafts_offered": 1,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 1
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "discarded-tail"
+  ]
+}

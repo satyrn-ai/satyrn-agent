@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "id": "failure-poison-rejection",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      },
+      {
+        "op": "commit",
+        "error": "boom"
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "first",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "DFlashError: ds4_session_verify_commit: boom",
+        "token_ids": [],
+        "native_position": 1,
+        "rng": 6791897765849424158,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced"
+        ]
+      }
+    },
+    {
+      "prompt": "second",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "WorkerPoisonedError: engine worker is poisoned",
+        "token_ids": [],
+        "native_position": 1,
+        "rng": 6791897765849424158,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": []
+      }
+    }
+  ],
+  "expected_branches": [
+    "native-error",
+    "poison"
+  ]
+}

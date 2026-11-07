@@ -61,7 +61,7 @@ def test_load_valid_scenario_uses_generated_types() -> None:
 def test_iter_scenarios_loads_documents_in_name_order() -> None:
     scenarios = list(iter_scenarios())
 
-    assert [scenario["id"] for scenario in scenarios] == ["basic-round"]
+    assert [scenario["id"] for scenario in scenarios] == sorted(scenario["id"] for scenario in scenarios)
 
 
 def test_missing_id_is_rejected(tmp_path: Path) -> None:

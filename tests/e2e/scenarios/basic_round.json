@@ -45,9 +45,23 @@
           "drafts_offered": 1,
           "drafts_accepted": 1,
           "replacement_anchors": 0,
-          "discarded_tails": 0
+          "discarded_tails": 0,
+          "acceptance_rate": 1.0
         },
-        "metadata": [],
+        "metadata": [
+          {
+            "position": 1,
+            "think_tokens": 0,
+            "sampled_tokens": []
+          },
+          {
+            "position": 2,
+            "think_tokens": 0,
+            "sampled_tokens": [
+              11
+            ]
+          }
+        ],
         "event_types": [
           "Prefill",
           "Synced",

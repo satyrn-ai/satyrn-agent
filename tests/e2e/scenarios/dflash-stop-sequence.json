@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "id": "dflash-stop-sequence",
+  "backend": "metal",
+  "native": {
+    "script": [
+      11
+    ],
+    "calls": []
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 3,
+      "stop_sequences": [
+        "\n"
+      ],
+      "expect": {
+        "reason": "stop_sequence",
+        "token_ids": [
+          11
+        ],
+        "native_position": 2,
+        "rng": 10451216379200822465,
+        "metrics": {
+          "committed_blocks": 1,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "stop_sequence"
+  ]
+}

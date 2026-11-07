@@ -16,6 +16,7 @@ class RoundResult:
     rng: int
     token_ids: tuple[int, ...]
     reason: str | None
+    error: Exception | None
     metrics: DFlashMetrics
     metadata: list[SampleMetadata]
 

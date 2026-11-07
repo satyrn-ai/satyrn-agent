@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "id": "dflash-anchor-stop",
+  "backend": "metal",
+  "native": {
+    "script": [
+      0
+    ],
+    "calls": [],
+    "stop_tokens": [
+      0
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 1,
+      "expect": {
+        "reason": "stop_token",
+        "token_ids": [],
+        "native_position": 1,
+        "rng": 10451216379200822465,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0,
+          "acceptance_rate": 0.0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "stop_token"
+  ]
+}

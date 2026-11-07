@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "id": "dflash-partial-acceptance",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10,
+      11,
+      99
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11,
+          12
+        ]
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 3,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          10,
+          11,
+          99
+        ],
+        "native_position": 4,
+        "rng": 12793040940332582595,
+        "metrics": {
+          "committed_blocks": 2,
+          "drafts_offered": 2,
+          "drafts_accepted": 1,
+          "replacement_anchors": 1,
+          "discarded_tails": 1,
+          "acceptance_rate": 0.5
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Token",
+          "Token",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "partial-acceptance",
+    "replacement-anchor",
+    "discarded-tail"
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "id": "dflash-stop-row",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10,
+      99
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      }
+    ],
+    "stop_tokens": [
+      99
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 3,
+      "expect": {
+        "reason": "stop_token",
+        "token_ids": [
+          10
+        ],
+        "native_position": 2,
+        "rng": 6791897765849424158,
+        "metrics": {
+          "committed_blocks": 1,
+          "drafts_offered": 1,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 1
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "stop_token",
+    "discarded-tail"
+  ]
+}

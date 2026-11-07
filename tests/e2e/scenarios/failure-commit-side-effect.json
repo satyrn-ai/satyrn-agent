@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "id": "failure-commit-side-effect",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10,
+      11
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      },
+      {
+        "op": "commit",
+        "error": "boom",
+        "side_effect": true
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "DFlashError: ds4_session_verify_commit: boom",
+        "token_ids": [],
+        "native_position": 3,
+        "rng": 6791897765849424158,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "native-error"
+  ]
+}

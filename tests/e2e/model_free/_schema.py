@@ -21,7 +21,7 @@ from tests.e2e.scenarios._generated.scenario_types import (
 )
 
 SCENARIO_ROOT = Path(__file__).parents[1] / "scenarios"
-_OPERATIONS = {"draft", "verify", "select", "commit", "eval"}
+_OPERATIONS = {"draft", "verify", "select", "commit", "eval", "sample"}
 
 
 def _integer_list(value: object) -> TypeIs[list[int]]:
@@ -69,11 +69,13 @@ def _think_budget(value: object) -> bool:
 
 
 def _native_call(value: object) -> TypeIs[NativeCall]:
-    if not is_string_key_mapping(value) or not _allowed(value, {"op", "tokens", "error", "side_effect"}):
+    if not is_string_key_mapping(value) or not _allowed(value, {"op", "tokens", "index", "error", "side_effect"}):
         return False
     if value.get("op") not in _OPERATIONS:
         return False
     if "tokens" in value and not _integer_list(value["tokens"]):
+        return False
+    if "index" in value and (type(value["index"]) is not int or value["index"] < 0):
         return False
     if (error := value.get("error")) is not None and not isinstance(error, str):
         return False
@@ -121,11 +123,15 @@ def _config(value: object) -> TypeIs[ScenarioConfig]:
 
 def _metrics(value: object) -> TypeIs[Metrics]:
     names = {"committed_blocks", "drafts_offered", "drafts_accepted", "replacement_anchors", "discarded_tails"}
-    return (
-        is_string_key_mapping(value)
-        and set(value) == names
-        and all(type(item) is int and item >= 0 for item in value.values())
-    )
+    if not is_string_key_mapping(value) or not names <= set(value) or not _allowed(value, names | {"acceptance_rate"}):
+        return False
+    for name in names:
+        item = value[name]
+        if not isinstance(item, int) or isinstance(item, bool):
+            return False
+        if item < 0:
+            return False
+    return (rate := value.get("acceptance_rate")) is None or (_real(rate) and 0 <= rate <= 1)
 
 
 def _metadata(value: object) -> bool:
@@ -146,11 +152,13 @@ def _metadata(value: object) -> bool:
     return state is None or isinstance(state, str)
 
 
-def _expectation(value: object) -> TypeIs[Expectation]:
+def _expectation(value: object) -> TypeIs[Expectation]:  # noqa: PLR0911 - Validate each expected field independently.
     required = {"reason", "token_ids", "native_position", "rng", "metrics", "metadata", "event_types"}
     if not is_string_key_mapping(value) or set(value) != required:
         return False
-    if not isinstance(value["reason"], str) or not _integer_list(value["token_ids"]):
+    if (reason := value["reason"]) is not None and not isinstance(reason, str):
+        return False
+    if not _integer_list(value["token_ids"]):
         return False
     if type(value["native_position"]) is not int or value["native_position"] < 0:
         return False
@@ -161,10 +169,10 @@ def _expectation(value: object) -> TypeIs[Expectation]:
     return all(_metadata(item) for item in value["metadata"]) and _string_list(value["event_types"])
 
 
-def _round(value: object) -> TypeIs[Round]:
+def _round(value: object) -> TypeIs[Round]:  # noqa: PLR0911 - Validate each round field independently.
     if not is_string_key_mapping(value) or not _allowed(
         value,
-        {"prompt", "mode", "max_tokens", "stop_sequences", "cancel_after_samples", "expect"},
+        {"prompt", "mode", "max_tokens", "stop_sequences", "cancel_after_samples", "hook_error_at", "expect"},
     ):
         return False
     if not isinstance(value.get("prompt"), str) or value.get("mode", "raw") not in {"raw", "chat"}:
@@ -175,8 +183,10 @@ def _round(value: object) -> TypeIs[Round]:
     if "stop_sequences" in value and not _string_list(value["stop_sequences"]):
         return False
     if "cancel_after_samples" in value and (
-        type(value["cancel_after_samples"]) is not int or value["cancel_after_samples"] < 0
+        type(value["cancel_after_samples"]) is not int or value["cancel_after_samples"] < -3
     ):
+        return False
+    if "hook_error_at" in value and (type(value["hook_error_at"]) is not int or value["hook_error_at"] < 1):
         return False
     return _expectation(value.get("expect"))
 

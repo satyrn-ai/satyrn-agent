@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING
 
 from ds4py.engine.decode import Verdict
 from ds4py.errors import EngineError
+from typing_extensions import sentinel
+
+_BONUS = sentinel("_BONUS")
 
 if TYPE_CHECKING:
     from ds4py._native.protocol import SessionHandle
@@ -178,7 +181,7 @@ class DFlashStep:
     ) -> _RowOutcome:
         row = 0
         while True:
-            draft = block.drafts[row] if row < len(block.drafts) else None
+            draft = block.drafts[row] if row < len(block.drafts) else _BONUS
             if ctx.cancelled():
                 return _RowOutcome(interrupted=True)
             self._native.select(session.raw, row)
@@ -187,8 +190,8 @@ class DFlashStep:
                 return _RowOutcome(stop=candidate)
             if ctx.cancelled():
                 return _RowOutcome(candidate, interrupted=True)
-            if draft is None or candidate.token != draft:
-                return _RowOutcome(candidate, replacement=draft is not None)
+            if draft is _BONUS or candidate.token != draft:
+                return _RowOutcome(candidate, replacement=draft is not _BONUS)
             verdict = ctx.stage(candidate.token, ctx.accept(candidate.token))
             block.accepted_drafts += 1
             if verdict is Verdict.STOP_AFTER or ctx.reason is not None:

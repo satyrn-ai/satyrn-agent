@@ -19,8 +19,10 @@ class ThinkBudget(TypedDict, closed=True):
 
 
 class NativeCall(TypedDict, closed=True):
-    op: Literal["draft", "verify", "select", "commit", "eval"]
+    op: Literal["draft", "verify", "select", "commit", "eval", "sample"]
     tokens: NotRequired[list[int]]
+    index: NotRequired[int]
+    """Zero-based sample index for a sample fault."""
     error: NotRequired[str | None]
     side_effect: NotRequired[bool]
 
@@ -38,6 +40,7 @@ class Metrics(TypedDict, closed=True):
     drafts_accepted: int
     replacement_anchors: int
     discarded_tails: int
+    acceptance_rate: NotRequired[float]
 
 
 class SampleMetadata(TypedDict, closed=True):
@@ -66,7 +69,7 @@ class Native(TypedDict, closed=True):
 
 
 class Expectation(TypedDict, closed=True):
-    reason: str
+    reason: str | None
     token_ids: list[int]
     native_position: int
     rng: int
@@ -81,6 +84,8 @@ class Round(TypedDict, closed=True):
     max_tokens: int
     stop_sequences: NotRequired[list[str]]
     cancel_after_samples: NotRequired[int]
+    """Sample index to cancel at; -1 selects before a row sample, -2 cancels during native commit, and -3 cancels before the round."""
+    hook_error_at: NotRequired[int]
     expect: Expectation
 
 

@@ -1,5 +1,7 @@
 """Deterministic optional bindings over ds4-py's real fake worker/session."""
 
+from __future__ import annotations
+
 import ctypes as C
 import threading
 from collections.abc import Sequence
@@ -24,6 +26,7 @@ class ScenarioFakeNative(FakeNative):
         self.last_drafts: list[int] = []
         self.operations: list[str] = []
         self.sample_count = 0
+        self.current_token = 0
         self.cancel_after_samples: int | None = None
         self.cancel_event: threading.Event | None = None
         super().__init__(
@@ -54,14 +57,22 @@ class ScenarioFakeNative(FakeNative):
         self.sample_count += 1
         if self.cancel_after_samples == index and self.cancel_event is not None:
             self.cancel_event.set()
-        return script[index] if index < len(script) else 0
+        call = self._response("sample", index)
+        if call is not None and (message := call.get("error")) is not None:
+            raise RuntimeError(message)
+        self.current_token = script[index] if index < len(script) else 0
+        return self.current_token
 
     def session(self, raw: int) -> FakeSession:
         return self.sessions[raw]
 
-    def _response(self, operation: str) -> NativeCall | None:
+    def _response(self, operation: str, index: int | None = None) -> NativeCall | None:
         responses = self.responses[operation]
-        return responses.pop(0) if responses else None
+        if not responses:
+            return None
+        if index is not None and responses[0].get("index", 0) != index:
+            return None
+        return responses.pop(0)
 
     def _has_dflash(self, raw: int) -> bool:
         return self.config.get("has_dflash", True)
@@ -95,14 +106,24 @@ class ScenarioFakeNative(FakeNative):
 
     def _select(self, raw: int, row: int) -> int:
         self.operations.append("select")
+        if self.cancel_after_samples == -1 and self.cancel_event is not None:
+            self.cancel_event.set()
         self.session(raw)._logits = None
         call = self._response("select")
         if call is not None and (message := call.get("error")) is not None:
             raise DFlashError("ds4_session_verify_select", message)
         return 0
 
+    def _eval(self, token: int) -> None:
+        self.operations.append("eval")
+        call = self._response("eval")
+        if call is not None and (message := call.get("error")) is not None:
+            raise RuntimeError(message)
+
     def _commit(self, raw: int, rows: int, error: Any, error_length: int) -> int:
         self.operations.append("commit")
+        if self.cancel_after_samples == -2 and self.cancel_event is not None:
+            self.cancel_event.set()
         call = self._response("commit")
         session = self.session(raw)
         side_effect = call is not None and call.get("side_effect", False)
@@ -125,6 +146,22 @@ class ScenarioFakeNative(FakeNative):
         C.cast(min_p, C.POINTER(C.c_float))[0] = values["min_p"]
 
 
+class ScenarioFakeSession(FakeSession):
+    def __init__(self, engine: ScenarioFakeEngine, ctx: int) -> None:
+        super().__init__(engine, ctx)
+        self.scenario_native = engine.scenario_native
+
+    @override
+    def sample(self, temperature: float, top_k: int, top_p: float, min_p: float, rng: C.c_uint64) -> int:
+        result = super().sample(temperature, top_k, top_p, min_p, rng)
+        return self.scenario_native.current_token if self.scenario_native.current_token < 0 else result
+
+    @override
+    def eval(self, token: int) -> None:
+        self.scenario_native._eval(token)
+        super().eval(token)
+
+
 class ScenarioFakeEngine(FakeEngine):
     def __init__(self, native: ScenarioFakeNative) -> None:
         super().__init__(native)
@@ -132,7 +169,8 @@ class ScenarioFakeEngine(FakeEngine):
 
     @override
     def create_session(self, ctx: int) -> FakeSession:
-        session = super().create_session(ctx)
+        session = ScenarioFakeSession(self, ctx)
+        self._sessions.add(session)
         self.scenario_native.sessions[session.raw] = session
         return session
 
@@ -147,4 +185,4 @@ class ScenarioFakeEngine(FakeEngine):
         )
 
 
-_OPERATIONS = ("draft", "verify", "select", "commit", "eval")
+_OPERATIONS = ("draft", "verify", "select", "commit", "eval", "sample")
