@@ -26,8 +26,9 @@ All commands ran from the repository root through devenv.
   including Ruff, ty, ShellCheck, configuration, and workflow checks.
 - `uv run --frozen pytest tests/e2e/model_free --cov=satyrn_agent
   --cov-branch --cov-report=term-missing --cov-fail-under=100 -q` —
-  **95 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
-  including 76 JSON scenarios through the shared public-flow runner.
+  **122 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
+  including 76 JSON scenarios and production config-boundary tests through the
+  shared public-flow runner.
 - `uv run --frozen --no-sync pytest tests/unit tests/abnormal -q` — **64 passed**
   in the separate auxiliary unit/exception suite.
 - `uv run --frozen --no-sync pytest tests/e2e/live -q` — **17 skipped**. Every
@@ -39,7 +40,7 @@ All commands ran from the repository root through devenv.
 - `bash tests/ds4_tools_test.sh` — **49 passed, 0 failed**.
 - `git diff --check` — passed.
 
-The 95 model-free E2E tests use public `satyrn_agent.open()` and real ds4-py
+The 122 model-free E2E tests use public `satyrn_agent.open()` and real ds4-py
 worker/session/decode code. Only the external native library is scripted. The
 100% result does not convert those doubles into normal-path real-engine evidence
 or use auxiliary unit tests to fill missing branches.
@@ -87,6 +88,19 @@ The soft think-budget test intentionally does not require the closing marker to
 be absent: the capability is a soft bias, not a guaranteed stop or token
 injection prohibition. Its tests separately prove that the hook only biases
 logits and never appends transcript content.
+
+## Production config schema
+
+`schemas/satyrn-config.schema.json` now defines the actual external Satyrn config,
+including nested sampling/think-budget values and the `on` drafter requirement.
+Named datamodel-code-generator jobs generate production and scenario TypedDicts
+with `practical-py314-20261104`; prek checks both with `--all-jobs --check`.
+The scenario schema references the production schema rather than duplicating it.
+
+`config_from_dict()` validates external `object` input with handwritten `TypeIs`
+logic and converts it to the existing frozen, slotted `SatyrnConfig`. Existing
+ordinary scenarios use this production parser. No Pydantic BaseModel or
+TypeAdapter is used.
 
 ## Scenario-driven E2E migration
 

@@ -142,6 +142,22 @@ TypeAdapter. Handwritten `TypeIs` validators and conversion logic perform
 runtime validation. prek rejects stale generated files and invalid scenario
 documents.
 
+### Production config schema
+
+`schemas/satyrn-config.schema.json` is the production external config contract,
+and the scenario schema references it. Generate the production DTO and scenario
+DTOs with:
+
+```bash
+devenv shell -- uv run --frozen datamodel-codegen --all-jobs
+```
+
+Use `config_from_dict(data)` to validate a JSON-shaped external mapping and
+construct the frozen, slotted `SatyrnConfig`. The generated DTOs do not replace
+that domain object. Use `--recommend-options` for schema-specific option review
+and `--generate-cli-command` to inspect effective generation options. Do not use
+Pydantic BaseModel or TypeAdapter.
+
 Build and inspect the wheel:
 
 ```bash

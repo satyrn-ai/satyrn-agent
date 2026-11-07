@@ -10,6 +10,13 @@ def test_external_defaults_convert_to_domain_config() -> None:
     assert config_from_dict({}) == SatyrnConfig()
 
 
+def test_external_partial_sampling_keeps_missing_top_k() -> None:
+    config = config_from_dict({"sampling": {"temperature": 0.5}})
+
+    assert config.sampling.temperature == 0.5
+    assert config.sampling.top_k is None
+
+
 def test_external_full_config_converts_modes_paths_and_values() -> None:
     config = config_from_dict(
         {
@@ -40,6 +47,10 @@ def test_external_full_config_converts_modes_paths_and_values() -> None:
         ({"draft_tokens": True}, TypeError, "draft_tokens"),
         ({"draft_tokens": -1}, ValueError, "draft_tokens"),
         ({"sampling": None}, TypeError, "sampling"),
+        ({"sampling": {"unknown": 1}}, ValueError, "unknown sampling"),
+        ({"sampling": {"temperature": -1}}, ValueError, "non-negative"),
+        ({"think_budget": []}, TypeError, "think_budget"),
+        ({"think_budget": {}}, ValueError, "max_tokens"),
         ({"sampling": {"temperature": None}}, TypeError, "temperature"),
         ({"sampling": {"top_k": True}}, TypeError, "top_k"),
         ({"sampling": {"temperature": float("nan")}}, ValueError, "finite"),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeIs
+from typing import TYPE_CHECKING, TypeIs, cast
 
 from .config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
 
@@ -46,8 +46,8 @@ def _sampling(value: object) -> TypeIs[SamplingOverridesDocument]:
         if name not in value:
             continue
         item = value[name]
-        if not _real(item, name):
-            raise AssertionError("validated sampling value must be real")
+        _real(item, name)
+        item = cast("float", item)
         if name == "temperature" and item < 0:
             raise ValueError("temperature must be non-negative")
         if name != "temperature" and not 0 <= item <= 1:
@@ -88,8 +88,8 @@ def _document(value: object) -> TypeIs[ConfigDocument]:
 
 def config_from_dict(data: object) -> SatyrnConfig:
     """Validate an external JSON-shaped mapping before creating domain values."""
-    if not _document(data):
-        raise AssertionError("validated config must be retained")
+    _document(data)
+    data = cast("ConfigDocument", data)
     path = data.get("drafter_path")
     budget = data.get("think_budget")
     return SatyrnConfig(

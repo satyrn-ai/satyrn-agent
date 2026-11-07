@@ -59,6 +59,12 @@ policy. It returns ds4-py's real `Session`. See `tests/e2e/README.md` for the
 real patched-engine environment and acceptance commands. M3 CLI, TUI, and
 persistence integration are not part of this package slice.
 
+For a JSON-shaped external configuration, use `config_from_dict(data)`. The
+versioned contract is `schemas/satyrn-config.schema.json`; datamodel-code-generator
+generates the TypedDict DTOs, and handwritten runtime validation converts them
+to the frozen domain config without Pydantic models or TypeAdapter. The E2E
+scenario config references the same production schema.
+
 ## Layout
 
 - `src/satyrn_agent/` — typed downstream engine factory, optional native
