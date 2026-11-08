@@ -1,0 +1,183 @@
+{
+  "schema_version": 0,
+  "packet_id": "customer-tracker-e2-rules-and-create",
+  "task": "Implement the E2 pure customer rules and create operation as a bounded multi-file slice.",
+  "readable_files": [
+    "app/crm/domain.py",
+    "app/crm/models.py"
+  ],
+  "file_changes": [
+    {"path": "app/crm/domain.py", "operation": "modify"},
+    {"path": "app/crm/operations.py", "operation": "create"},
+    {"path": "app/tests/test_operations.py", "operation": "create"}
+  ],
+  "consumes": [
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "CustomerId",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "FirstName",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "LastName",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "EmailAddress",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "PhoneNumber",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/models.py"},
+      "qualified_name": "Customer",
+      "expected_signature": null
+    }
+  ],
+  "produces": [
+    {
+      "path": "app/crm/domain.py",
+      "qualified_name": "RuleViolation",
+      "operation": "create",
+      "kind": "class",
+      "declaration": "class RuleViolation(ValueError):"
+    },
+    {
+      "path": "app/crm/domain.py",
+      "qualified_name": "validate_customer_name",
+      "operation": "create",
+      "kind": "function",
+      "declaration": "def validate_customer_name(first_name: FirstName, last_name: LastName) -> None:"
+    },
+    {
+      "path": "app/crm/domain.py",
+      "qualified_name": "validate_contact",
+      "operation": "create",
+      "kind": "function",
+      "declaration": "def validate_contact(email: EmailAddress, phone: PhoneNumber) -> None:"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "qualified_name": "create_customer",
+      "operation": "create",
+      "kind": "function",
+      "declaration": "def create_customer(*, first_name: FirstName, last_name: LastName, email: EmailAddress, phone: PhoneNumber) -> CustomerId:"
+    }
+  ],
+  "imports": [
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "CustomerId",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "FirstName",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "LastName",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "EmailAddress",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "PhoneNumber",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "validate_customer_name",
+      "alias": null,
+      "target": "planned"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "validate_contact",
+      "alias": null,
+      "target": "planned"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.models",
+      "name": "Customer",
+      "alias": "CustomerRecord",
+      "target": "existing"
+    },
+    {
+      "path": "app/tests/test_operations.py",
+      "module": "crm.domain",
+      "name": "RuleViolation",
+      "alias": null,
+      "target": "planned"
+    },
+    {
+      "path": "app/tests/test_operations.py",
+      "module": "crm.domain",
+      "name": "validate_customer_name",
+      "alias": null,
+      "target": "planned"
+    },
+    {
+      "path": "app/tests/test_operations.py",
+      "module": "crm.domain",
+      "name": "validate_contact",
+      "alias": null,
+      "target": "planned"
+    },
+    {
+      "path": "app/tests/test_operations.py",
+      "module": "crm.operations",
+      "name": "create_customer",
+      "alias": null,
+      "target": "planned"
+    }
+  ],
+  "tests": [
+    {
+      "path": "app/tests/test_operations.py",
+      "operation": "create",
+      "content": "from crm.domain import RuleViolation, validate_contact, validate_customer_name\nfrom crm.operations import create_customer\n\ndef test_customer_name_rule_rejects_blank_values() -> None:\n    try:\n        validate_customer_name(' ', 'Lee')\n    except RuleViolation:\n        return\n    raise AssertionError('blank name unexpectedly passed')\n\ndef test_contact_rule_accepts_optional_phone() -> None:\n    validate_contact('lee@example.test', '')\n\ndef test_create_customer_returns_an_identifier() -> None:\n    assert create_customer(first_name='Lee', last_name='Ng', email='lee@example.test', phone='')\n"
+    }
+  ],
+  "gates": [
+    {
+      "argv": ["pytest", "tests/test_operations.py"],
+      "cwd": "app",
+      "before": {"exit_code": "nonzero", "reason": "The rules and operation are not implemented."},
+      "after": {"exit_code": 0, "reason": "The operation tests pass."}
+    }
+  ],
+  "known_facts": ["The E2 starting domain module already contains the semantic aliases and Customer object."],
+  "acceptance_criteria": [
+    "Names and contact fields are validated by pure domain functions.",
+    "The create operation persists normalized values and returns a customer ID."
+  ],
+  "preserved_behavior": ["The operation does not import Django into the domain module."]
+}

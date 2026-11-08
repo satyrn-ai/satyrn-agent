@@ -1,0 +1,117 @@
+{
+  "schema_version": 0,
+  "packet_id": "customer-tracker-e3-contact-update",
+  "task": "Add the E3 contact update operation while preserving the existing customer identity and unrelated fields.",
+  "readable_files": [
+    "app/crm/domain.py",
+    "app/crm/models.py"
+  ],
+  "file_changes": [
+    {"path": "app/crm/operations.py", "operation": "modify"},
+    {"path": "app/tests/test_contact_update.py", "operation": "create"}
+  ],
+  "consumes": [
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "CustomerId",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "EmailAddress",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "PhoneNumber",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "validate_contact",
+      "expected_signature": "def validate_contact(email: EmailAddress, phone: PhoneNumber) -> None:"
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/models.py"},
+      "qualified_name": "Customer",
+      "expected_signature": null
+    }
+  ],
+  "produces": [
+    {
+      "path": "app/crm/operations.py",
+      "qualified_name": "update_contact",
+      "operation": "create",
+      "kind": "function",
+      "declaration": "def update_contact(customer_id: CustomerId, *, email: EmailAddress, phone: PhoneNumber) -> None:"
+    }
+  ],
+  "imports": [
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "CustomerId",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "EmailAddress",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "PhoneNumber",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.domain",
+      "name": "validate_contact",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/crm/operations.py",
+      "module": "crm.models",
+      "name": "Customer",
+      "alias": "CustomerRecord",
+      "target": "existing"
+    },
+    {
+      "path": "app/tests/test_contact_update.py",
+      "module": "crm.operations",
+      "name": "update_contact",
+      "alias": null,
+      "target": "planned"
+    }
+  ],
+  "tests": [
+    {
+      "path": "app/tests/test_contact_update.py",
+      "operation": "create",
+      "content": "from crm.operations import update_contact\n\ndef test_update_contact_is_declared() -> None:\n    assert callable(update_contact)\n"
+    }
+  ],
+  "gates": [
+    {
+      "argv": ["pytest", "tests/test_contact_update.py"],
+      "cwd": "app",
+      "before": {"exit_code": "nonzero", "reason": "The contact update operation is not implemented."},
+      "after": {"exit_code": 0, "reason": "The contact update tests pass."}
+    }
+  ],
+  "known_facts": ["The E3 starting workspace already contains pure contact rules and the create operation."],
+  "acceptance_criteria": [
+    "The operation updates only email and phone after validating and trimming them.",
+    "A missing customer produces the declared missing-customer behavior."
+  ],
+  "preserved_behavior": [
+    "The customer ID, names, notes, and creation timestamp remain unchanged.",
+    "The existing create-customer operation retains its behavior."
+  ]
+}

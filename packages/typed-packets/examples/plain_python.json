@@ -1,0 +1,75 @@
+{
+  "schema_version": 0,
+  "packet_id": "plain-python-balance-report",
+  "task": "Create a small report layer that consumes an existing balance function and composes two planned definitions.",
+  "readable_files": ["src/ledger.py"],
+  "file_changes": [
+    {"path": "src/formatting.py", "operation": "create"},
+    {"path": "src/reports.py", "operation": "create"},
+    {"path": "tests/test_reports.py", "operation": "create"}
+  ],
+  "consumes": [
+    {
+      "source": {"root_id": "workspace", "path": "src/ledger.py"},
+      "qualified_name": "current_balance",
+      "expected_signature": "def current_balance(account_id: int) -> int:"
+    }
+  ],
+  "produces": [
+    {
+      "path": "src/formatting.py",
+      "qualified_name": "format_amount",
+      "operation": "create",
+      "kind": "function",
+      "declaration": "def format_amount(amount: int) -> str:"
+    },
+    {
+      "path": "src/reports.py",
+      "qualified_name": "render_balance",
+      "operation": "create",
+      "kind": "function",
+      "declaration": "def render_balance(account_id: int) -> str:"
+    }
+  ],
+  "imports": [
+    {
+      "path": "src/reports.py",
+      "module": "ledger",
+      "name": "current_balance",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "src/reports.py",
+      "module": "formatting",
+      "name": "format_amount",
+      "alias": null,
+      "target": "planned"
+    },
+    {
+      "path": "tests/test_reports.py",
+      "module": "reports",
+      "name": "render_balance",
+      "alias": null,
+      "target": "planned"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_reports.py",
+      "operation": "create",
+      "content": "from reports import render_balance\n\ndef test_render_balance_returns_text() -> None:\n    assert isinstance(render_balance(1), str)\n"
+    }
+  ],
+  "gates": [
+    {
+      "argv": ["pytest", "tests/test_reports.py"],
+      "cwd": ".",
+      "before": {"exit_code": "nonzero", "reason": "The report modules are not implemented."},
+      "after": {"exit_code": 0, "reason": "The plain-Python test passes."}
+    }
+  ],
+  "known_facts": ["The fixture contains one plain-Python balance function."],
+  "acceptance_criteria": ["The report returns formatted text based on the current balance."],
+  "preserved_behavior": []
+}

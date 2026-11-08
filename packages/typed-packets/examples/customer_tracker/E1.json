@@ -1,0 +1,50 @@
+{
+  "schema_version": 0,
+  "packet_id": "customer-tracker-e1-model-slice",
+  "task": "Complete the E1 Customer persistence model declaration with its required fields.",
+  "readable_files": ["app/crm/models.py"],
+  "file_changes": [
+    {"path": "app/crm/models.py", "operation": "modify"},
+    {"path": "app/tests/test_customer_model.py", "operation": "create"}
+  ],
+  "consumes": [],
+  "produces": [
+    {
+      "path": "app/crm/models.py",
+      "qualified_name": "Customer",
+      "operation": "modify",
+      "kind": "class",
+      "declaration": "class Customer(models.Model):"
+    }
+  ],
+  "imports": [
+    {
+      "path": "app/tests/test_customer_model.py",
+      "module": "crm.models",
+      "name": "Customer",
+      "alias": null,
+      "target": "existing"
+    }
+  ],
+  "tests": [
+    {
+      "path": "app/tests/test_customer_model.py",
+      "operation": "create",
+      "content": "from crm.models import Customer\n\ndef test_customer_has_required_persistence_fields() -> None:\n    assert Customer._meta.get_field('first_name').max_length == 100\n    assert Customer._meta.get_field('last_name').max_length == 100\n    assert Customer._meta.get_field('email').max_length == 254\n    assert Customer._meta.get_field('phone').max_length == 40\n"
+    }
+  ],
+  "gates": [
+    {
+      "argv": ["pytest", "tests/test_customer_model.py"],
+      "cwd": "app",
+      "before": {"exit_code": "nonzero", "reason": "The model fields are incomplete."},
+      "after": {"exit_code": 0, "reason": "The model field tests pass."}
+    }
+  ],
+  "known_facts": ["E1 starts with a Customer model class whose body is empty."],
+  "acceptance_criteria": [
+    "The model declares the E1 first name, last name, email, phone, and notes fields.",
+    "Creation time is initialized and immutable as specified by the public E1 task."
+  ],
+  "preserved_behavior": ["The existing directory and detail view behavior is unchanged."]
+}
