@@ -35,3 +35,26 @@ def test_failed_session_setup_closes_wrapper() -> None:
 
     with pytest.raises(EngineError, match="engine is closed"):
         wrapper.session()
+
+
+def test_close_failure_does_not_replace_session_setup_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native = ScenarioFakeNative(
+        {
+            "script": [10],
+            "calls": [{"op": "sampling_defaults", "values": [1, 0, 1, 0], "nonfinite": True}],
+        }
+    )
+    wrapper = satyrn_agent.open("scenario.gguf", config=SatyrnConfig(dflash=DFlashMode.OFF), native=native)
+
+    def fail_close() -> None:
+        raise RuntimeError("close injected")
+
+    monkeypatch.setattr(wrapper._engine, "close", fail_close)
+    with pytest.raises(DFlashError, match="invalid sampling defaults") as caught:
+        wrapper.session()
+
+    assert caught.value.__notes__ == [
+        "Satyrn engine close failed after session setup error: RuntimeError: close injected"
+    ]

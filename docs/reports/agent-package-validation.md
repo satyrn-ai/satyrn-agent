@@ -26,7 +26,7 @@ All commands ran from the repository root through devenv.
   including Ruff, ty, ShellCheck, configuration, and workflow checks.
 - `uv run --frozen pytest tests/e2e/model_free --cov=satyrn_agent
   --cov-branch --cov-report=term-missing --cov-fail-under=100 -q` —
-  **114 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
+  **115 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
   including 58 JSON scenarios and production config-boundary tests through the
   shared public-flow runner.
 - `uv run --frozen --no-sync pytest tests/unit tests/abnormal -q` — **60 passed**
@@ -40,7 +40,7 @@ All commands ran from the repository root through devenv.
 - `bash tests/ds4_tools_test.sh` — **49 passed, 0 failed**.
 - `git diff --check` — passed.
 
-The 114 model-free tests combine public-flow scenarios with direct parser,
+The 115 model-free tests combine public-flow scenarios with direct parser,
 schema, and generation checks. Public scenarios use `satyrn_agent.open()` and
 real ds4-py worker/session/decode code; only the external native library is
 scripted. The 100% result does not convert those doubles into normal-path
@@ -127,7 +127,8 @@ The PR #12 review reduced duplicate validation and test doubles while preserving
 the model-free gate. Numeric rules now live in the domain constructors, native
 capability names derive from `bindings.py`, and DFlash publication has one
 failure/poison path. Session setup claims and closes its session atomically on
-failure. `decode_step` and `sampling_defaults` expose the selected public policy
+failure. Cleanup failure adds a note without replacing the setup exception.
+`decode_step` and `sampling_defaults` expose the selected public policy
 without harness access to wrapper internals. Context-fault scenarios use a
 `DecodeContext` public-interface test double instead of mutating ds4-py private
 state.

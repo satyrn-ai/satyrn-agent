@@ -92,8 +92,13 @@ class SatyrnEngine:
                 )
             ).result()
             session.set_decode_step(self._step)
-        except BaseException:
-            self.close()
+        except BaseException as error:
+            try:
+                self.close()
+            except BaseException as close_error:  # noqa: BLE001 - Preserve the original setup failure.
+                error.add_note(
+                    f"Satyrn engine close failed after session setup error: {type(close_error).__name__}: {close_error}"
+                )
             raise
         return session
 
