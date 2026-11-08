@@ -1,0 +1,24 @@
+[project]
+name = "customer-tracker"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=5.2,<5.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-django>=4.14.0",
+    "ruff>=0.17.4",
+    "ty>=0.0.99",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+pythonpath = ["app", "."]
+testpaths = ["app/tests", "tests"]
+addopts = "-q"
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["RUF012"]

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ customer.first_name }} {{ customer.last_name }}</title>
+  </head>
+  <body>
+    <main>
+      <p><a href="{% url 'crm:customer_list' %}">All customers</a></p>
+      <h1>{{ customer.first_name }} {{ customer.last_name }}</h1>
+      <p>Email: {{ customer.email }}</p>
+      <p>Phone: {{ customer.phone|default:"Not provided" }}</p>
+      <p>Notes: {{ customer.notes|default:"None" }}</p>
+      <p>Created: {{ customer.created_at }}</p>
+    </main>
+  </body>
+</html>

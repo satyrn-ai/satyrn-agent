@@ -1,0 +1,15 @@
+{
+  "task_id": "E3",
+  "task_file_sha256": "2fa37d745110ad20859cbbb205e35233acec93375dcb5b05041d90daffca9e51",
+  "tree_hash_method": "SHA-256 over lexically sorted UTF-8 relative paths, NUL separators, and raw SHA-256 file digests.",
+  "snapshots": {
+    "start": {
+      "sha256": "e2fc395b89426f0974f8ce767a0fd02ce1ccddda64adc4a1c8303df2dfb0b44e",
+      "file_count": 23
+    },
+    "complete": {
+      "sha256": "848597a0fce9c87d04536500887d830e8ce1eed1fea0eccfcc43a69212a119e6",
+      "file_count": 24
+    }
+  }
+}

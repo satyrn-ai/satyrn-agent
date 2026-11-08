@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ customer.first_name }} {{ customer.last_name }}</title>
+  </head>
+  <body>
+    <main>
+      <p><a href="{% url 'crm:customer_list' %}">All customers</a></p>
+      <h1>{{ customer.first_name }} {{ customer.last_name }}</h1>
+      {% if customer.archived_at %}
+        <p><strong>Archived</strong> since {{ customer.archived_at }}</p>
+      {% else %}
+        <p>Status: Active</p>
+        <form method="post" action="{% url 'crm:customer_archive' customer.id %}">
+          {% csrf_token %}
+          <button type="submit">Archive customer</button>
+        </form>
+        <p><a href="{% url 'crm:follow_up_create' customer.id %}">Create a follow-up</a></p>
+      {% endif %}
+      <p>Email: {{ customer.email }}</p>
+      <p>Phone: {{ customer.phone|default:"Not provided" }}</p>
+      <p>Notes: {{ customer.notes|default:"None" }}</p>
+      <p>Created: {{ customer.created_at }}</p>
+      <p><a href="{% url 'crm:customer_contact_edit' customer.id %}">Edit contact details</a></p>
+      <h2>Follow-up history</h2>
+      {% if follow_ups %}
+        <ul>
+          {% for follow_up in follow_ups %}
+            <li>{{ follow_up.summary }} — due {{ follow_up.due_at }} — completed {{ follow_up.completed_at|default:"No" }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No follow-up history.</p>
+      {% endif %}
+    </main>
+  </body>
+</html>

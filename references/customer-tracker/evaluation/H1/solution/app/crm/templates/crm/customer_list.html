@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Customers</title>
+  </head>
+  <body>
+    <main>
+      <h1>Customers</h1>
+      <p><a href="{% url 'crm:customer_create' %}">Add a customer</a></p>
+      <form method="get">
+        <label for="customer-search">Search customers</label>
+        <input id="customer-search" name="q" value="{{ query }}">
+        <button type="submit">Search</button>
+      </form>
+      {% if customer_page.customers %}
+        <ul>
+          {% for customer in customer_page.customers %}
+            <li>
+              <a href="{% url 'crm:customer_detail' customer.id %}">
+                {{ customer.first_name }} {{ customer.last_name }}
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        {% if query %}
+          <p>No customers found.</p>
+        {% else %}
+          <p>No customers yet.</p>
+        {% endif %}
+      {% endif %}
+      {% if customer_page.page_count > 1 %}
+        <nav aria-label="Customer pages">
+          {% if customer_page.has_previous %}
+            <a href="?q={{ query|urlencode }}&amp;page={{ customer_page.page_number|add:'-1' }}">
+              Previous
+            </a>
+          {% endif %}
+          <span>Page {{ customer_page.page_number }} of {{ customer_page.page_count }}</span>
+          {% if customer_page.has_next %}
+            <a href="?q={{ query|urlencode }}&amp;page={{ customer_page.page_number|add:'1' }}">
+              Next
+            </a>
+          {% endif %}
+        </nav>
+      {% endif %}
+    </main>
+  </body>
+</html>

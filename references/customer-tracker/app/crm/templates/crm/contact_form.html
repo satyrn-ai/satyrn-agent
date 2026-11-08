@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Edit contact details</title>
+  </head>
+  <body>
+    <main>
+      <h1>Edit contact details for {{ customer.first_name }} {{ customer.last_name }}</h1>
+      <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Save contact details</button>
+      </form>
+      <p>
+        <a href="{% url 'crm:customer_detail' customer.id %}">Cancel</a>
+      </p>
+    </main>
+  </body>
+</html>

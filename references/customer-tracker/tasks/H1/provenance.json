@@ -1,0 +1,19 @@
+{
+  "task_id": "H1",
+  "task_file_sha256": "32f72f2143c38d3341961033950f4a30820626f947b66331fde71e63848c40c9",
+  "baseline": {
+    "path": "examples/E3/complete",
+    "sha256": "848597a0fce9c87d04536500887d830e8ce1eed1fea0eccfcc43a69212a119e6",
+    "file_count": 24
+  },
+  "start": {
+    "sha256": "960b355d87a50807c51f05060218d2aa26d608a68a76ccac923565a459241768",
+    "file_count": 24
+  },
+  "scaffold_additions": [
+    "app/crm/domain.py: CustomerPage frozen domain type",
+    "app/crm/queries.py: search_customers unfinished interface",
+    "app/crm/views.py: unfinished customer_list implementation"
+  ],
+  "tree_hash_method": "SHA-256 over lexically sorted UTF-8 relative paths, NUL separators, and raw SHA-256 file digests."
+}

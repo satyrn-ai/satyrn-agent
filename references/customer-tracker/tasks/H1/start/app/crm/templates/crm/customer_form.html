@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Add a customer</title>
+  </head>
+  <body>
+    <main>
+      <h1>Add a customer</h1>
+      <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Save customer</button>
+      </form>
+      <p><a href="{% url 'crm:customer_list' %}">Cancel</a></p>
+    </main>
+  </body>
+</html>

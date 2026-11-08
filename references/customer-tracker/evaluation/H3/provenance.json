@@ -1,0 +1,13 @@
+{
+  "task_id": "H3",
+  "protected_solution": {
+    "path": "solution",
+    "sha256": "6f03600223e8380e300bcd0aef1f808e0151ae5e8b485b52e3e379f25b9362c3",
+    "file_count": 9
+  },
+  "protected_tests": {
+    "path": "test_archive.py",
+    "sha256": "474a97d85e7d207e8ac6d1d7f3a40010618285edf515a6896368d5fbe5f5557b"
+  },
+  "tree_hash_method": "SHA-256 over lexically sorted UTF-8 relative paths, NUL separators, and raw SHA-256 file digests."
+}

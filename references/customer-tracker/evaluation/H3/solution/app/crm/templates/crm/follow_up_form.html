@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Create a follow-up</title>
+  </head>
+  <body>
+    <main>
+      <h1>Create a follow-up for {{ customer.first_name }} {{ customer.last_name }}</h1>
+      <p>Enter the due date and time in UTC.</p>
+      <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Create follow-up</button>
+      </form>
+    </main>
+  </body>
+</html>

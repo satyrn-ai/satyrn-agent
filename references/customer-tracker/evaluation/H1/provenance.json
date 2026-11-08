@@ -1,0 +1,13 @@
+{
+  "task_id": "H1",
+  "protected_solution": {
+    "path": "solution",
+    "sha256": "1249f30f3d52c45b2fcbd9de7f2db3b8305d32cccd1dfb8dae3a22a957aee88a",
+    "file_count": 4
+  },
+  "protected_tests": {
+    "path": "test_search.py",
+    "sha256": "ab1bdb62264d907e254134fcf516c9b76e681dcce44e7b467c618fb586836111"
+  },
+  "tree_hash_method": "SHA-256 over lexically sorted UTF-8 relative paths, NUL separators, and raw SHA-256 file digests."
+}

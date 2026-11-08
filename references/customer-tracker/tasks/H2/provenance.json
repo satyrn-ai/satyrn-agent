@@ -1,0 +1,26 @@
+{
+  "task_id": "H2",
+  "task_file_sha256": "b93e6fb218cfd1b3e2406e2f523922a78b1756405c29018ee23ba3e20c55278e",
+  "baseline": {
+    "path": "examples/E3/complete",
+    "sha256": "848597a0fce9c87d04536500887d830e8ce1eed1fea0eccfcc43a69212a119e6",
+    "file_count": 24
+  },
+  "start": {
+    "sha256": "b0a4bbc1c142a4911b6a3bc6261cdd8cf8498b4c5cabb8c4e7a783ffc0a2098a",
+    "file_count": 26
+  },
+  "scaffold_additions": [
+    "app/crm/models.py: FollowUp schema with protected customer deletion",
+    "app/crm/migrations/0002_followup.py: minimal follow-up migration",
+    "app/crm/domain.py: FollowUp value, FollowUpId, and unfinished status rule",
+    "app/crm/operations.py: unfinished scheduling and completion interfaces",
+    "app/crm/queries.py: unfinished follow-up reads",
+    "app/crm/forms.py: follow-up input form",
+    "app/crm/views.py: unfinished follow-up views",
+    "app/crm/urls.py: follow-up routes",
+    "app/crm/templates/crm/customer_detail.html: schedule link",
+    "app/tests/test_follow_ups_public.py: public clock examples"
+  ],
+  "tree_hash_method": "SHA-256 over lexically sorted UTF-8 relative paths, NUL separators, and raw SHA-256 file digests."
+}

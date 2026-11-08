@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Customers</title>
+  </head>
+  <body>
+    <main>
+      <h1>Customers</h1>
+      {% if customers %}
+        <ul>
+          {% for customer in customers %}
+            <li>
+              <a href="{% url 'crm:customer_detail' customer.id %}">
+                {{ customer.first_name }} {{ customer.last_name }}
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No customers yet.</p>
+      {% endif %}
+    </main>
+  </body>
+</html>

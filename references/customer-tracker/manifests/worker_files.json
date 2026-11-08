@@ -1,0 +1,892 @@
+{
+  "tasks": {
+    "E1": {
+      "examples/E1/complete/app/config/__init__.py": {
+        "export_path": "complete/app/config/__init__.py",
+        "sha256": "9e745870300bd8ef9f8577187d4e82be6512905b720986383c537657044ff275"
+      },
+      "examples/E1/complete/app/config/settings.py": {
+        "export_path": "complete/app/config/settings.py",
+        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+      },
+      "examples/E1/complete/app/config/urls.py": {
+        "export_path": "complete/app/config/urls.py",
+        "sha256": "da096e46f204256655b9065f626cac8ac85df699d56d4284c33e0e25f83a9f29"
+      },
+      "examples/E1/complete/app/config/wsgi.py": {
+        "export_path": "complete/app/config/wsgi.py",
+        "sha256": "f2563644298f803003bd744e8bd67fdf55e97f8f79d5420269bee499541b7269"
+      },
+      "examples/E1/complete/app/crm/__init__.py": {
+        "export_path": "complete/app/crm/__init__.py",
+        "sha256": "173910aa0a138ba5bdfb8b057954f58cc4bd71223bf537f243c474d6965b2ffc"
+      },
+      "examples/E1/complete/app/crm/apps.py": {
+        "export_path": "complete/app/crm/apps.py",
+        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+      },
+      "examples/E1/complete/app/crm/domain.py": {
+        "export_path": "complete/app/crm/domain.py",
+        "sha256": "835c29d24a46f374ab22509dfed6f1d6c18791878d50ac362f63720c03a759ff"
+      },
+      "examples/E1/complete/app/crm/migrations/0001_initial.py": {
+        "export_path": "complete/app/crm/migrations/0001_initial.py",
+        "sha256": "1b92562086c9f3d06bd69d6210d533e8fd09c62e204872cebe05a1c7fffd36d3"
+      },
+      "examples/E1/complete/app/crm/migrations/__init__.py": {
+        "export_path": "complete/app/crm/migrations/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "examples/E1/complete/app/crm/models.py": {
+        "export_path": "complete/app/crm/models.py",
+        "sha256": "fcf1baefa1596e975251e8d94a6547aa74321de5ec2bc73a3415312ee12acdbf"
+      },
+      "examples/E1/complete/app/crm/queries.py": {
+        "export_path": "complete/app/crm/queries.py",
+        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+      },
+      "examples/E1/complete/app/crm/templates/crm/customer_detail.html": {
+        "export_path": "complete/app/crm/templates/crm/customer_detail.html",
+        "sha256": "98145375da8ec380a3c634f951b38ad9e282fbcb1a41c030a54f6852b0f66a88"
+      },
+      "examples/E1/complete/app/crm/templates/crm/customer_list.html": {
+        "export_path": "complete/app/crm/templates/crm/customer_list.html",
+        "sha256": "b1e206b7160c0bc02978b654febb8988758fa1d34a656df01f64bd724271616c"
+      },
+      "examples/E1/complete/app/crm/urls.py": {
+        "export_path": "complete/app/crm/urls.py",
+        "sha256": "9863185f3d589ce26b6e90ca3c4a3129f44f897d718a542a393894ad3ec4d0fd"
+      },
+      "examples/E1/complete/app/crm/views.py": {
+        "export_path": "complete/app/crm/views.py",
+        "sha256": "90e7ffed3b11e36a388fe032b6bdadc59f0f851c5e857084a9835a8e16d02596"
+      },
+      "examples/E1/complete/app/manage.py": {
+        "export_path": "complete/app/manage.py",
+        "sha256": "30428108646cb4ce4db65635c073005a74654b2a908655f130880771e7493c14"
+      },
+      "examples/E1/complete/app/tests/test_domain.py": {
+        "export_path": "complete/app/tests/test_domain.py",
+        "sha256": "ff58b0818bc4a32b5fba01a9c400074d93750fcdeed893598ed566caab3f258b"
+      },
+      "examples/E1/complete/app/tests/test_persistence.py": {
+        "export_path": "complete/app/tests/test_persistence.py",
+        "sha256": "ee213008d051c280428d9e018723ac6a094ff3e9241bf438bdb18f59b89e3cab"
+      },
+      "examples/E1/complete/app/tests/test_requests.py": {
+        "export_path": "complete/app/tests/test_requests.py",
+        "sha256": "32eddff6a0b2748c5d7709a9f4d8a595b6e09540b7a1c67203802ce36a7c0e72"
+      },
+      "examples/E1/complete/pytest.ini": {
+        "export_path": "complete/pytest.ini",
+        "sha256": "c11f6237644cc9ed8b6fdc163b389c255bbf0ea2b513f42614ebaef8d8281c86"
+      },
+      "examples/E1/provenance.json": {
+        "export_path": "provenance.json",
+        "sha256": "29fa1dda870eb9399c7aa3285083df23b833e005d67b281c79951215ee056ce5"
+      },
+      "examples/E1/start/app/config/__init__.py": {
+        "export_path": "start/app/config/__init__.py",
+        "sha256": "9e745870300bd8ef9f8577187d4e82be6512905b720986383c537657044ff275"
+      },
+      "examples/E1/start/app/config/settings.py": {
+        "export_path": "start/app/config/settings.py",
+        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+      },
+      "examples/E1/start/app/config/urls.py": {
+        "export_path": "start/app/config/urls.py",
+        "sha256": "da096e46f204256655b9065f626cac8ac85df699d56d4284c33e0e25f83a9f29"
+      },
+      "examples/E1/start/app/config/wsgi.py": {
+        "export_path": "start/app/config/wsgi.py",
+        "sha256": "f2563644298f803003bd744e8bd67fdf55e97f8f79d5420269bee499541b7269"
+      },
+      "examples/E1/start/app/crm/__init__.py": {
+        "export_path": "start/app/crm/__init__.py",
+        "sha256": "173910aa0a138ba5bdfb8b057954f58cc4bd71223bf537f243c474d6965b2ffc"
+      },
+      "examples/E1/start/app/crm/apps.py": {
+        "export_path": "start/app/crm/apps.py",
+        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+      },
+      "examples/E1/start/app/crm/domain.py": {
+        "export_path": "start/app/crm/domain.py",
+        "sha256": "1e624a899681279c5fa89ba1ded911773bd5cbc1a1f90c51e0fae49cccd555b3"
+      },
+      "examples/E1/start/app/crm/migrations/__init__.py": {
+        "export_path": "start/app/crm/migrations/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "examples/E1/start/app/crm/models.py": {
+        "export_path": "start/app/crm/models.py",
+        "sha256": "9a8eaa809a6412b054c5480ff1138047a60009b1585a350faca20b57aa04a1be"
+      },
+      "examples/E1/start/app/crm/queries.py": {
+        "export_path": "start/app/crm/queries.py",
+        "sha256": "c345d0f2c79b945550db7794d985342013972d8f3e8bfd22bba2e3be94ba29a4"
+      },
+      "examples/E1/start/app/crm/templates/crm/customer_detail.html": {
+        "export_path": "start/app/crm/templates/crm/customer_detail.html",
+        "sha256": "98145375da8ec380a3c634f951b38ad9e282fbcb1a41c030a54f6852b0f66a88"
+      },
+      "examples/E1/start/app/crm/templates/crm/customer_list.html": {
+        "export_path": "start/app/crm/templates/crm/customer_list.html",
+        "sha256": "b1e206b7160c0bc02978b654febb8988758fa1d34a656df01f64bd724271616c"
+      },
+      "examples/E1/start/app/crm/urls.py": {
+        "export_path": "start/app/crm/urls.py",
+        "sha256": "9863185f3d589ce26b6e90ca3c4a3129f44f897d718a542a393894ad3ec4d0fd"
+      },
+      "examples/E1/start/app/crm/views.py": {
+        "export_path": "start/app/crm/views.py",
+        "sha256": "ff9f33e3d1ea2ada2f35934c4392ce4c6d20fba26b9c570206e32b7edbd975dc"
+      },
+      "examples/E1/start/app/manage.py": {
+        "export_path": "start/app/manage.py",
+        "sha256": "30428108646cb4ce4db65635c073005a74654b2a908655f130880771e7493c14"
+      },
+      "examples/E1/start/app/tests/test_domain.py": {
+        "export_path": "start/app/tests/test_domain.py",
+        "sha256": "ff58b0818bc4a32b5fba01a9c400074d93750fcdeed893598ed566caab3f258b"
+      },
+      "examples/E1/start/app/tests/test_persistence.py": {
+        "export_path": "start/app/tests/test_persistence.py",
+        "sha256": "ee213008d051c280428d9e018723ac6a094ff3e9241bf438bdb18f59b89e3cab"
+      },
+      "examples/E1/start/app/tests/test_requests.py": {
+        "export_path": "start/app/tests/test_requests.py",
+        "sha256": "32eddff6a0b2748c5d7709a9f4d8a595b6e09540b7a1c67203802ce36a7c0e72"
+      },
+      "examples/E1/start/pytest.ini": {
+        "export_path": "start/pytest.ini",
+        "sha256": "c11f6237644cc9ed8b6fdc163b389c255bbf0ea2b513f42614ebaef8d8281c86"
+      },
+      "examples/E1/task.md": {
+        "export_path": "task.md",
+        "sha256": "bb3264411a1e37498518dc81c341403a1e769e9f119418856dda8aa88777fdc6"
+      }
+    },
+    "E2": {
+      "examples/E2/complete/app/config/__init__.py": {
+        "export_path": "complete/app/config/__init__.py",
+        "sha256": "9e745870300bd8ef9f8577187d4e82be6512905b720986383c537657044ff275"
+      },
+      "examples/E2/complete/app/config/settings.py": {
+        "export_path": "complete/app/config/settings.py",
+        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+      },
+      "examples/E2/complete/app/config/urls.py": {
+        "export_path": "complete/app/config/urls.py",
+        "sha256": "da096e46f204256655b9065f626cac8ac85df699d56d4284c33e0e25f83a9f29"
+      },
+      "examples/E2/complete/app/config/wsgi.py": {
+        "export_path": "complete/app/config/wsgi.py",
+        "sha256": "f2563644298f803003bd744e8bd67fdf55e97f8f79d5420269bee499541b7269"
+      },
+      "examples/E2/complete/app/crm/__init__.py": {
+        "export_path": "complete/app/crm/__init__.py",
+        "sha256": "173910aa0a138ba5bdfb8b057954f58cc4bd71223bf537f243c474d6965b2ffc"
+      },
+      "examples/E2/complete/app/crm/apps.py": {
+        "export_path": "complete/app/crm/apps.py",
+        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+      },
+      "examples/E2/complete/app/crm/domain.py": {
+        "export_path": "complete/app/crm/domain.py",
+        "sha256": "d928dd9e2f5a65dfe97e918ace054b46fd61ed6672f5135df8adca79bf2b1b1e"
+      },
+      "examples/E2/complete/app/crm/forms.py": {
+        "export_path": "complete/app/crm/forms.py",
+        "sha256": "a716dcf8b77fcbc0e57560e20c5aa545494e498de09bf3946aa1913f31dcc589"
+      },
+      "examples/E2/complete/app/crm/migrations/0001_initial.py": {
+        "export_path": "complete/app/crm/migrations/0001_initial.py",
+        "sha256": "1b92562086c9f3d06bd69d6210d533e8fd09c62e204872cebe05a1c7fffd36d3"
+      },
+      "examples/E2/complete/app/crm/migrations/__init__.py": {
+        "export_path": "complete/app/crm/migrations/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "examples/E2/complete/app/crm/models.py": {
+        "export_path": "complete/app/crm/models.py",
+        "sha256": "fcf1baefa1596e975251e8d94a6547aa74321de5ec2bc73a3415312ee12acdbf"
+      },
+      "examples/E2/complete/app/crm/operations.py": {
+        "export_path": "complete/app/crm/operations.py",
+        "sha256": "75bb9f24e0dc8a2c5d7eb7e585bd35295fcba3beb8d1101f69fbd440b2ce5f43"
+      },
+      "examples/E2/complete/app/crm/queries.py": {
+        "export_path": "complete/app/crm/queries.py",
+        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+      },
+      "examples/E2/complete/app/crm/templates/crm/customer_detail.html": {
+        "export_path": "complete/app/crm/templates/crm/customer_detail.html",
+        "sha256": "98145375da8ec380a3c634f951b38ad9e282fbcb1a41c030a54f6852b0f66a88"
+      },
+      "examples/E2/complete/app/crm/templates/crm/customer_form.html": {
+        "export_path": "complete/app/crm/templates/crm/customer_form.html",
+        "sha256": "ce0a854e5cef28bdddd25e3ad249965635b282c864f14d1b021ca702d88eadb3"
+      },
+      "examples/E2/complete/app/crm/templates/crm/customer_list.html": {
+        "export_path": "complete/app/crm/templates/crm/customer_list.html",
+        "sha256": "e38998cf285d35df6ff15b1bd8a105c2588aaf8312a9dafc7c810dbae1541587"
+      },
+      "examples/E2/complete/app/crm/urls.py": {
+        "export_path": "complete/app/crm/urls.py",
+        "sha256": "47399bf5dc73511236ea768473bd902cde9c8298de3bad4efc4ceb265f239517"
+      },
+      "examples/E2/complete/app/crm/views.py": {
+        "export_path": "complete/app/crm/views.py",
+        "sha256": "496c7b10fc0a2b7da3be4f5fe7b67dd39f8d7afe9ac9c960e4932c52be040b24"
+      },
+      "examples/E2/complete/app/manage.py": {
+        "export_path": "complete/app/manage.py",
+        "sha256": "30428108646cb4ce4db65635c073005a74654b2a908655f130880771e7493c14"
+      },
+      "examples/E2/complete/app/tests/test_domain.py": {
+        "export_path": "complete/app/tests/test_domain.py",
+        "sha256": "0633b44f4fd66deb6b4441c689c5626fd00215409e0a5a40f89b2907e5416edf"
+      },
+      "examples/E2/complete/app/tests/test_persistence.py": {
+        "export_path": "complete/app/tests/test_persistence.py",
+        "sha256": "0ed91b6bb4551b90eafea62db99846ee1da5bc2271cdfff95a2e86c52059aac3"
+      },
+      "examples/E2/complete/app/tests/test_requests.py": {
+        "export_path": "complete/app/tests/test_requests.py",
+        "sha256": "5674ab64623d652e859481e18fa5acd81e790c5113ac1e48a31db06bb16d167f"
+      },
+      "examples/E2/complete/pytest.ini": {
+        "export_path": "complete/pytest.ini",
+        "sha256": "c11f6237644cc9ed8b6fdc163b389c255bbf0ea2b513f42614ebaef8d8281c86"
+      },
+      "examples/E2/provenance.json": {
+        "export_path": "provenance.json",
+        "sha256": "e26c530f70b47b3ecb87e65ef56f857818853b02fc6c566a762fa2e5ccc91233"
+      },
+      "examples/E2/start/app/config/__init__.py": {
+        "export_path": "start/app/config/__init__.py",
+        "sha256": "9e745870300bd8ef9f8577187d4e82be6512905b720986383c537657044ff275"
+      },
+      "examples/E2/start/app/config/settings.py": {
+        "export_path": "start/app/config/settings.py",
+        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+      },
+      "examples/E2/start/app/config/urls.py": {
+        "export_path": "start/app/config/urls.py",
+        "sha256": "da096e46f204256655b9065f626cac8ac85df699d56d4284c33e0e25f83a9f29"
+      },
+      "examples/E2/start/app/config/wsgi.py": {
+        "export_path": "start/app/config/wsgi.py",
+        "sha256": "f2563644298f803003bd744e8bd67fdf55e97f8f79d5420269bee499541b7269"
+      },
+      "examples/E2/start/app/crm/__init__.py": {
+        "export_path": "start/app/crm/__init__.py",
+        "sha256": "173910aa0a138ba5bdfb8b057954f58cc4bd71223bf537f243c474d6965b2ffc"
+      },
+      "examples/E2/start/app/crm/apps.py": {
+        "export_path": "start/app/crm/apps.py",
+        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+      },
+      "examples/E2/start/app/crm/domain.py": {
+        "export_path": "start/app/crm/domain.py",
+        "sha256": "835c29d24a46f374ab22509dfed6f1d6c18791878d50ac362f63720c03a759ff"
+      },
+      "examples/E2/start/app/crm/migrations/0001_initial.py": {
+        "export_path": "start/app/crm/migrations/0001_initial.py",
+        "sha256": "1b92562086c9f3d06bd69d6210d533e8fd09c62e204872cebe05a1c7fffd36d3"
+      },
+      "examples/E2/start/app/crm/migrations/__init__.py": {
+        "export_path": "start/app/crm/migrations/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "examples/E2/start/app/crm/models.py": {
+        "export_path": "start/app/crm/models.py",
+        "sha256": "fcf1baefa1596e975251e8d94a6547aa74321de5ec2bc73a3415312ee12acdbf"
+      },
+      "examples/E2/start/app/crm/queries.py": {
+        "export_path": "start/app/crm/queries.py",
+        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+      },
+      "examples/E2/start/app/crm/templates/crm/customer_detail.html": {
+        "export_path": "start/app/crm/templates/crm/customer_detail.html",
+        "sha256": "98145375da8ec380a3c634f951b38ad9e282fbcb1a41c030a54f6852b0f66a88"
+      },
+      "examples/E2/start/app/crm/templates/crm/customer_list.html": {
+        "export_path": "start/app/crm/templates/crm/customer_list.html",
+        "sha256": "b1e206b7160c0bc02978b654febb8988758fa1d34a656df01f64bd724271616c"
+      },
+      "examples/E2/start/app/crm/urls.py": {
+        "export_path": "start/app/crm/urls.py",
+        "sha256": "9863185f3d589ce26b6e90ca3c4a3129f44f897d718a542a393894ad3ec4d0fd"
+      },
+      "examples/E2/start/app/crm/views.py": {
+        "export_path": "start/app/crm/views.py",
+        "sha256": "90e7ffed3b11e36a388fe032b6bdadc59f0f851c5e857084a9835a8e16d02596"
+      },
+      "examples/E2/start/app/manage.py": {
+        "export_path": "start/app/manage.py",
+        "sha256": "30428108646cb4ce4db65635c073005a74654b2a908655f130880771e7493c14"
+      },
+      "examples/E2/start/app/tests/test_domain.py": {
+        "export_path": "start/app/tests/test_domain.py",
+        "sha256": "0633b44f4fd66deb6b4441c689c5626fd00215409e0a5a40f89b2907e5416edf"
+      },
+      "examples/E2/start/app/tests/test_persistence.py": {
+        "export_path": "start/app/tests/test_persistence.py",
+        "sha256": "0ed91b6bb4551b90eafea62db99846ee1da5bc2271cdfff95a2e86c52059aac3"
+      },
+      "examples/E2/start/app/tests/test_requests.py": {
+        "export_path": "start/app/tests/test_requests.py",
+        "sha256": "5674ab64623d652e859481e18fa5acd81e790c5113ac1e48a31db06bb16d167f"
+      },
+      "examples/E2/start/pytest.ini": {
+        "export_path": "start/pytest.ini",
+        "sha256": "c11f6237644cc9ed8b6fdc163b389c255bbf0ea2b513f42614ebaef8d8281c86"
+      },
+      "examples/E2/task.md": {
+        "export_path": "task.md",
+        "sha256": "ae2e707669fe24124480201a18504cb3c1756d9d0ac28180c47c686f27967ab0"
+      }
+    },
+    "E3": {
+      "examples/E3/complete/app/config/__init__.py": {
+        "export_path": "complete/app/config/__init__.py",
+        "sha256": "9e745870300bd8ef9f8577187d4e82be6512905b720986383c537657044ff275"
+      },
+      "examples/E3/complete/app/config/settings.py": {
+        "export_path": "complete/app/config/settings.py",
+        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+      },
+      "examples/E3/complete/app/config/urls.py": {
+        "export_path": "complete/app/config/urls.py",
+        "sha256": "da096e46f204256655b9065f626cac8ac85df699d56d4284c33e0e25f83a9f29"
+      },
+      "examples/E3/complete/app/config/wsgi.py": {
+        "export_path": "complete/app/config/wsgi.py",
+        "sha256": "f2563644298f803003bd744e8bd67fdf55e97f8f79d5420269bee499541b7269"
+      },
+      "examples/E3/complete/app/crm/__init__.py": {
+        "export_path": "complete/app/crm/__init__.py",
+        "sha256": "173910aa0a138ba5bdfb8b057954f58cc4bd71223bf537f243c474d6965b2ffc"
+      },
+      "examples/E3/complete/app/crm/apps.py": {
+        "export_path": "complete/app/crm/apps.py",
+        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+      },
+      "examples/E3/complete/app/crm/domain.py": {
+        "export_path": "complete/app/crm/domain.py",
+        "sha256": "d928dd9e2f5a65dfe97e918ace054b46fd61ed6672f5135df8adca79bf2b1b1e"
+      },
+      "examples/E3/complete/app/crm/forms.py": {
+        "export_path": "complete/app/crm/forms.py",
+        "sha256": "7db1ec5905ea17d8692aad66d637230da39d633842347a52d59b05de7941f4dd"
+      },
+      "examples/E3/complete/app/crm/migrations/0001_initial.py": {
+        "export_path": "complete/app/crm/migrations/0001_initial.py",
+        "sha256": "1b92562086c9f3d06bd69d6210d533e8fd09c62e204872cebe05a1c7fffd36d3"
+      },
+      "examples/E3/complete/app/crm/migrations/__init__.py": {
+        "export_path": "complete/app/crm/migrations/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "examples/E3/complete/app/crm/models.py": {
+        "export_path": "complete/app/crm/models.py",
+        "sha256": "fcf1baefa1596e975251e8d94a6547aa74321de5ec2bc73a3415312ee12acdbf"
+      },
+      "examples/E3/complete/app/crm/operations.py": {
+        "export_path": "complete/app/crm/operations.py",
+        "sha256": "9d9e06385e4c6a3e7ab71778fdc935997f77d17c42db2a77db5a0ea488ad69b9"
+      },
+      "examples/E3/complete/app/crm/queries.py": {
+        "export_path": "complete/app/crm/queries.py",
+        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+      },
+      "examples/E3/complete/app/crm/templates/crm/contact_form.html": {
+        "export_path": "complete/app/crm/templates/crm/contact_form.html",
+        "sha256": "b61c642b674452807675d9b6c48668f82df59a9fe4c494448adc1ae96086ef72"
+      },
+      "examples/E3/complete/app/crm/templates/crm/customer_detail.html": {
+        "export_path": "complete/app/crm/templates/crm/customer_detail.html",
+        "sha256": "fffd167c22c5ff5056753a02047044049e8876e48d32435e643e6756bd61c4e8"
+      },
+      "examples/E3/complete/app/crm/templates/crm/customer_form.html": {
+        "export_path": "complete/app/crm/templates/crm/customer_form.html",
+        "sha256": "ce0a854e5cef28bdddd25e3ad249965635b282c864f14d1b021ca702d88eadb3"
+      },
+      "examples/E3/complete/app/crm/templates/crm/customer_list.html": {
+        "export_path": "complete/app/crm/templates/crm/customer_list.html",
+        "sha256": "e38998cf285d35df6ff15b1bd8a105c2588aaf8312a9dafc7c810dbae1541587"
+      },
+      "examples/E3/complete/app/crm/urls.py": {
+        "export_path": "complete/app/crm/urls.py",
+        "sha256": "73f4220123284809221d88d4eb5c60c2eb6a1b899cb908a0a455d0896e643430"
+      },
+      "examples/E3/complete/app/crm/views.py": {
+        "export_path": "complete/app/crm/views.py",
+        "sha256": "45eea2e6ecf68fc6ce2353f894da53e96e6981810ec5f5bfc6cb7d9f3d5f694d"
+      },
+      "examples/E3/complete/app/manage.py": {
+        "export_path": "complete/app/manage.py",
+        "sha256": "30428108646cb4ce4db65635c073005a74654b2a908655f130880771e7493c14"
+      },
+      "examples/E3/complete/app/tests/test_domain.py": {
+        "export_path": "complete/app/tests/test_domain.py",
+        "sha256": "0633b44f4fd66deb6b4441c689c5626fd00215409e0a5a40f89b2907e5416edf"
+      },
+      "examples/E3/complete/app/tests/test_persistence.py": {
+        "export_path": "complete/app/tests/test_persistence.py",
+        "sha256": "eb5d06130c75f3725d10645757eb07b883055950e65fd6ff8c798633ba433287"
+      },
+      "examples/E3/complete/app/tests/test_requests.py": {
+        "export_path": "complete/app/tests/test_requests.py",
+        "sha256": "222243164ca2677119b7f2e2d13e97962d257726d9a5056f277835f8b652449f"
+      },
+      "examples/E3/complete/pytest.ini": {
+        "export_path": "complete/pytest.ini",
+        "sha256": "c11f6237644cc9ed8b6fdc163b389c255bbf0ea2b513f42614ebaef8d8281c86"
+      },
+      "examples/E3/provenance.json": {
+        "export_path": "provenance.json",
+        "sha256": "ed0cc22556a578a5fd54fcac9dc717d7e9d91b7aa0d12d05218780999fb18f5d"
+      },
+      "examples/E3/start/app/config/__init__.py": {
+        "export_path": "start/app/config/__init__.py",
+        "sha256": "9e745870300bd8ef9f8577187d4e82be6512905b720986383c537657044ff275"
+      },
+      "examples/E3/start/app/config/settings.py": {
+        "export_path": "start/app/config/settings.py",
+        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+      },
+      "examples/E3/start/app/config/urls.py": {
+        "export_path": "start/app/config/urls.py",
+        "sha256": "da096e46f204256655b9065f626cac8ac85df699d56d4284c33e0e25f83a9f29"
+      },
+      "examples/E3/start/app/config/wsgi.py": {
+        "export_path": "start/app/config/wsgi.py",
+        "sha256": "f2563644298f803003bd744e8bd67fdf55e97f8f79d5420269bee499541b7269"
+      },
+      "examples/E3/start/app/crm/__init__.py": {
+        "export_path": "start/app/crm/__init__.py",
+        "sha256": "173910aa0a138ba5bdfb8b057954f58cc4bd71223bf537f243c474d6965b2ffc"
+      },
+      "examples/E3/start/app/crm/apps.py": {
+        "export_path": "start/app/crm/apps.py",
+        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+      },
+      "examples/E3/start/app/crm/domain.py": {
+        "export_path": "start/app/crm/domain.py",
+        "sha256": "d928dd9e2f5a65dfe97e918ace054b46fd61ed6672f5135df8adca79bf2b1b1e"
+      },
+      "examples/E3/start/app/crm/forms.py": {
+        "export_path": "start/app/crm/forms.py",
+        "sha256": "a716dcf8b77fcbc0e57560e20c5aa545494e498de09bf3946aa1913f31dcc589"
+      },
+      "examples/E3/start/app/crm/migrations/0001_initial.py": {
+        "export_path": "start/app/crm/migrations/0001_initial.py",
+        "sha256": "1b92562086c9f3d06bd69d6210d533e8fd09c62e204872cebe05a1c7fffd36d3"
+      },
+      "examples/E3/start/app/crm/migrations/__init__.py": {
+        "export_path": "start/app/crm/migrations/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "examples/E3/start/app/crm/models.py": {
+        "export_path": "start/app/crm/models.py",
+        "sha256": "fcf1baefa1596e975251e8d94a6547aa74321de5ec2bc73a3415312ee12acdbf"
+      },
+      "examples/E3/start/app/crm/operations.py": {
+        "export_path": "start/app/crm/operations.py",
+        "sha256": "75bb9f24e0dc8a2c5d7eb7e585bd35295fcba3beb8d1101f69fbd440b2ce5f43"
+      },
+      "examples/E3/start/app/crm/queries.py": {
+        "export_path": "start/app/crm/queries.py",
+        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+      },
+      "examples/E3/start/app/crm/templates/crm/customer_detail.html": {
+        "export_path": "start/app/crm/templates/crm/customer_detail.html",
+        "sha256": "98145375da8ec380a3c634f951b38ad9e282fbcb1a41c030a54f6852b0f66a88"
+      },
+      "examples/E3/start/app/crm/templates/crm/customer_form.html": {
+        "export_path": "start/app/crm/templates/crm/customer_form.html",
+        "sha256": "ce0a854e5cef28bdddd25e3ad249965635b282c864f14d1b021ca702d88eadb3"
+      },
+      "examples/E3/start/app/crm/templates/crm/customer_list.html": {
+        "export_path": "start/app/crm/templates/crm/customer_list.html",
+        "sha256": "e38998cf285d35df6ff15b1bd8a105c2588aaf8312a9dafc7c810dbae1541587"
+      },
+      "examples/E3/start/app/crm/urls.py": {
+        "export_path": "start/app/crm/urls.py",
+        "sha256": "47399bf5dc73511236ea768473bd902cde9c8298de3bad4efc4ceb265f239517"
+      },
+      "examples/E3/start/app/crm/views.py": {
+        "export_path": "start/app/crm/views.py",
+        "sha256": "496c7b10fc0a2b7da3be4f5fe7b67dd39f8d7afe9ac9c960e4932c52be040b24"
+      },
+      "examples/E3/start/app/manage.py": {
+        "export_path": "start/app/manage.py",
+        "sha256": "30428108646cb4ce4db65635c073005a74654b2a908655f130880771e7493c14"
+      },
+      "examples/E3/start/app/tests/test_domain.py": {
+        "export_path": "start/app/tests/test_domain.py",
+        "sha256": "0633b44f4fd66deb6b4441c689c5626fd00215409e0a5a40f89b2907e5416edf"
+      },
+      "examples/E3/start/app/tests/test_persistence.py": {
+        "export_path": "start/app/tests/test_persistence.py",
+        "sha256": "eb5d06130c75f3725d10645757eb07b883055950e65fd6ff8c798633ba433287"
+      },
+      "examples/E3/start/app/tests/test_requests.py": {
+        "export_path": "start/app/tests/test_requests.py",
+        "sha256": "222243164ca2677119b7f2e2d13e97962d257726d9a5056f277835f8b652449f"
+      },
+      "examples/E3/start/pytest.ini": {
+        "export_path": "start/pytest.ini",
+        "sha256": "c11f6237644cc9ed8b6fdc163b389c255bbf0ea2b513f42614ebaef8d8281c86"
+      },
+      "examples/E3/task.md": {
+        "export_path": "task.md",
+        "sha256": "2fa37d745110ad20859cbbb205e35233acec93375dcb5b05041d90daffca9e51"
+      }
+    },
+    "H1": {
+      "tasks/H1/provenance.json": {
+        "export_path": "provenance.json",
+        "sha256": "5a65b2a65c3fe2e1d49c50999ba4a2474db135a78498702f3acb49deca042772"
+      },
+      "tasks/H1/start/app/config/__init__.py": {
+        "export_path": "app/config/__init__.py",
+        "sha256": "9e745870300bd8ef9f8577187d4e82be6512905b720986383c537657044ff275"
+      },
+      "tasks/H1/start/app/config/settings.py": {
+        "export_path": "app/config/settings.py",
+        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+      },
+      "tasks/H1/start/app/config/urls.py": {
+        "export_path": "app/config/urls.py",
+        "sha256": "da096e46f204256655b9065f626cac8ac85df699d56d4284c33e0e25f83a9f29"
+      },
+      "tasks/H1/start/app/config/wsgi.py": {
+        "export_path": "app/config/wsgi.py",
+        "sha256": "f2563644298f803003bd744e8bd67fdf55e97f8f79d5420269bee499541b7269"
+      },
+      "tasks/H1/start/app/crm/__init__.py": {
+        "export_path": "app/crm/__init__.py",
+        "sha256": "173910aa0a138ba5bdfb8b057954f58cc4bd71223bf537f243c474d6965b2ffc"
+      },
+      "tasks/H1/start/app/crm/apps.py": {
+        "export_path": "app/crm/apps.py",
+        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+      },
+      "tasks/H1/start/app/crm/domain.py": {
+        "export_path": "app/crm/domain.py",
+        "sha256": "3c27471f068241a4a2649d14b28cd0f4a5c9448b0239ed4c7325ae0e632d6bdd"
+      },
+      "tasks/H1/start/app/crm/forms.py": {
+        "export_path": "app/crm/forms.py",
+        "sha256": "7db1ec5905ea17d8692aad66d637230da39d633842347a52d59b05de7941f4dd"
+      },
+      "tasks/H1/start/app/crm/migrations/0001_initial.py": {
+        "export_path": "app/crm/migrations/0001_initial.py",
+        "sha256": "1b92562086c9f3d06bd69d6210d533e8fd09c62e204872cebe05a1c7fffd36d3"
+      },
+      "tasks/H1/start/app/crm/migrations/__init__.py": {
+        "export_path": "app/crm/migrations/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "tasks/H1/start/app/crm/models.py": {
+        "export_path": "app/crm/models.py",
+        "sha256": "fcf1baefa1596e975251e8d94a6547aa74321de5ec2bc73a3415312ee12acdbf"
+      },
+      "tasks/H1/start/app/crm/operations.py": {
+        "export_path": "app/crm/operations.py",
+        "sha256": "9d9e06385e4c6a3e7ab71778fdc935997f77d17c42db2a77db5a0ea488ad69b9"
+      },
+      "tasks/H1/start/app/crm/queries.py": {
+        "export_path": "app/crm/queries.py",
+        "sha256": "8199573acfea82b74c2974261fe502f09ee2c768b3838d30a393230698e5bb22"
+      },
+      "tasks/H1/start/app/crm/templates/crm/contact_form.html": {
+        "export_path": "app/crm/templates/crm/contact_form.html",
+        "sha256": "b61c642b674452807675d9b6c48668f82df59a9fe4c494448adc1ae96086ef72"
+      },
+      "tasks/H1/start/app/crm/templates/crm/customer_detail.html": {
+        "export_path": "app/crm/templates/crm/customer_detail.html",
+        "sha256": "fffd167c22c5ff5056753a02047044049e8876e48d32435e643e6756bd61c4e8"
+      },
+      "tasks/H1/start/app/crm/templates/crm/customer_form.html": {
+        "export_path": "app/crm/templates/crm/customer_form.html",
+        "sha256": "ce0a854e5cef28bdddd25e3ad249965635b282c864f14d1b021ca702d88eadb3"
+      },
+      "tasks/H1/start/app/crm/templates/crm/customer_list.html": {
+        "export_path": "app/crm/templates/crm/customer_list.html",
+        "sha256": "e38998cf285d35df6ff15b1bd8a105c2588aaf8312a9dafc7c810dbae1541587"
+      },
+      "tasks/H1/start/app/crm/urls.py": {
+        "export_path": "app/crm/urls.py",
+        "sha256": "73f4220123284809221d88d4eb5c60c2eb6a1b899cb908a0a455d0896e643430"
+      },
+      "tasks/H1/start/app/crm/views.py": {
+        "export_path": "app/crm/views.py",
+        "sha256": "6f62cb5e2c8d6b6d97131af548d9eb3feea006c12cb01e9802f0215ba3ed78a0"
+      },
+      "tasks/H1/start/app/manage.py": {
+        "export_path": "app/manage.py",
+        "sha256": "30428108646cb4ce4db65635c073005a74654b2a908655f130880771e7493c14"
+      },
+      "tasks/H1/start/app/tests/test_domain.py": {
+        "export_path": "app/tests/test_domain.py",
+        "sha256": "0633b44f4fd66deb6b4441c689c5626fd00215409e0a5a40f89b2907e5416edf"
+      },
+      "tasks/H1/start/app/tests/test_persistence.py": {
+        "export_path": "app/tests/test_persistence.py",
+        "sha256": "eb5d06130c75f3725d10645757eb07b883055950e65fd6ff8c798633ba433287"
+      },
+      "tasks/H1/start/app/tests/test_requests.py": {
+        "export_path": "app/tests/test_requests.py",
+        "sha256": "222243164ca2677119b7f2e2d13e97962d257726d9a5056f277835f8b652449f"
+      },
+      "tasks/H1/start/pytest.ini": {
+        "export_path": "pytest.ini",
+        "sha256": "c11f6237644cc9ed8b6fdc163b389c255bbf0ea2b513f42614ebaef8d8281c86"
+      },
+      "tasks/H1/task.md": {
+        "export_path": "task.md",
+        "sha256": "32f72f2143c38d3341961033950f4a30820626f947b66331fde71e63848c40c9"
+      }
+    },
+    "H2": {
+      "tasks/H2/provenance.json": {
+        "export_path": "provenance.json",
+        "sha256": "145d2a3f0d55bd8385ec5b9ac1b8b6a10faee997ba4a0b4d5839a5b8cf843426"
+      },
+      "tasks/H2/start/app/config/__init__.py": {
+        "export_path": "app/config/__init__.py",
+        "sha256": "9e745870300bd8ef9f8577187d4e82be6512905b720986383c537657044ff275"
+      },
+      "tasks/H2/start/app/config/settings.py": {
+        "export_path": "app/config/settings.py",
+        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+      },
+      "tasks/H2/start/app/config/urls.py": {
+        "export_path": "app/config/urls.py",
+        "sha256": "da096e46f204256655b9065f626cac8ac85df699d56d4284c33e0e25f83a9f29"
+      },
+      "tasks/H2/start/app/config/wsgi.py": {
+        "export_path": "app/config/wsgi.py",
+        "sha256": "f2563644298f803003bd744e8bd67fdf55e97f8f79d5420269bee499541b7269"
+      },
+      "tasks/H2/start/app/crm/__init__.py": {
+        "export_path": "app/crm/__init__.py",
+        "sha256": "173910aa0a138ba5bdfb8b057954f58cc4bd71223bf537f243c474d6965b2ffc"
+      },
+      "tasks/H2/start/app/crm/apps.py": {
+        "export_path": "app/crm/apps.py",
+        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+      },
+      "tasks/H2/start/app/crm/domain.py": {
+        "export_path": "app/crm/domain.py",
+        "sha256": "615e003ab18694b0dd1140cd0c2453ef79b1f349f5511478d1ccfed6e02873c3"
+      },
+      "tasks/H2/start/app/crm/forms.py": {
+        "export_path": "app/crm/forms.py",
+        "sha256": "b6ade6b33488ce8a30ae8bd99387184e5a1b118cfb33502a72acfd3e1f589cef"
+      },
+      "tasks/H2/start/app/crm/migrations/0001_initial.py": {
+        "export_path": "app/crm/migrations/0001_initial.py",
+        "sha256": "1b92562086c9f3d06bd69d6210d533e8fd09c62e204872cebe05a1c7fffd36d3"
+      },
+      "tasks/H2/start/app/crm/migrations/0002_followup.py": {
+        "export_path": "app/crm/migrations/0002_followup.py",
+        "sha256": "8605c14516deac5018bcd91d7b95d6d2fc31e0b1df56ced95fcf0ccdb9e5055e"
+      },
+      "tasks/H2/start/app/crm/migrations/__init__.py": {
+        "export_path": "app/crm/migrations/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "tasks/H2/start/app/crm/models.py": {
+        "export_path": "app/crm/models.py",
+        "sha256": "5060c68703e98f32495c5efd54e8176a392e5bf66ef1ab85d634b3e6d7820146"
+      },
+      "tasks/H2/start/app/crm/operations.py": {
+        "export_path": "app/crm/operations.py",
+        "sha256": "0c96a4d7f946d19670f3734ba3abf773456cf1ca70c1159b72231216031543d6"
+      },
+      "tasks/H2/start/app/crm/queries.py": {
+        "export_path": "app/crm/queries.py",
+        "sha256": "7897b00b7a0e14f0b1280e7df33cb6f15a044045dc13116097c93ca9b3da4ee9"
+      },
+      "tasks/H2/start/app/crm/templates/crm/contact_form.html": {
+        "export_path": "app/crm/templates/crm/contact_form.html",
+        "sha256": "b61c642b674452807675d9b6c48668f82df59a9fe4c494448adc1ae96086ef72"
+      },
+      "tasks/H2/start/app/crm/templates/crm/customer_detail.html": {
+        "export_path": "app/crm/templates/crm/customer_detail.html",
+        "sha256": "4afaf2cac34e81ff11179a53eeabc7311ff1de96aabff32ab5d690aa9035a92c"
+      },
+      "tasks/H2/start/app/crm/templates/crm/customer_form.html": {
+        "export_path": "app/crm/templates/crm/customer_form.html",
+        "sha256": "ce0a854e5cef28bdddd25e3ad249965635b282c864f14d1b021ca702d88eadb3"
+      },
+      "tasks/H2/start/app/crm/templates/crm/customer_list.html": {
+        "export_path": "app/crm/templates/crm/customer_list.html",
+        "sha256": "e38998cf285d35df6ff15b1bd8a105c2588aaf8312a9dafc7c810dbae1541587"
+      },
+      "tasks/H2/start/app/crm/urls.py": {
+        "export_path": "app/crm/urls.py",
+        "sha256": "a0cb6e9124aec9f9f7b6da67b35fbf4142c4cdeac1b4f7e2bbf531dba40abf37"
+      },
+      "tasks/H2/start/app/crm/views.py": {
+        "export_path": "app/crm/views.py",
+        "sha256": "1828f6c321f9676b5f38e912f1b9276f6fbb76dbda9d44b64e1477cd18493dd9"
+      },
+      "tasks/H2/start/app/manage.py": {
+        "export_path": "app/manage.py",
+        "sha256": "30428108646cb4ce4db65635c073005a74654b2a908655f130880771e7493c14"
+      },
+      "tasks/H2/start/app/tests/test_domain.py": {
+        "export_path": "app/tests/test_domain.py",
+        "sha256": "0633b44f4fd66deb6b4441c689c5626fd00215409e0a5a40f89b2907e5416edf"
+      },
+      "tasks/H2/start/app/tests/test_follow_ups_public.py": {
+        "export_path": "app/tests/test_follow_ups_public.py",
+        "sha256": "95d4978e60bc88b30f69094eb03c79f5fc73d880f7e914050044af1fc39bd8b6"
+      },
+      "tasks/H2/start/app/tests/test_persistence.py": {
+        "export_path": "app/tests/test_persistence.py",
+        "sha256": "eb5d06130c75f3725d10645757eb07b883055950e65fd6ff8c798633ba433287"
+      },
+      "tasks/H2/start/app/tests/test_requests.py": {
+        "export_path": "app/tests/test_requests.py",
+        "sha256": "222243164ca2677119b7f2e2d13e97962d257726d9a5056f277835f8b652449f"
+      },
+      "tasks/H2/start/pytest.ini": {
+        "export_path": "pytest.ini",
+        "sha256": "c11f6237644cc9ed8b6fdc163b389c255bbf0ea2b513f42614ebaef8d8281c86"
+      },
+      "tasks/H2/task.md": {
+        "export_path": "task.md",
+        "sha256": "b93e6fb218cfd1b3e2406e2f523922a78b1756405c29018ee23ba3e20c55278e"
+      }
+    },
+    "H3": {
+      "tasks/H3/provenance.json": {
+        "export_path": "provenance.json",
+        "sha256": "865e27653d1aaf0f91aab1f7d635595e9bdc9645e51ebe2b4354d63bb4ab044e"
+      },
+      "tasks/H3/start/app/config/__init__.py": {
+        "export_path": "app/config/__init__.py",
+        "sha256": "9e745870300bd8ef9f8577187d4e82be6512905b720986383c537657044ff275"
+      },
+      "tasks/H3/start/app/config/settings.py": {
+        "export_path": "app/config/settings.py",
+        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+      },
+      "tasks/H3/start/app/config/urls.py": {
+        "export_path": "app/config/urls.py",
+        "sha256": "da096e46f204256655b9065f626cac8ac85df699d56d4284c33e0e25f83a9f29"
+      },
+      "tasks/H3/start/app/config/wsgi.py": {
+        "export_path": "app/config/wsgi.py",
+        "sha256": "f2563644298f803003bd744e8bd67fdf55e97f8f79d5420269bee499541b7269"
+      },
+      "tasks/H3/start/app/crm/__init__.py": {
+        "export_path": "app/crm/__init__.py",
+        "sha256": "173910aa0a138ba5bdfb8b057954f58cc4bd71223bf537f243c474d6965b2ffc"
+      },
+      "tasks/H3/start/app/crm/apps.py": {
+        "export_path": "app/crm/apps.py",
+        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+      },
+      "tasks/H3/start/app/crm/domain.py": {
+        "export_path": "app/crm/domain.py",
+        "sha256": "0041a1672a529f9f799f521c829baad2d3b2055d2843ca8dddd6ec77bbd16a27"
+      },
+      "tasks/H3/start/app/crm/fixtures/h3_history.json": {
+        "export_path": "app/crm/fixtures/h3_history.json",
+        "sha256": "e025539fb21d9fbead226e82114eff5bff2b65d8f458c4d401c4a2daf4714f9a"
+      },
+      "tasks/H3/start/app/crm/forms.py": {
+        "export_path": "app/crm/forms.py",
+        "sha256": "b6ade6b33488ce8a30ae8bd99387184e5a1b118cfb33502a72acfd3e1f589cef"
+      },
+      "tasks/H3/start/app/crm/migrations/0001_initial.py": {
+        "export_path": "app/crm/migrations/0001_initial.py",
+        "sha256": "1b92562086c9f3d06bd69d6210d533e8fd09c62e204872cebe05a1c7fffd36d3"
+      },
+      "tasks/H3/start/app/crm/migrations/0002_archive_followup.py": {
+        "export_path": "app/crm/migrations/0002_archive_followup.py",
+        "sha256": "443b7d51944eb9a8e08df6309184217be48ce632f0b8a46f61e80a69dc415c07"
+      },
+      "tasks/H3/start/app/crm/migrations/__init__.py": {
+        "export_path": "app/crm/migrations/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "tasks/H3/start/app/crm/models.py": {
+        "export_path": "app/crm/models.py",
+        "sha256": "f41b23a465c7c005d4af3b31f16273f011bcbb5cdf0de7c32bdae50af9d621ff"
+      },
+      "tasks/H3/start/app/crm/operations.py": {
+        "export_path": "app/crm/operations.py",
+        "sha256": "b7a5a9ba15d4a1fcbcd74865f0ddd27ab9dfc5df765c8b9dc53433fd13f7e787"
+      },
+      "tasks/H3/start/app/crm/queries.py": {
+        "export_path": "app/crm/queries.py",
+        "sha256": "35a768220db07a0285fd36f2afbb339a23a4b8f8658ecb4a697ad312e4e0cc84"
+      },
+      "tasks/H3/start/app/crm/templates/crm/contact_form.html": {
+        "export_path": "app/crm/templates/crm/contact_form.html",
+        "sha256": "b61c642b674452807675d9b6c48668f82df59a9fe4c494448adc1ae96086ef72"
+      },
+      "tasks/H3/start/app/crm/templates/crm/customer_detail.html": {
+        "export_path": "app/crm/templates/crm/customer_detail.html",
+        "sha256": "fffd167c22c5ff5056753a02047044049e8876e48d32435e643e6756bd61c4e8"
+      },
+      "tasks/H3/start/app/crm/templates/crm/customer_form.html": {
+        "export_path": "app/crm/templates/crm/customer_form.html",
+        "sha256": "ce0a854e5cef28bdddd25e3ad249965635b282c864f14d1b021ca702d88eadb3"
+      },
+      "tasks/H3/start/app/crm/templates/crm/customer_list.html": {
+        "export_path": "app/crm/templates/crm/customer_list.html",
+        "sha256": "e38998cf285d35df6ff15b1bd8a105c2588aaf8312a9dafc7c810dbae1541587"
+      },
+      "tasks/H3/start/app/crm/templates/crm/follow_up_form.html": {
+        "export_path": "app/crm/templates/crm/follow_up_form.html",
+        "sha256": "6a0339bd403bcce74f1ce80ed8e1373421ee1e78b7544dd2e112533222afa982"
+      },
+      "tasks/H3/start/app/crm/urls.py": {
+        "export_path": "app/crm/urls.py",
+        "sha256": "a1c4ddc3c6c70f93538cbb4d0120562f1781b86e3821a1e277b6074af54aa104"
+      },
+      "tasks/H3/start/app/crm/views.py": {
+        "export_path": "app/crm/views.py",
+        "sha256": "b671d866bc86e5a01ebc3eb63fe546db4c672aa332628a7af461c407922b72a6"
+      },
+      "tasks/H3/start/app/manage.py": {
+        "export_path": "app/manage.py",
+        "sha256": "30428108646cb4ce4db65635c073005a74654b2a908655f130880771e7493c14"
+      },
+      "tasks/H3/start/app/tests/test_archive_public.py": {
+        "export_path": "app/tests/test_archive_public.py",
+        "sha256": "5b750eeb672d9c1a3a1c7de41979bc88326bea854d6cbb4cd88a297919761023"
+      },
+      "tasks/H3/start/app/tests/test_domain.py": {
+        "export_path": "app/tests/test_domain.py",
+        "sha256": "0633b44f4fd66deb6b4441c689c5626fd00215409e0a5a40f89b2907e5416edf"
+      },
+      "tasks/H3/start/app/tests/test_persistence.py": {
+        "export_path": "app/tests/test_persistence.py",
+        "sha256": "eb5d06130c75f3725d10645757eb07b883055950e65fd6ff8c798633ba433287"
+      },
+      "tasks/H3/start/app/tests/test_requests.py": {
+        "export_path": "app/tests/test_requests.py",
+        "sha256": "222243164ca2677119b7f2e2d13e97962d257726d9a5056f277835f8b652449f"
+      },
+      "tasks/H3/start/pytest.ini": {
+        "export_path": "pytest.ini",
+        "sha256": "c11f6237644cc9ed8b6fdc163b389c255bbf0ea2b513f42614ebaef8d8281c86"
+      },
+      "tasks/H3/task.md": {
+        "export_path": "task.md",
+        "sha256": "886061b9d10297b12f19098abbbcf04303d3d33f1128cddefc10675d5b37ceb2"
+      }
+    }
+  }
+}

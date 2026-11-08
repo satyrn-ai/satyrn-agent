@@ -1,0 +1,267 @@
+{
+  "fingerprint_method": "SHA-256 of exact protected files and ast.dump() for top-level or nested function/class definitions after replacing the outer definition name; definitions already present in the frozen E3 baseline or that task's frozen start are explicitly shared.",
+  "source_trees": {
+    "examples/E3/complete": "848597a0fce9c87d04536500887d830e8ce1eed1fea0eccfcc43a69212a119e6",
+    "app/tests": "288ccb15f02e8eb1e54367c07a036083523b2a112765dc54efee8cfe505d0155",
+    "tasks/H1/start": "960b355d87a50807c51f05060218d2aa26d608a68a76ccac923565a459241768",
+    "evaluation/H1/solution": "1249f30f3d52c45b2fcbd9de7f2db3b8305d32cccd1dfb8dae3a22a957aee88a",
+    "evaluation/H1/test_search.py": "ab1bdb62264d907e254134fcf516c9b76e681dcce44e7b467c618fb586836111",
+    "tasks/H2/start": "b0a4bbc1c142a4911b6a3bc6261cdd8cf8498b4c5cabb8c4e7a783ffc0a2098a",
+    "evaluation/H2/solution": "5577c44389e4d0a25f1e36da9e0675c1567f6ff6331427d1c04e38201b20e5d2",
+    "evaluation/H2/test_follow_ups.py": "d330ec8737c52e813768c1417cd35cbbcd87af552b9f0ff9024bd0a86f87b882",
+    "tasks/H3/start": "e9fa0eecee95bfafd1d7bfc93889cfb471b0f0e5191ac272bc697ab2cdffcf80",
+    "evaluation/H3/solution": "6f03600223e8380e300bcd0aef1f808e0151ae5e8b485b52e3e379f25b9362c3",
+    "evaluation/H3/test_archive.py": "474a97d85e7d207e8ac6d1d7f3a40010618285edf515a6896368d5fbe5f5557b"
+  },
+  "protected_files": [
+    {
+      "task_id": "H1",
+      "path": "app/crm/queries.py",
+      "sha256": "8998f35fa8c2d47b555a978e49ac3c131e6e27dbcb8ea92261e6ca3f58627893"
+    },
+    {
+      "task_id": "H1",
+      "path": "app/crm/templates/crm/customer_list.html",
+      "sha256": "d168dcad433e2066abca8e2c473f131f68575cb4a4ad8726ccefae84a832a23a"
+    },
+    {
+      "task_id": "H1",
+      "path": "app/crm/views.py",
+      "sha256": "48d9e86b8e7f14eec931ef2ba8b6828caf8ac7f5a8d293ef4509771302c79070"
+    },
+    {
+      "task_id": "H2",
+      "path": "app/crm/domain.py",
+      "sha256": "b8347fdbc8970f9e87a009154fff759682cafb07cd4b096c36447057bde80f57"
+    },
+    {
+      "task_id": "H2",
+      "path": "app/crm/operations.py",
+      "sha256": "4e557287455f15cab3db79fab57b60beb406aa98c02e035cc8ad6b3271578ba4"
+    },
+    {
+      "task_id": "H2",
+      "path": "app/crm/queries.py",
+      "sha256": "7aa9e993a47bfe676685f5981f2b749866adf80d3fd2ed47de0e964f9e274881"
+    },
+    {
+      "task_id": "H2",
+      "path": "app/crm/templates/crm/customer_detail.html",
+      "sha256": "dde77b870c7f9e473b78e0339cd40bf7658ffcd35bc0ef02a0891528ad39ca60"
+    },
+    {
+      "task_id": "H2",
+      "path": "app/crm/templates/crm/follow_up_form.html",
+      "sha256": "99bc53338047f95e9bca085951ade5e504588be586a47e6807e50de6b5685e24"
+    },
+    {
+      "task_id": "H2",
+      "path": "app/crm/urls.py",
+      "sha256": "c81476eba08d657aaaacf5e047064337763eb241037eddfb371cba7381923945"
+    },
+    {
+      "task_id": "H2",
+      "path": "app/crm/views.py",
+      "sha256": "f45382cd65f545426dda48927cd76d50c4c1834df8e57fcacefc90e4265632c6"
+    },
+    {
+      "task_id": "H3",
+      "path": "app/crm/operations.py",
+      "sha256": "9ac37b750be690575aef5b2a328527fe1afdb86ad6aa322cff8146b09c6fd157"
+    },
+    {
+      "task_id": "H3",
+      "path": "app/crm/queries.py",
+      "sha256": "9845801d8db8e6260b7ef03d554a727acff5099c6ec2b0014bca84418ac0195b"
+    },
+    {
+      "task_id": "H3",
+      "path": "app/crm/templates/crm/customer_detail.html",
+      "sha256": "77cc7c65be8ed0169265415a7c91168dbd5c2a2ea7ccfab50cf346653b2c5400"
+    },
+    {
+      "task_id": "H3",
+      "path": "app/crm/templates/crm/customer_list.html",
+      "sha256": "940431803726a7f05adb33a46db5b691eb1583a14da0cc4c9b42cfdc7f7dfa7f"
+    },
+    {
+      "task_id": "H3",
+      "path": "app/crm/templates/crm/follow_up_form.html",
+      "sha256": "bed3d185a8a382150259f363bec9b7954326b899f46e05a6266f442c6c83fc11"
+    },
+    {
+      "task_id": "H3",
+      "path": "app/crm/urls.py",
+      "sha256": "ae38b1042a9dcc8b406aeb73579afb2c8a5250b28fca28878a724716d3ce19f7"
+    },
+    {
+      "task_id": "H3",
+      "path": "app/crm/views.py",
+      "sha256": "9ba1add8568710b9de93f1512d3b1563c6424a2900e4316804c9b858b5e50810"
+    }
+  ],
+  "protected_definitions": [
+    {
+      "task_id": "H1",
+      "path": "crm/queries.py",
+      "name": "list_customers",
+      "sha256": "dd64bae0d8925ce05b4f6ed01f186d9a965143fe8c2350692ff74e8d7cae9fd9"
+    },
+    {
+      "task_id": "H1",
+      "path": "crm/queries.py",
+      "name": "search_customers",
+      "sha256": "450d3f45015b129f8697b4eb95e8fbd3b1efb2696c735fc56e5c8fffd1aa2a5e"
+    },
+    {
+      "task_id": "H1",
+      "path": "crm/views.py",
+      "name": "_parse_page_number",
+      "sha256": "282a5a07ef6714f02425c19042995bbc06396e950d5a737529c724065f8d9b6e"
+    },
+    {
+      "task_id": "H1",
+      "path": "crm/views.py",
+      "name": "customer_list",
+      "sha256": "775f235b61d80c68bf7c9ee61a4b0fef1049738b58930b9445b1beb2e4e89eb9"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/domain.py",
+      "name": "_require_aware",
+      "sha256": "9406ef8f86de8fcce20725ab97cd321f019a94fdef44fbce267b83493f412ada"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/domain.py",
+      "name": "follow_up_status",
+      "sha256": "afa9640809d92a4362cc93ea33ea13ee5a3ed1c59cf5818a52b468bb439bdb94"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/operations.py",
+      "name": "complete_follow_up",
+      "sha256": "77fee20e218116bd173e06b2e31dc7a8db029473e16c08c5481ec852df039f27"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/operations.py",
+      "name": "schedule_follow_up",
+      "sha256": "4309d69529b4a73d842f56a7a041a36ce540d5c9d6a26e71c220c09f57e9945d"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/queries.py",
+      "name": "_to_follow_up",
+      "sha256": "8b529697a7e6bf439320a317f01e23f76ead340801f2c1f9efc85f727ff460c7"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/queries.py",
+      "name": "get_customer",
+      "sha256": "2ea4df59bb4de3b1d160607d42ccb92945fc5f38c88a11cd8bf4e273a8b1236b"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/queries.py",
+      "name": "get_follow_up",
+      "sha256": "1b853e77d88b40bb3357db85a8270536aebce16f804ed826bbdaa8e67ab14dae"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/queries.py",
+      "name": "list_customers",
+      "sha256": "c5024fdd5e72efb1e992eac97717a5ad5ad3652806f477bf306773cd5bacff1c"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/queries.py",
+      "name": "list_follow_ups",
+      "sha256": "670f449397af8b294fcd3dea63b1dd088feb7eede4363246e7caae1cc345bd99"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/views.py",
+      "name": "customer_detail",
+      "sha256": "1677af0983b50ca6b148c66bf2b48367293fc6f2e52ae28e9822ccfe99e192b2"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/views.py",
+      "name": "follow_up_complete",
+      "sha256": "58957c58713c08f27f624a5fab759f7133c8e65dcff87888a513af6ddcfac399"
+    },
+    {
+      "task_id": "H2",
+      "path": "crm/views.py",
+      "name": "follow_up_create",
+      "sha256": "cc296ee9a3c2ea6d25c64543fa16d971c5431031e2439aca195ac6bb8315bb64"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/operations.py",
+      "name": "_validate_aware",
+      "sha256": "9406ef8f86de8fcce20725ab97cd321f019a94fdef44fbce267b83493f412ada"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/operations.py",
+      "name": "archive_customer",
+      "sha256": "fc9ab18ae3e79bd344acc935fb0825c1e803a3418ca70ec8e79ea600f3d2be99"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/operations.py",
+      "name": "create_customer",
+      "sha256": "296660ae40b29e0ac9c8f87fc2285722ff6bfc63537178fffd2fa5c90fb26d7f"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/operations.py",
+      "name": "create_follow_up",
+      "sha256": "45835de019630e6e68a3a8c7d6f979b08f6b039bb8dcf3dece836b3763dd5eee"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/queries.py",
+      "name": "_to_follow_up",
+      "sha256": "8b529697a7e6bf439320a317f01e23f76ead340801f2c1f9efc85f727ff460c7"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/queries.py",
+      "name": "get_customer",
+      "sha256": "3df4b4de4adf6df0ed20dcdbcbffacd0e7c1467e6b1d8c6312e0142f0fb66443"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/queries.py",
+      "name": "list_customers",
+      "sha256": "c5024fdd5e72efb1e992eac97717a5ad5ad3652806f477bf306773cd5bacff1c"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/queries.py",
+      "name": "list_follow_ups",
+      "sha256": "a85284b41930d6441c5ec64cc59d7695116caafe3504fcec5671a4ad95e1bc6a"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/views.py",
+      "name": "customer_archive",
+      "sha256": "572c51e0a530e5c6fa0a5a220712d809e32b819839a90b553af520269713328f"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/views.py",
+      "name": "customer_detail",
+      "sha256": "a34719067f13122b37748990a9e375dcd57d5009906068198114c1f1c96ecde1"
+    },
+    {
+      "task_id": "H3",
+      "path": "crm/views.py",
+      "name": "follow_up_create",
+      "sha256": "c5f27da0bd7a1286d6fe4515712940d7275517674e948695c9909131e02765c8"
+    }
+  ]
+}

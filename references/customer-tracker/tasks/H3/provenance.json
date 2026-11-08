@@ -1,0 +1,32 @@
+{
+  "task_id": "H3",
+  "task_file_sha256": "886061b9d10297b12f19098abbbcf04303d3d33f1128cddefc10675d5b37ceb2",
+  "baseline": {
+    "path": "examples/E3/complete",
+    "sha256": "848597a0fce9c87d04536500887d830e8ce1eed1fea0eccfcc43a69212a119e6",
+    "file_count": 24
+  },
+  "start": {
+    "sha256": "e9fa0eecee95bfafd1d7bfc93889cfb471b0f0e5191ac272bc697ab2cdffcf80",
+    "file_count": 28
+  },
+  "scaffold_additions": [
+    "app/crm/models.py: nullable archive timestamp and minimal FollowUp schema",
+    "app/crm/migrations/0002_archive_followup.py: independent archive/history migration",
+    "app/crm/fixtures/h3_history.json: active and archived customer history records",
+    "app/crm/domain.py: archive timestamp and plain FollowUp value",
+    "app/crm/queries.py: eager history reads",
+    "app/crm/operations.py: unfinished archive_customer and create_follow_up interfaces",
+    "app/crm/forms.py: follow-up input form",
+    "app/crm/views.py: unfinished archive and follow-up views",
+    "app/crm/urls.py: archive and follow-up creation routes",
+    "app/crm/templates/crm/follow_up_form.html: UTC-labeled form scaffold",
+    "app/tests/test_archive_public.py: public archive behavior example"
+  ],
+  "excluded_h2_implementations": [
+    "schedule_follow_up",
+    "complete_follow_up",
+    "follow_up_status"
+  ],
+  "tree_hash_method": "SHA-256 over lexically sorted UTF-8 relative paths, NUL separators, and raw SHA-256 file digests."
+}
