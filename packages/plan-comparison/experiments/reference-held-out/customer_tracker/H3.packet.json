@@ -1,0 +1,81 @@
+{
+  "schema_version": 0,
+  "packet_id": "customer-tracker-h3-archive-workflow",
+  "task": "Implement visible H3 customer archiving, archived status markers, and safe follow-up creation.",
+  "readable_files": [
+    "app/crm/domain.py",
+    "app/crm/forms.py",
+    "app/crm/models.py",
+    "app/crm/operations.py",
+    "app/crm/queries.py",
+    "app/crm/urls.py",
+    "app/crm/views.py",
+    "app/crm/templates/crm/customer_list.html",
+    "app/crm/templates/crm/customer_detail.html"
+  ],
+  "file_changes": [
+    {"path": "app/crm/operations.py", "operation": "modify"},
+    {"path": "app/crm/views.py", "operation": "modify"},
+    {"path": "app/crm/templates/crm/customer_list.html", "operation": "modify"},
+    {"path": "app/crm/templates/crm/customer_detail.html", "operation": "modify"},
+    {"path": "app/tests/test_archive_workflow.py", "operation": "create"}
+  ],
+  "consumes": [
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "CustomerId", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "FollowUpId", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "Customer", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "FollowUp", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "RuleViolation", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/operations.py"}, "qualified_name": "archive_customer", "expected_signature": "def archive_customer(customer_id: CustomerId, *, now: datetime) -> None:"},
+    {"source": {"root_id": "workspace", "path": "app/crm/operations.py"}, "qualified_name": "create_follow_up", "expected_signature": "def create_follow_up(customer_id: CustomerId, *, summary: str, due_at: datetime, now: datetime) -> FollowUpId:"},
+    {"source": {"root_id": "workspace", "path": "app/crm/models.py"}, "qualified_name": "Customer", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/models.py"}, "qualified_name": "FollowUp", "expected_signature": null}
+  ],
+  "produces": [
+    {"path": "app/crm/operations.py", "qualified_name": "archive_customer", "operation": "modify", "kind": "function", "declaration": "def archive_customer(customer_id: CustomerId, *, now: datetime) -> None:"},
+    {"path": "app/crm/operations.py", "qualified_name": "create_follow_up", "operation": "modify", "kind": "function", "declaration": "def create_follow_up(customer_id: CustomerId, *, summary: str, due_at: datetime, now: datetime) -> FollowUpId:"},
+    {"path": "app/crm/views.py", "qualified_name": "customer_archive", "operation": "modify", "kind": "function", "declaration": "def customer_archive(request: HttpRequest, customer_id: int) -> HttpResponse:"},
+    {"path": "app/crm/views.py", "qualified_name": "follow_up_create", "operation": "modify", "kind": "function", "declaration": "def follow_up_create(request: HttpRequest, customer_id: int) -> HttpResponse:"}
+  ],
+  "imports": [
+    {"path": "app/crm/operations.py", "module": "crm.models", "name": "FollowUp", "alias": "FollowUpRecord", "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.domain", "name": "RuleViolation", "alias": null, "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.forms", "name": "FollowUpCreateForm", "alias": null, "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.operations", "name": "archive_customer", "alias": null, "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.operations", "name": "create_follow_up", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_archive_workflow.py", "module": "crm.domain", "name": "RuleViolation", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_archive_workflow.py", "module": "crm.models", "name": "Customer", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_archive_workflow.py", "module": "crm.models", "name": "FollowUp", "alias": "FollowUpRecord", "target": "existing"},
+    {"path": "app/tests/test_archive_workflow.py", "module": "crm.operations", "name": "archive_customer", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_archive_workflow.py", "module": "crm.operations", "name": "create_follow_up", "alias": null, "target": "existing"}
+  ],
+  "tests": [
+    {
+      "path": "app/tests/test_archive_workflow.py",
+      "operation": "create",
+      "content": "from datetime import datetime, timezone\n\nimport pytest\n\nfrom crm.domain import RuleViolation\nfrom crm.models import Customer, FollowUp as FollowUpRecord\nfrom crm.operations import archive_customer, create_follow_up\n\n\n@pytest.mark.django_db\ndef test_archive_customer_is_idempotent() -> None:\n    customer = Customer.objects.create(first_name='Ada', last_name='Lovelace', email='ada@example.com')\n    first = datetime(2030, 1, 1, tzinfo=timezone.utc)\n    later = datetime(2030, 1, 2, tzinfo=timezone.utc)\n    archive_customer(customer.pk, now=first)\n    archive_customer(customer.pk, now=later)\n    customer.refresh_from_db()\n    assert customer.archived_at == first\n\n\n@pytest.mark.django_db\ndef test_archived_customer_cannot_receive_follow_up() -> None:\n    now = datetime(2030, 1, 1, tzinfo=timezone.utc)\n    customer = Customer.objects.create(first_name='Grace', last_name='Hopper', email='grace@example.com', archived_at=now)\n    with pytest.raises(RuleViolation):\n        create_follow_up(customer.pk, summary='call', due_at=now, now=now)\n    assert not FollowUpRecord.objects.filter(customer_id=customer.pk).exists()\n"
+    }
+  ],
+  "gates": [
+    {
+      "argv": ["pytest", "tests/test_archive_workflow.py"],
+      "cwd": "app",
+      "before": {"exit_code": "nonzero", "reason": "The archive operation is an unfinished placeholder."},
+      "after": {"exit_code": 0, "reason": "Archive and follow-up rejection behavior pass."}
+    }
+  ],
+  "known_facts": [
+    "The visible H3 start already includes archived_at and the minimal follow-up schema.",
+    "The supplied archive and follow-up view functions are unfinished placeholders.",
+    "SQLite tests do not establish production row-lock concurrency guarantees."
+  ],
+  "acceptance_criteria": [
+    "Archiving stores the first aware timestamp and is idempotent.",
+    "Archived customers remain visible with a status marker containing the text `Archived` and have no unarchive action.",
+    "Follow-up creation trims and validates summaries, requires aware timestamps and a due time not earlier than now, and rejects archived customers without partial writes.",
+    "Archive and follow-up creation serialize on the same customer-row lock where supported."
+  ],
+  "preserved_behavior": [
+    "Customer identity and fields, contact updates, and existing follow-up history are preserved."
+  ]
+}

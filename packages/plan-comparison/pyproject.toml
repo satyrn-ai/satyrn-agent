@@ -1,0 +1,38 @@
+[project]
+name = "plan-comparison"
+version = "0.1.0"
+description = "A deterministic core for prose-versus-compiled task comparisons"
+requires-python = ">=3.12"
+dependencies = ["typed-packets"]
+
+[project.scripts]
+plan-comparison = "plan_comparison.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.9",
+    "ty>=0.0.99",
+]
+
+[tool.uv.sources]
+typed-packets = { path = "../typed-packets", editable = true }
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plan_comparison"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = ["ds4_runtime: optional tests against the pinned external ds4-py fake"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

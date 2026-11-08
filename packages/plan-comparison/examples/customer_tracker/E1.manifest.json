@@ -1,0 +1,31 @@
+{
+  "manifest_version": 0,
+  "task_id": "E1",
+  "plan_sha256": "786abbf78dfb86ecd0519ee297118cd8a5bdfe1aa988d81da80d3fa5f52982e0",
+  "packets": [
+    {
+      "packet_id": "customer-tracker-e1-model-slice",
+      "packet_sha256": "8b70c85594af2fb106eaa9ef856fda3435018e60c8810d48a6210b1bf9122ed2",
+      "slots": [
+        {
+          "slot_id": "customer-model-fields",
+          "path": "app/crm/models.py",
+          "kind": "ancillary",
+          "operation": "replace",
+          "target": {"kind": "structural", "qualified_name": "Customer"},
+          "extent": {"kind": "structural", "region": "body"},
+          "preimage_sha256": "5445e17aded309745ffda329fcd65862d5296c4ed7b0feceb330475f6e274c61"
+        }
+      ],
+      "placements": [],
+      "red_checks": [
+        {
+          "path": "app/tests/test_customer_model.py",
+          "test_node": "test_customer_has_required_persistence_fields",
+          "expected_exception": "AssertionError",
+          "marker": "test_customer_has_required_persistence_fields"
+        }
+      ]
+    }
+  ]
+}

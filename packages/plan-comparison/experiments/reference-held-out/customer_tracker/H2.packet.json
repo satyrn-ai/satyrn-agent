@@ -1,0 +1,91 @@
+{
+  "schema_version": 0,
+  "packet_id": "customer-tracker-h2-follow-up-workflow",
+  "task": "Implement the visible H2 follow-up scheduling, status, completion, queries, and web workflow.",
+  "readable_files": [
+    "app/crm/domain.py",
+    "app/crm/forms.py",
+    "app/crm/models.py",
+    "app/crm/operations.py",
+    "app/crm/queries.py",
+    "app/crm/urls.py",
+    "app/crm/views.py",
+    "app/crm/templates/crm/customer_detail.html"
+  ],
+  "file_changes": [
+    {"path": "app/crm/domain.py", "operation": "modify"},
+    {"path": "app/crm/forms.py", "operation": "modify"},
+    {"path": "app/crm/operations.py", "operation": "modify"},
+    {"path": "app/crm/queries.py", "operation": "modify"},
+    {"path": "app/crm/views.py", "operation": "modify"},
+    {"path": "app/crm/templates/crm/customer_detail.html", "operation": "modify"},
+    {"path": "app/crm/templates/crm/follow_up_form.html", "operation": "create"},
+    {"path": "app/tests/test_follow_up_workflow.py", "operation": "create"}
+  ],
+  "consumes": [
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "CustomerId", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "FollowUpId", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "Customer", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "FollowUp", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/domain.py"}, "qualified_name": "RuleViolation", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/operations.py"}, "qualified_name": "schedule_follow_up", "expected_signature": "def schedule_follow_up(customer_id: CustomerId, *, summary: str, due_at: datetime, now: datetime) -> FollowUpId:"},
+    {"source": {"root_id": "workspace", "path": "app/crm/operations.py"}, "qualified_name": "complete_follow_up", "expected_signature": "def complete_follow_up(follow_up_id: FollowUpId, *, now: datetime) -> None:"},
+    {"source": {"root_id": "workspace", "path": "app/crm/models.py"}, "qualified_name": "Customer", "expected_signature": null},
+    {"source": {"root_id": "workspace", "path": "app/crm/models.py"}, "qualified_name": "FollowUp", "expected_signature": null}
+  ],
+  "produces": [
+    {"path": "app/crm/domain.py", "qualified_name": "follow_up_status", "operation": "modify", "kind": "function", "declaration": "def follow_up_status(follow_up: FollowUp, *, now: datetime) -> str:"},
+    {"path": "app/crm/operations.py", "qualified_name": "schedule_follow_up", "operation": "modify", "kind": "function", "declaration": "def schedule_follow_up(customer_id: CustomerId, *, summary: str, due_at: datetime, now: datetime) -> FollowUpId:"},
+    {"path": "app/crm/operations.py", "qualified_name": "complete_follow_up", "operation": "modify", "kind": "function", "declaration": "def complete_follow_up(follow_up_id: FollowUpId, *, now: datetime) -> None:"},
+    {"path": "app/crm/queries.py", "qualified_name": "list_follow_ups", "operation": "modify", "kind": "function", "declaration": "def list_follow_ups(customer_id: CustomerId) -> list[FollowUp]:"},
+    {"path": "app/crm/queries.py", "qualified_name": "get_follow_up", "operation": "modify", "kind": "function", "declaration": "def get_follow_up(follow_up_id: FollowUpId) -> FollowUp:"},
+    {"path": "app/crm/forms.py", "qualified_name": "FollowUpCreateForm", "operation": "modify", "kind": "class", "declaration": "class FollowUpCreateForm(forms.Form):"},
+    {"path": "app/crm/views.py", "qualified_name": "customer_detail", "operation": "modify", "kind": "function", "declaration": "def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:"},
+    {"path": "app/crm/views.py", "qualified_name": "follow_up_create", "operation": "modify", "kind": "function", "declaration": "def follow_up_create(request: HttpRequest, customer_id: int) -> HttpResponse:"},
+    {"path": "app/crm/views.py", "qualified_name": "follow_up_complete", "operation": "modify", "kind": "function", "declaration": "def follow_up_complete(request: HttpRequest, follow_up_id: int) -> HttpResponse:"}
+  ],
+  "imports": [
+    {"path": "app/crm/operations.py", "module": "crm.models", "name": "FollowUp", "alias": "FollowUpRecord", "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.domain", "name": "follow_up_status", "alias": null, "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.forms", "name": "FollowUpCreateForm", "alias": null, "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.operations", "name": "schedule_follow_up", "alias": null, "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.operations", "name": "complete_follow_up", "alias": null, "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.queries", "name": "list_follow_ups", "alias": null, "target": "existing"},
+    {"path": "app/crm/views.py", "module": "crm.queries", "name": "get_follow_up", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_follow_up_workflow.py", "module": "crm.domain", "name": "FollowUp", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_follow_up_workflow.py", "module": "crm.domain", "name": "RuleViolation", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_follow_up_workflow.py", "module": "crm.domain", "name": "follow_up_status", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_follow_up_workflow.py", "module": "crm.models", "name": "Customer", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_follow_up_workflow.py", "module": "crm.models", "name": "FollowUp", "alias": "FollowUpRecord", "target": "existing"},
+    {"path": "app/tests/test_follow_up_workflow.py", "module": "crm.operations", "name": "complete_follow_up", "alias": null, "target": "existing"},
+    {"path": "app/tests/test_follow_up_workflow.py", "module": "crm.operations", "name": "schedule_follow_up", "alias": null, "target": "existing"}
+  ],
+  "tests": [
+    {
+      "path": "app/tests/test_follow_up_workflow.py",
+      "operation": "create",
+      "content": "from datetime import datetime, timezone\n\nimport pytest\n\nfrom crm.domain import FollowUp, RuleViolation, follow_up_status\nfrom crm.models import Customer, FollowUp as FollowUpRecord\nfrom crm.operations import complete_follow_up, schedule_follow_up\n\n\ndef test_follow_up_status_uses_explicit_clock_boundaries() -> None:\n    now = datetime(2030, 1, 1, tzinfo=timezone.utc)\n    due = FollowUp(id=1, customer_id=1, summary='call', due_at=now, completed_at=None)\n    completed = FollowUp(id=2, customer_id=1, summary='done', due_at=now, completed_at=now)\n    assert follow_up_status(due, now=now) == 'due'\n    assert follow_up_status(completed, now=now) == 'completed'\n    with pytest.raises(RuleViolation):\n        follow_up_status(due, now=datetime(2030, 1, 1))\n\n\n@pytest.mark.django_db\ndef test_scheduling_trims_and_completion_is_idempotent() -> None:\n    customer = Customer.objects.create(first_name='Ada', last_name='Lovelace', email='ada@example.com')\n    now = datetime(2030, 1, 1, tzinfo=timezone.utc)\n    follow_up_id = schedule_follow_up(customer.pk, summary='  call  ', due_at=now, now=now)\n    complete_follow_up(follow_up_id, now=now)\n    later = datetime(2030, 1, 2, tzinfo=timezone.utc)\n    complete_follow_up(follow_up_id, now=later)\n    follow_up = FollowUpRecord.objects.get(pk=follow_up_id)\n    assert follow_up.summary == 'call'\n    assert follow_up.completed_at == now\n\n\n@pytest.mark.django_db\ndef test_form_interprets_datetime_local_as_utc() -> None:\n    customer = Customer.objects.create(first_name='Grace', last_name='Hopper', email='grace@example.com')\n    response = __import__('django.test', fromlist=['Client']).Client().post(\n        f'/customers/{customer.pk}/follow-ups/new/',\n        {'summary': 'review', 'due_at': '2030-01-01T10:00'},\n    )\n    assert response.status_code == 302\n    follow_up = FollowUpRecord.objects.get(customer_id=customer.pk)\n    assert follow_up.due_at == datetime(2030, 1, 1, 10, tzinfo=timezone.utc)\n"
+    }
+  ],
+  "gates": [
+    {
+      "argv": ["pytest", "tests/test_follow_up_workflow.py"],
+      "cwd": "app",
+      "before": {"exit_code": "nonzero", "reason": "The pure follow-up status stub is unimplemented."},
+      "after": {"exit_code": 0, "reason": "Follow-up rules and workflow pass."}
+    }
+  ],
+  "known_facts": [
+    "The visible H2 start already contains the protected FollowUp schema.",
+    "The form's datetime-local widget requires an explicit UTC convention."
+  ],
+  "acceptance_criteria": [
+    "Follow-up summaries are trimmed and bounded, times are aware, due time equality is accepted, and invalid writes are atomic.",
+    "Completion is idempotent and preserves the first completion timestamp.",
+    "Status precedence is completed, overdue, due at equality, then scheduled.",
+    "The web flow uses one aware clock value, labels the form with the text `in UTC`, and orders pending before completed by due time and ID."
+  ],
+  "preserved_behavior": [
+    "E3 customer creation, contact editing, detail pages, and protected customer deletion remain intact."
+  ]
+}

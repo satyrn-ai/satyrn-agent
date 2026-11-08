@@ -1,0 +1,41 @@
+{
+  "manifest_version": 0,
+  "task_id": "E3",
+  "plan_sha256": "1505798bb909b004584fe4118cd9de4ad138f64e4189e2cd56bc041ae1437871",
+  "packets": [
+    {
+      "packet_id": "customer-tracker-e3-contact-validation",
+      "packet_sha256": "394c134f3cb0708e8494687618c909c3a162e5e46c53c951eb2e697bd165caba",
+      "slots": [
+        {
+          "slot_id": "update-contact-body",
+          "path": "app/crm/operations.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "update_contact"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": null
+        }
+      ],
+      "placements": [
+        {
+          "placement_id": "update-contact-declaration",
+          "path": "app/crm/operations.py",
+          "kind": "declarations",
+          "target": "module",
+          "position": "end",
+          "anchor": null,
+          "preimage_sha256": null
+        }
+      ],
+      "red_checks": [
+        {
+          "path": "app/tests/test_contact_update_contract.py",
+          "test_node": "test_invalid_email_is_rejected_before_customer_lookup",
+          "expected_exception": "NotImplementedError",
+          "marker": "test_invalid_email_is_rejected_before_customer_lookup"
+        }
+      ]
+    }
+  ]
+}

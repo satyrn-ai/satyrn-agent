@@ -1,0 +1,79 @@
+{
+  "schema_version": 0,
+  "packet_id": "customer-tracker-e3-contact-validation",
+  "task": "Add the E3 contact update operation and validate contact input before persistence.",
+  "readable_files": [
+    "app/crm/domain.py",
+    "app/crm/models.py",
+    "app/crm/operations.py"
+  ],
+  "file_changes": [
+    {"path": "app/crm/operations.py", "operation": "modify"},
+    {"path": "app/tests/test_contact_update_contract.py", "operation": "create"}
+  ],
+  "consumes": [
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "CustomerId",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "EmailAddress",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "PhoneNumber",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "RuleViolation",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "validate_contact",
+      "expected_signature": "def validate_contact(email: EmailAddress, phone: PhoneNumber) -> None:"
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/models.py"},
+      "qualified_name": "Customer",
+      "expected_signature": null
+    }
+  ],
+  "produces": [
+    {
+      "path": "app/crm/operations.py",
+      "qualified_name": "update_contact",
+      "operation": "create",
+      "kind": "function",
+      "declaration": "def update_contact(customer_id: CustomerId, *, email: EmailAddress, phone: PhoneNumber) -> None:"
+    }
+  ],
+  "imports": [],
+  "tests": [
+    {
+      "path": "app/tests/test_contact_update_contract.py",
+      "operation": "create",
+      "content": "from crm.domain import RuleViolation\nfrom crm.operations import update_contact\n\ndef test_invalid_email_is_rejected_before_customer_lookup() -> None:\n    try:\n        update_contact(1, email=' ', phone='')\n    except RuleViolation:\n        return\n    raise AssertionError('invalid contact unexpectedly accepted')\n"
+    }
+  ],
+  "gates": [
+    {
+      "argv": ["pytest", "tests/test_contact_update_contract.py"],
+      "cwd": "app",
+      "before": {"exit_code": "nonzero", "reason": "The prepared update body raises NotImplementedError."},
+      "after": {"exit_code": 0, "reason": "Invalid contact input is rejected before persistence."}
+    }
+  ],
+  "known_facts": ["The E3 starting workspace already contains the pure contact rule and create operation."],
+  "acceptance_criteria": [
+    "The operation reuses the contact rule and validates before looking up the customer.",
+    "Only email and phone are updated after valid input."
+  ],
+  "preserved_behavior": [
+    "Customer identity, names, notes, and creation time are unchanged."
+  ]
+}

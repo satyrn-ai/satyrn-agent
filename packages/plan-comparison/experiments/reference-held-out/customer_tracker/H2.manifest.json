@@ -1,0 +1,149 @@
+{
+  "manifest_version": 0,
+  "task_id": "H2",
+  "plan_sha256": "7640076f10085cb7a7157896c0f98b360fbbc90ab23ec93174ee4e5cef01e47f",
+  "packets": [
+    {
+      "packet_id": "customer-tracker-h2-follow-up-workflow",
+      "packet_sha256": "2c81a484a5841421bc75ee322d3df44baa6fc696503b57c89a3a1093b1d0f366",
+      "slots": [
+        {
+          "slot_id": "follow-up-status-body",
+          "path": "app/crm/domain.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "follow_up_status"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "schedule-follow-up-body",
+          "path": "app/crm/operations.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "schedule_follow_up"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "complete-follow-up-body",
+          "path": "app/crm/operations.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "complete_follow_up"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "list-follow-ups-body",
+          "path": "app/crm/queries.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "list_follow_ups"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "get-follow-up-body",
+          "path": "app/crm/queries.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "get_follow_up"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "follow-up-form-fields",
+          "path": "app/crm/forms.py",
+          "kind": "ancillary",
+          "operation": "replace",
+          "target": {"kind": "structural", "qualified_name": "FollowUpCreateForm"},
+          "extent": {"kind": "structural", "region": "body"},
+          "preimage_sha256": "2e435df77e8bb3500df67c79d3a3d845832322520c6d004cc9dffa85c5d2d6b5"
+        },
+        {
+          "slot_id": "customer-detail-body",
+          "path": "app/crm/views.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "customer_detail"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "aab569ca52693b60e6d979083010c6f7eb62bb824765b3872f1bb709fc7029a7"
+        },
+        {
+          "slot_id": "follow-up-create-view-body",
+          "path": "app/crm/views.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "follow_up_create"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "follow-up-complete-view-body",
+          "path": "app/crm/views.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "follow_up_complete"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "utc-timezone-import",
+          "path": "app/crm/views.py",
+          "kind": "ancillary",
+          "operation": "insert_after",
+          "target": {"kind": "text_anchor", "anchor": "from django.shortcuts import redirect, render"},
+          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
+          "preimage_sha256": "bdf93d13f85bbdadbe9009a6782097228a3ad54e6290a76623afee2f3c96a237"
+        },
+        {
+          "slot_id": "follow-up-detail-template",
+          "path": "app/crm/templates/crm/customer_detail.html",
+          "kind": "ancillary",
+          "operation": "insert_before",
+          "target": {"kind": "text_anchor", "anchor": "    </main>"},
+          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
+          "preimage_sha256": "8aeb63f2aaeb37170fbc966377288cdeecb2de2d0f4e905b621842c8e12ef460"
+        },
+        {
+          "slot_id": "follow-up-form-file",
+          "path": "app/crm/templates/crm/follow_up_form.html",
+          "kind": "ancillary",
+          "operation": "create_file",
+          "target": {"kind": "whole_file"},
+          "extent": {"kind": "whole_file"},
+          "preimage_sha256": null
+        }
+      ],
+      "placements": [
+        {
+          "placement_id": "follow-up-model-import",
+          "path": "app/crm/operations.py",
+          "kind": "imports",
+          "target": "module",
+          "position": "after",
+          "anchor": "from crm.models import Customer as CustomerRecord",
+          "preimage_sha256": "df0b7ddc5abea8c81e76e8990e49ec13daacd8a67e8092db54b94c9c0278f47e"
+        },
+        {
+          "placement_id": "follow-up-view-imports",
+          "path": "app/crm/views.py",
+          "kind": "imports",
+          "target": "module",
+          "position": "after",
+          "anchor": "from crm.queries import get_customer, list_customers",
+          "preimage_sha256": "aa8bb0c0c2e689497834a5f36a2b1724c559f83c5bdccfc21164193bb8cb89a4"
+        }
+      ],
+      "red_checks": [
+        {
+          "path": "app/tests/test_follow_up_workflow.py",
+          "test_node": "test_follow_up_status_uses_explicit_clock_boundaries",
+          "expected_exception": "NotImplementedError",
+          "marker": "test_follow_up_status_uses_explicit_clock_boundaries"
+        }
+      ]
+    }
+  ]
+}

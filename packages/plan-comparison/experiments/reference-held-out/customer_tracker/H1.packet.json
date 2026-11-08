@@ -1,0 +1,102 @@
+{
+  "schema_version": 0,
+  "packet_id": "customer-tracker-h1-search-pagination",
+  "task": "Implement visible H1 customer search and pagination through a pure query and the directory view/template.",
+  "readable_files": [
+    "app/crm/domain.py",
+    "app/crm/models.py",
+    "app/crm/queries.py",
+    "app/crm/views.py",
+    "app/crm/templates/crm/customer_list.html"
+  ],
+  "file_changes": [
+    {"path": "app/crm/queries.py", "operation": "modify"},
+    {"path": "app/crm/views.py", "operation": "modify"},
+    {"path": "app/crm/templates/crm/customer_list.html", "operation": "modify"},
+    {"path": "app/tests/test_search_pagination.py", "operation": "create"}
+  ],
+  "consumes": [
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "Customer",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/domain.py"},
+      "qualified_name": "CustomerPage",
+      "expected_signature": null
+    },
+    {
+      "source": {"root_id": "workspace", "path": "app/crm/models.py"},
+      "qualified_name": "Customer",
+      "expected_signature": null
+    }
+  ],
+  "produces": [
+    {
+      "path": "app/crm/queries.py",
+      "qualified_name": "search_customers",
+      "operation": "modify",
+      "kind": "function",
+      "declaration": "def search_customers(*, query: str, page: int) -> CustomerPage:"
+    },
+    {
+      "path": "app/crm/views.py",
+      "qualified_name": "customer_list",
+      "operation": "modify",
+      "kind": "function",
+      "declaration": "def customer_list(request: HttpRequest) -> HttpResponse:"
+    }
+  ],
+  "imports": [
+    {
+      "path": "app/crm/views.py",
+      "module": "crm.queries",
+      "name": "search_customers",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/tests/test_search_pagination.py",
+      "module": "crm.models",
+      "name": "Customer",
+      "alias": null,
+      "target": "existing"
+    },
+    {
+      "path": "app/tests/test_search_pagination.py",
+      "module": "crm.queries",
+      "name": "search_customers",
+      "alias": null,
+      "target": "existing"
+    }
+  ],
+  "tests": [
+    {
+      "path": "app/tests/test_search_pagination.py",
+      "operation": "create",
+      "content": "import pytest\n\nfrom crm.models import Customer\nfrom crm.queries import search_customers\n\n\n@pytest.mark.django_db\ndef test_search_customers_filters_and_pages() -> None:\n    Customer.objects.create(first_name='Ada', last_name='Lovelace', email='ada@example.com')\n    Customer.objects.create(first_name='Grace', last_name='Hopper', email='ada-contact@example.com')\n    for index in range(10):\n        Customer.objects.create(first_name=f'First {index}', last_name='Smith', email=f'person-{index}@example.com')\n\n    matches = search_customers(query=' ADA ', page=0)\n    assert matches.total_count == 2\n    assert matches.page_number == 1\n    assert matches.page_count == 1\n    assert tuple(customer.first_name for customer in matches.customers) == ('Grace', 'Ada')\n\n    last_page = search_customers(query='', page=999)\n    assert last_page.total_count == 12\n    assert last_page.page_count == 2\n    assert last_page.page_number == 2\n    assert last_page.has_previous\n    assert not last_page.has_next\n    assert len(last_page.customers) == 2\n"
+    }
+  ],
+  "gates": [
+    {
+      "argv": ["pytest", "tests/test_search_pagination.py"],
+      "cwd": "app",
+      "before": {"exit_code": "nonzero", "reason": "The visible search behavior is not implemented."},
+      "after": {"exit_code": 0, "reason": "Search and pagination requirements pass."}
+    }
+  ],
+  "known_facts": [
+    "The frozen CustomerPage value and search_customers signature are declared in the visible start.",
+    "The directory view and template are unfinished in the visible start."
+  ],
+  "acceptance_criteria": [
+    "Search strips the query and performs case-insensitive OR matching over first name, last name, and email.",
+    "Results use deterministic lowercase last-name, lowercase first-name, then ID ordering.",
+    "Pagination uses ten rows, normalizes invalid pages, clamps positive out-of-range pages, and represents empty results as page one of one.",
+    "The template preserves the stripped query in URL-encoded pagination links, receives `customer_page` and `query` in its context, and does not receive querysets or ORM instances."
+  ],
+  "preserved_behavior": [
+    "Customer creation, detail URLs, and the empty directory state remain available."
+  ]
+}

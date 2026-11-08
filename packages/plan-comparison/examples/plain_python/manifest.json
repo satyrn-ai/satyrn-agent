@@ -1,0 +1,68 @@
+{
+  "manifest_version": 0,
+  "task_id": "plain-python",
+  "plan_sha256": "99898610ef0db9168a87f02814d51f2365b8a36c27165b20596459e15e7a9fd0",
+  "packets": [
+    {
+      "packet_id": "plain-python-balance-report",
+      "packet_sha256": "ca52067a983fbbd108780a4c7e22470f41714a1aeadd5a5ab7807b8f29c5a892",
+      "slots": [
+        {
+          "slot_id": "format-amount-body",
+          "path": "src/formatting.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "format_amount"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": null
+        },
+        {
+          "slot_id": "render-balance-body",
+          "path": "src/reports.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "render_balance"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": null
+        }
+      ],
+      "placements": [
+        {
+          "placement_id": "formatting-declaration",
+          "path": "src/formatting.py",
+          "kind": "declarations",
+          "target": "module",
+          "position": "start",
+          "anchor": null,
+          "preimage_sha256": null
+        },
+        {
+          "placement_id": "report-imports",
+          "path": "src/reports.py",
+          "kind": "imports",
+          "target": "module",
+          "position": "start",
+          "anchor": null,
+          "preimage_sha256": null
+        },
+        {
+          "placement_id": "report-declaration",
+          "path": "src/reports.py",
+          "kind": "declarations",
+          "target": "module",
+          "position": "end",
+          "anchor": null,
+          "preimage_sha256": null
+        }
+      ],
+      "red_checks": [
+        {
+          "path": "tests/test_reports.py",
+          "test_node": "test_render_balance_returns_text",
+          "expected_exception": "NotImplementedError",
+          "marker": "test_render_balance_returns_text"
+        }
+      ]
+    }
+  ]
+}

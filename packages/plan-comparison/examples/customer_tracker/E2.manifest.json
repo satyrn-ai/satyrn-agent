@@ -1,0 +1,86 @@
+{
+  "manifest_version": 0,
+  "task_id": "E2",
+  "plan_sha256": "33e2529ebcc2ee321b0f74f81cdc535bfc9ff053fa192f0898b4d792a5495826",
+  "packets": [
+    {
+      "packet_id": "customer-tracker-e2-rules-and-create",
+      "packet_sha256": "53c9da3ab57e3aa1c71f63209611cbc6233960f03cc3189d7260c24b9cc81b4b",
+      "slots": [
+        {
+          "slot_id": "rule-violation-class",
+          "path": "app/crm/domain.py",
+          "kind": "ancillary",
+          "operation": "replace",
+          "target": {"kind": "structural", "qualified_name": "RuleViolation"},
+          "extent": {"kind": "structural", "region": "body"},
+          "preimage_sha256": null
+        },
+        {
+          "slot_id": "customer-name-rule",
+          "path": "app/crm/domain.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "validate_customer_name"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": null
+        },
+        {
+          "slot_id": "contact-rule",
+          "path": "app/crm/domain.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "validate_contact"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": null
+        },
+        {
+          "slot_id": "create-customer-operation",
+          "path": "app/crm/operations.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "create_customer"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": null
+        }
+      ],
+      "placements": [
+        {
+          "placement_id": "domain-declarations",
+          "path": "app/crm/domain.py",
+          "kind": "declarations",
+          "target": "module",
+          "position": "end",
+          "anchor": null,
+          "preimage_sha256": null
+        },
+        {
+          "placement_id": "operation-imports",
+          "path": "app/crm/operations.py",
+          "kind": "imports",
+          "target": "module",
+          "position": "start",
+          "anchor": null,
+          "preimage_sha256": null
+        },
+        {
+          "placement_id": "operation-declaration",
+          "path": "app/crm/operations.py",
+          "kind": "declarations",
+          "target": "module",
+          "position": "end",
+          "anchor": null,
+          "preimage_sha256": null
+        }
+      ],
+      "red_checks": [
+        {
+          "path": "app/tests/test_operations.py",
+          "test_node": "test_customer_name_rule_rejects_blank_values",
+          "expected_exception": "NotImplementedError",
+          "marker": "test_customer_name_rule_rejects_blank_values"
+        }
+      ]
+    }
+  ]
+}

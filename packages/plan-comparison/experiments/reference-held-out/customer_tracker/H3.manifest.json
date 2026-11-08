@@ -1,0 +1,131 @@
+{
+  "manifest_version": 0,
+  "task_id": "H3",
+  "plan_sha256": "ea23b853d0fce13576e7a47af8fa37fce48c6ac9743af32a3d612e32558d410f",
+  "packets": [
+    {
+      "packet_id": "customer-tracker-h3-archive-workflow",
+      "packet_sha256": "8fc79a1fa57400bca71d90e84e3b5de9ad3cb0b0f819c432f651d769024c76dc",
+      "slots": [
+        {
+          "slot_id": "archive-customer-body",
+          "path": "app/crm/operations.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "archive_customer"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "create-follow-up-body",
+          "path": "app/crm/operations.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "create_follow_up"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "archive-view-body",
+          "path": "app/crm/views.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "customer_archive"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "follow-up-create-view-body",
+          "path": "app/crm/views.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "follow_up_create"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "archive-timezone-import",
+          "path": "app/crm/views.py",
+          "kind": "ancillary",
+          "operation": "insert_after",
+          "target": {"kind": "text_anchor", "anchor": "from django.shortcuts import redirect, render"},
+          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
+          "preimage_sha256": "bdf93d13f85bbdadbe9009a6782097228a3ad54e6290a76623afee2f3c96a237"
+        },
+        {
+          "slot_id": "archive-post-only-decorator",
+          "path": "app/crm/views.py",
+          "kind": "ancillary",
+          "operation": "insert_before",
+          "target": {"kind": "text_anchor", "anchor": "def customer_archive(request: HttpRequest, customer_id: int) -> HttpResponse:"},
+          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
+          "preimage_sha256": "9d2b64f66861502b747820cd80825263107c8a1594b2e091a11dd022fe703ba6"
+        },
+        {
+          "slot_id": "follow-up-create-method-decorator",
+          "path": "app/crm/views.py",
+          "kind": "ancillary",
+          "operation": "insert_before",
+          "target": {"kind": "text_anchor", "anchor": "def follow_up_create(request: HttpRequest, customer_id: int) -> HttpResponse:"},
+          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
+          "preimage_sha256": "86f56a66b3c4e9c036f699f8ea13239b0c0952ae61b5f18f13151d4ba01d69fd"
+        },
+        {
+          "slot_id": "directory-archive-marker",
+          "path": "app/crm/templates/crm/customer_list.html",
+          "kind": "ancillary",
+          "operation": "replace",
+          "target": {"kind": "text_anchor", "anchor": "              </a>\n            </li>"},
+          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 36},
+          "preimage_sha256": "71b94521d48faead6e2f7e36c4afb8d949558cf891926cb265008e81488de9ab"
+        },
+        {
+          "slot_id": "detail-archive-marker",
+          "path": "app/crm/templates/crm/customer_detail.html",
+          "kind": "ancillary",
+          "operation": "insert_after",
+          "target": {"kind": "text_anchor", "anchor": "<h1>{{ customer.first_name }} {{ customer.last_name }}</h1>"},
+          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
+          "preimage_sha256": "9a5b30ff1210f30d1200698db726a0bd297e455dfa1ff8aad88748d0ee024134"
+        },
+        {
+          "slot_id": "detail-archive-post-form",
+          "path": "app/crm/templates/crm/customer_detail.html",
+          "kind": "ancillary",
+          "operation": "insert_before",
+          "target": {"kind": "text_anchor", "anchor": "    </main>"},
+          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
+          "preimage_sha256": "8aeb63f2aaeb37170fbc966377288cdeecb2de2d0f4e905b621842c8e12ef460"
+        }
+      ],
+      "placements": [
+        {
+          "placement_id": "follow-up-model-import",
+          "path": "app/crm/operations.py",
+          "kind": "imports",
+          "target": "module",
+          "position": "after",
+          "anchor": "from crm.models import Customer as CustomerRecord",
+          "preimage_sha256": "df0b7ddc5abea8c81e76e8990e49ec13daacd8a67e8092db54b94c9c0278f47e"
+        },
+        {
+          "placement_id": "archive-view-imports",
+          "path": "app/crm/views.py",
+          "kind": "imports",
+          "target": "module",
+          "position": "after",
+          "anchor": "from crm.queries import get_customer, list_customers",
+          "preimage_sha256": "aa8bb0c0c2e689497834a5f36a2b1724c559f83c5bdccfc21164193bb8cb89a4"
+        }
+      ],
+      "red_checks": [
+        {
+          "path": "app/tests/test_archive_workflow.py",
+          "test_node": "test_archive_customer_is_idempotent",
+          "expected_exception": "NotImplementedError",
+          "marker": "test_archive_customer_is_idempotent"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "manifest_version": 0,
+  "task_id": "H1",
+  "plan_sha256": "38ef3f4e61563da3fb8f5d10aec24327adebaf128dade32b328c16152350f12b",
+  "packets": [
+    {
+      "packet_id": "customer-tracker-h1-search-pagination",
+      "packet_sha256": "33527a337dc281f557f1589f703ddaf2310b171d6d21bb3cca0669a8e6603c6f",
+      "slots": [
+        {
+          "slot_id": "search-query-body",
+          "path": "app/crm/queries.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "search_customers"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "directory-view-body",
+          "path": "app/crm/views.py",
+          "kind": "callable_body",
+          "operation": "replace_body",
+          "target": {"kind": "callable", "qualified_name": "customer_list"},
+          "extent": {"kind": "callable_body"},
+          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+        },
+        {
+          "slot_id": "directory-pagination-template",
+          "path": "app/crm/templates/crm/customer_list.html",
+          "kind": "ancillary",
+          "operation": "insert_before",
+          "target": {"kind": "text_anchor", "anchor": "    </main>"},
+          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
+          "preimage_sha256": "8aeb63f2aaeb37170fbc966377288cdeecb2de2d0f4e905b621842c8e12ef460"
+        }
+      ],
+      "placements": [
+        {
+          "placement_id": "directory-query-import",
+          "path": "app/crm/views.py",
+          "kind": "imports",
+          "target": "module",
+          "position": "after",
+          "anchor": "from crm.queries import get_customer",
+          "preimage_sha256": "157bd25f55b068938f9c230f8375c60082a673123d825a6f2e2a9e2bcd7c5aa5"
+        }
+      ],
+      "red_checks": [
+        {
+          "path": "app/tests/test_search_pagination.py",
+          "test_node": "test_search_customers_filters_and_pages",
+          "expected_exception": "NotImplementedError",
+          "marker": "test_search_customers_filters_and_pages"
+        }
+      ]
+    }
+  ]
+}
