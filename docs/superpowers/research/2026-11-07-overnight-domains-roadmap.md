@@ -246,7 +246,15 @@ both mechanical and report-back.
   arguments from signatures (pathology 121). Reopen after item 0's trie-walk
   cost check, if item 1's calibration shows identifier errors worth fixing on
   the 27B, or with Mellum ([prior art](2026-11-07-masks-logits-prior-art.md),
-  idea 1).
+  idea 1). Targets are attribute and keyword-argument slots; imports go to
+  import synthesis (below). The trie must cover every tokenisation of a name
+  (DOMINO). First test: how often a plain mask and exact scoring pick
+  different names at real slots; if often, use exact scoring there
+  ([prior art](2026-11-07-masks-logits-prior-art.md), section 4).
+- **Import synthesis:** after the model writes a body, resolve the names it
+  uses against the index and write the import block deterministically. No
+  mask, no forward passes. A candidate addition to item 3's compiled arm;
+  needs a rule for names exported by two modules.
 - **Per-slot counterfactuals:** fork masked and unmasked decodes from one
   checkpoint at each slot, to measure any mask's benefit. Use it whenever a
   mask is tested (idea 3).
@@ -259,7 +267,8 @@ both mechanical and report-back.
 - **Import mask:** reopen when invalid imports impose meaningful failure or
   repair cost after the skeleton and a write-time import check, on any model.
   Benchmark a cached, batched mask before building
-  ([review](2026-11-07-import-mask-review.md)).
+  ([review](2026-11-07-import-mask-review.md)). Try import synthesis first:
+  it removes the slot instead of masking it.
 - **Pyrefly mid-decode checks:** reopen if a Pyrefly pass over the 27B's
   bodies finds unresolved names or wrong attributes often enough to matter.
 - **Steering and the DFlash features ring:** reopen when an item needs them;
