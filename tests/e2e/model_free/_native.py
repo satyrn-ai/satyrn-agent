@@ -11,9 +11,21 @@ from ds4py._native.fake import FakeEngine, FakeNative, FakeSession
 from ds4py._native.fake_chat import VOCAB_SIZE
 from ds4py._native.protocol import EngineInfo
 
-from satyrn_agent._native import NativeSampling
 from satyrn_agent.errors import DFlashError
 from tests.e2e.scenarios._generated.scenario_types import Native, NativeCall
+
+_OPERATIONS = (
+    "draft",
+    "verify",
+    "select",
+    "commit",
+    "eval",
+    "sample",
+    "mode",
+    "has_dflash",
+    "verify_rows",
+    "sampling_defaults",
+)
 
 
 class ScenarioFakeNative(FakeNative):
@@ -55,39 +67,6 @@ class ScenarioFakeNative(FakeNative):
     @override
     def open_engine(self, config: object) -> ScenarioFakeEngine:
         return ScenarioFakeEngine(self)
-
-    @property
-    def missing_dflash(self) -> tuple[str, ...]:
-        return tuple(sorted(self.config.get("missing", set())))
-
-    def has_dflash(self, engine_raw: int) -> bool:
-        return self._has_dflash(engine_raw)
-
-    def verify_rows(self, engine_raw: int) -> int:
-        return self._verify_rows(engine_raw)
-
-    def set_verify_mode(self, session_raw: int, mode: int) -> None:
-        self._set_verify_mode(session_raw, mode)
-
-    def draft(self, session_raw: int, anchor: int, maximum: int) -> list[int]:
-        output = (C.c_int * max(maximum, 1))()
-        count = self._draft(session_raw, anchor, maximum, output, None, 0)
-        return [int(token) for token in output[:count]]
-
-    def verify(self, session_raw: int, anchor: int, drafts: Sequence[int]) -> None:
-        self._verify(session_raw, anchor, list(drafts), len(drafts), None, 0)
-
-    def select(self, session_raw: int, row: int) -> None:
-        self._select(session_raw, row)
-
-    def commit(self, session_raw: int, rows: int) -> None:
-        self._commit(session_raw, rows, None, 0)
-
-    def sampling_defaults(self, engine_raw: int) -> NativeSampling | None:
-        values = self.config.get("sampling_defaults")
-        if values is None:
-            return None
-        return NativeSampling(values["temperature"], values["top_k"], values["top_p"], values["min_p"])
 
     def _next_token(self, prompt: Sequence[int], generated: Sequence[int]) -> int:
         script = self.config["script"]
@@ -261,17 +240,3 @@ class ScenarioFakeEngine(FakeEngine):
         if rendered and text == "</think>":
             return self.scenario_native.config.get("end_think_tokens", [258])
         return super().tokenize(text, rendered=rendered)
-
-
-_OPERATIONS = (
-    "draft",
-    "verify",
-    "select",
-    "commit",
-    "eval",
-    "sample",
-    "mode",
-    "has_dflash",
-    "verify_rows",
-    "sampling_defaults",
-)

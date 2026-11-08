@@ -10,8 +10,9 @@ deterministic `FakeNative` and scripted optional DFlash bindings.
 `tests/e2e/schema/scenario.schema.json` is the external contract. Generate
 TypedDicts with `uv run --frozen datamodel-codegen` after schema edits. The
 project uses `practical-py314-20261104`; use `--recommend-options` for
-schema-specific review. Handwritten `TypeIs` validators and conversion logic
-perform runtime validation. No Pydantic models or TypeAdapter are used.
+schema-specific review. `jsonschema` performs runtime validation, followed by
+explicit conversion of JSON arrays to sets. No Pydantic models or TypeAdapter
+are used.
 
 Run the independent coverage gate:
 

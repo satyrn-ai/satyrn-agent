@@ -1,13 +1,9 @@
-import subprocess
-
 from satyrn_agent._generated.config import ConfigDocument
+from satyrn_agent.config import DFlashMode
+from satyrn_agent.config_io import config_from_dict
 
 
-def test_production_config_dto_is_generated() -> None:
-    document = ConfigDocument(dflash="auto", drafter_path=None)
+def test_generated_config_document_feeds_the_parser() -> None:
+    document = ConfigDocument(dflash="off")
 
-    assert document == {"dflash": "auto", "drafter_path": None}
-
-
-def test_named_generation_jobs_are_current() -> None:
-    subprocess.run(["uv", "run", "--frozen", "datamodel-codegen", "--all-jobs", "--check"], check=True)
+    assert config_from_dict(document).dflash is DFlashMode.OFF

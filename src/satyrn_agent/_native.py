@@ -12,18 +12,11 @@ if TYPE_CHECKING:
 
 from ds4py.errors import MissingBinding
 
+from .bindings import BINDINGS
 from .errors import DFlashError
 
 _ERROR_BYTES = 256
-_DFLASH_NAMES = (
-    "ds4_engine_has_dflash",
-    "ds4_engine_verify_rows",
-    "ds4_session_set_verify_mode",
-    "ds4_session_dflash_draft",
-    "ds4_session_verify",
-    "ds4_session_verify_select",
-    "ds4_session_verify_commit",
-)
+_DFLASH_NAMES = tuple(binding.name for binding in BINDINGS if binding.name != "ds4_engine_sampling_defaults")
 
 
 class BindingSource(Protocol):

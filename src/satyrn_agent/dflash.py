@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from ds4py.engine.decode import Verdict
@@ -56,23 +55,15 @@ class _MetricsRecorder:
             )
 
 
-class _Phase(Enum):
-    IDLE = auto()
-    STAGING = auto()
-    VERIFY_OPEN = auto()
-
-
 @dataclass(slots=True)
 class _PendingAnchor:
     token: int
     before_rng: int
-    after_rng: int
 
 
 @dataclass(slots=True)
 class _BlockState:
     anchor: int
-    phase: _Phase = _Phase.STAGING
     drafts: tuple[int, ...] = ()
     accepted_drafts: int = 0
 
@@ -110,10 +101,10 @@ class DFlashStep:
             ctx.begin_staging()
             verdict = ctx.stage(block.anchor, ctx.accept(block.anchor))
             if verdict is Verdict.STOP_AFTER:
-                self._eval_and_publish(session, ctx, block)
+                self._publish_block(session, ctx, block, commit_rows=None)
                 return
             if ctx.cancelled():
-                self._eval_and_publish(session, ctx, block)
+                self._publish_block(session, ctx, block, commit_rows=None)
                 ctx.finish("interrupted")
                 return
 
@@ -124,14 +115,19 @@ class DFlashStep:
                 ctx.discard()
                 ctx.rng.value = block_start_rng
                 ctx.poison(error)
-            block.phase = _Phase.VERIFY_OPEN
             try:
                 outcome = self._scan_rows(session, ctx, block)
             except BaseException:
-                self._commit_and_publish(session, ctx, block, replacement=False)
+                self._publish_block(session, ctx, block, commit_rows=1 + block.accepted_drafts, replacement=False)
                 raise
             pending = outcome.pending
-            self._commit_and_publish(session, ctx, block, replacement=outcome.replacement)
+            self._publish_block(
+                session,
+                ctx,
+                block,
+                commit_rows=1 + block.accepted_drafts,
+                replacement=outcome.replacement,
+            )
             if outcome.stop is not None:
                 ctx.accept(outcome.stop.token)
                 return
@@ -150,14 +146,30 @@ class DFlashStep:
             ctx.rng.value = pending.before_rng
             ctx.finish("interrupted")
 
-    def _eval_and_publish(self, session: SessionHandle, ctx: DecodeContext, block: _BlockState) -> None:
+    def _publish_block(
+        self,
+        session: SessionHandle,
+        ctx: DecodeContext,
+        block: _BlockState,
+        *,
+        commit_rows: int | None,
+        replacement: bool = False,
+    ) -> None:
         try:
-            session.eval(block.anchor)
+            if commit_rows is None:
+                session.eval(block.anchor)
+            else:
+                self._native.commit(session.raw, commit_rows)
             ctx.publish()
-        except BaseException as error:  # noqa: BLE001 - Native/publication uncertainty must poison the worker.
+        except BaseException as error:  # noqa: BLE001 - Never publish after uncertain native work.
             ctx.poison(error)
-        block.phase = _Phase.IDLE
-        self._metrics.committed(0, 0, replacement=False, discarded=0)
+        committing = commit_rows is not None
+        self._metrics.committed(
+            len(block.drafts) if committing else 0,
+            block.accepted_drafts,
+            replacement=replacement,
+            discarded=len(block.drafts) - block.accepted_drafts if committing else 0,
+        )
 
     def _anchor(self, session: SessionHandle, ctx: DecodeContext) -> _PendingAnchor:
         before = ctx.rng.value
@@ -166,7 +178,7 @@ class DFlashStep:
         token = session.sample(policy.temperature, policy.top_k, policy.top_p, policy.min_p, ctx.rng)
         if token < 0:
             raise EngineError("cannot sample DFlash anchor: the session state is not valid; sync first")
-        return _PendingAnchor(token, before, ctx.rng.value)
+        return _PendingAnchor(token, before)
 
     def _scan_rows(
         self,
@@ -192,24 +204,3 @@ class DFlashStep:
             if verdict is Verdict.STOP_AFTER or ctx.reason is not None:
                 return _RowOutcome()
             row += 1
-
-    def _commit_and_publish(
-        self,
-        session: SessionHandle,
-        ctx: DecodeContext,
-        block: _BlockState,
-        *,
-        replacement: bool,
-    ) -> None:
-        try:
-            self._native.commit(session.raw, 1 + block.accepted_drafts)
-            ctx.publish()
-        except BaseException as error:  # noqa: BLE001 - Never publish or continue after uncertain native commit.
-            ctx.poison(error)
-        block.phase = _Phase.IDLE
-        self._metrics.committed(
-            len(block.drafts),
-            block.accepted_drafts,
-            replacement=replacement,
-            discarded=len(block.drafts) - block.accepted_drafts,
-        )

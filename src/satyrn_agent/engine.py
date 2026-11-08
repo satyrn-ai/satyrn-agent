@@ -22,11 +22,12 @@ if TYPE_CHECKING:
     from ds4py import Engine, Session
     from ds4py._native.protocol import Native
     from ds4py.engine.decode import DecodeStep
+    from ds4py.engine.sampling import SamplingPolicy
 
     from ._native import DFlashNative
 
 
-def _select_step(  # noqa: PLR0911 - One policy dispatch keeps each capability requirement explicit.
+def _select_step(
     native: DFlashNative,
     config: SatyrnConfig,
     engine_raw: int,
@@ -34,26 +35,23 @@ def _select_step(  # noqa: PLR0911 - One policy dispatch keeps each capability r
     backend: str,
 ) -> DecodeStep:
     """Resolve auto/on/off once; never reinterpret policy during a round."""
-    if config.dflash is DFlashMode.OFF:
+    if config.dflash is DFlashMode.OFF or config.drafter_path is None:
         return PlainStep()
-    if config.drafter_path is None:
-        return PlainStep()
+    reason: str | None = None
+    rows = 0
     if missing := native.missing_dflash:
+        reason = f"DFlash bindings are missing: {', '.join(missing)}"
+    elif backend != "metal":
+        reason = f"DFlash requires Metal, not {backend}"
+    elif not native.has_dflash(engine_raw):
+        reason = "DFlash requires a loaded drafter"
+    else:
+        rows = native.verify_rows(engine_raw)
+        if rows == 0:
+            reason = "DFlash requires at least one verify row"
+    if reason is not None:
         if config.dflash is DFlashMode.ON:
-            raise DFlashUnavailable(f"DFlash bindings are missing: {', '.join(missing)}")
-        return PlainStep()
-    if backend != "metal":
-        if config.dflash is DFlashMode.ON:
-            raise DFlashUnavailable(f"DFlash requires Metal, not {backend}")
-        return PlainStep()
-    if not native.has_dflash(engine_raw):
-        if config.dflash is DFlashMode.ON:
-            raise DFlashUnavailable("DFlash requires a loaded drafter")
-        return PlainStep()
-    rows = native.verify_rows(engine_raw)
-    if rows == 0:
-        if config.dflash is DFlashMode.ON:
-            raise DFlashUnavailable("DFlash requires at least one verify row")
+            raise DFlashUnavailable(reason)
         return PlainStep()
     native.set_verify_mode(session_raw, 1)
     return DFlashStep(native, draft_tokens=config.draft_tokens, verify_rows=rows)
@@ -76,24 +74,36 @@ class SatyrnEngine:
         if self._session is not None:
             raise EngineError("one session per engine")
         session = self._engine.session()
-        native = CtypesDFlashNative(self._engine.native)
-        defaults = session.on_worker(lambda handles: native.sampling_defaults(handles.engine)).result()
-        self._engine.sampling_defaults = merge_sampling(
-            self._engine.sampling_defaults,
-            defaults,
-            self._config.sampling,
-            self._seed,
-        )
-        if self._config.think_budget is not None:
-            session.add_logits_hook(ThinkBudgetHook(self._config.think_budget, resolve_end_think(self._engine)))
-        self._step = session.on_worker(
-            lambda handles: _select_step(
-                native, self._config, handles.engine, handles.session, self._engine.native.backend
-            )
-        ).result()
-        session.set_decode_step(self._step)
         self._session = session
+        try:
+            native = CtypesDFlashNative(self._engine.native)
+            defaults = session.on_worker(lambda handles: native.sampling_defaults(handles.engine)).result()
+            self._engine.sampling_defaults = merge_sampling(
+                self._engine.sampling_defaults,
+                defaults,
+                self._config.sampling,
+                self._seed,
+            )
+            if self._config.think_budget is not None:
+                session.add_logits_hook(ThinkBudgetHook(self._config.think_budget, resolve_end_think(self._engine)))
+            self._step = session.on_worker(
+                lambda handles: _select_step(
+                    native, self._config, handles.engine, handles.session, self._engine.native.backend
+                )
+            ).result()
+            session.set_decode_step(self._step)
+        except BaseException:
+            self.close()
+            raise
         return session
+
+    @property
+    def decode_step(self) -> DecodeStep | None:
+        return self._step
+
+    @property
+    def sampling_defaults(self) -> SamplingPolicy:
+        return self._engine.sampling_defaults
 
     @property
     def dflash_metrics(self) -> DFlashMetrics | None:

@@ -4,9 +4,9 @@
 
 **Goal:** Make model-free public-flow E2E scenarios the primary Satyrn verification suite, with generated TypedDict boundaries and a 100% line/branch coverage gate.
 
-**Architecture:** Versioned JSON scenarios use one shared runner over `satyrn_agent.open()`, real ds4-py workers/sessions, and deterministic scripted optional bindings. datamodel-code-generator produces checked-in TypedDicts; handwritten `TypeIs` validators and conversion logic provide runtime validation. Real-engine tests and narrow auxiliary unit/abnormal tests remain separate.
+**Architecture:** Versioned JSON scenarios use one shared runner over `satyrn_agent.open()`, real ds4-py workers/sessions, and deterministic scripted optional bindings. datamodel-code-generator produces checked-in TypedDicts; `jsonschema` provides runtime validation and explicit conversion handles arrays represented as sets. Real-engine tests and narrow auxiliary unit/abnormal tests remain separate.
 
-**Tech Stack:** Python 3.14, pytest/coverage, ds4-py FakeNative, JSON Schema, datamodel-code-generator 0.90.0, TypedDict, TypeIs, Ruff, ty, prek.
+**Tech Stack:** Python 3.14, pytest/coverage, ds4-py FakeNative, JSON Schema, jsonschema, datamodel-code-generator 0.90.0, TypedDict, TypeIs, Ruff, ty, prek.
 
 **Spec:** `docs/superpowers/specs/2026-11-07-e2e-scenario-testing-design.md`
 

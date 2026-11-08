@@ -3,12 +3,11 @@
 import math
 import threading
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ds4py import EngineError, Session, ThinkMode, WorkerPoisonedError
-from ds4py._json import is_string_key_mapping
 from ds4py._native.protocol import SessionHandle
 from ds4py.engine.decode import DecodeContext, DecodeStep, PlainStep, Verdict
 from ds4py.engine.events import Event, Interrupted, Stopped, Token
@@ -28,7 +27,7 @@ from tests.conftest import (
     serial_then_speculative,
 )
 from tests.e2e.model_free._native import ScenarioFakeNative
-from tests.e2e.model_free._observations import RoundResult, ScenarioResult
+from tests.e2e.model_free._observations import RoundResult, ScenarioResult, failed_round
 from tests.e2e.scenarios._generated.scenario_types import ConfigDocument, Expectation, Round, Scenario
 
 SUPPORTED_BRANCHES = {
@@ -65,23 +64,8 @@ def _config(config: ConfigDocument) -> SatyrnConfig:
     return satyrn_agent.config_from_dict(config)
 
 
-def _raw_value(value: object) -> object:
-    if value == "nonfinite":
-        return float("nan")
-    if value == "large-int":
-        return 10**1000
-    if isinstance(value, Mapping):
-        return {key: _raw_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_raw_value(item) for item in value]
-    return value
-
-
 def _raw_config(raw: Mapping[str, object]) -> SatyrnConfig:
-    converted = _raw_value(raw)
-    if not is_string_key_mapping(converted):
-        raise TypeError("raw_config must be a mapping")
-    values = dict[str, Any](converted)
+    values = dict[str, Any](raw)
     if isinstance(values.get("dflash"), str) and values["dflash"] in {"auto", "on", "off"}:
         values["dflash"] = DFlashMode(values["dflash"])
     if isinstance(values.get("drafter_path"), str):
@@ -180,8 +164,45 @@ def _observe(
     )
 
 
+class _ScenarioContext:
+    """Delegate to DecodeContext while intercepting only its public operations."""
+
+    def __init__(
+        self,
+        context: DecodeContext,
+        native: ScenarioFakeNative,
+        finish_at: int | None,
+        finish_reason: str | None,
+        cancel_after_accept: int | None,
+    ) -> None:
+        self._context = context
+        self._native = native
+        self._finish_at = finish_at
+        self._finish_reason = finish_reason
+        self._cancel_after_accept = cancel_after_accept
+        self._samples = 0
+        self._staged = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._context, name)
+
+    def sampling(self) -> SamplingPolicy:
+        policy = self._context.sampling()
+        self._samples += 1
+        if self._finish_at == self._samples and self._finish_reason is not None:
+            self._context.finish(self._finish_reason)
+        return policy
+
+    def stage(self, token: int, verdict: Verdict | None = None) -> Verdict:
+        result = self._context.stage(token, verdict)
+        self._staged += 1
+        if self._cancel_after_accept == self._staged and self._native.cancel_event is not None:
+            self._native.cancel_event.set()
+        return result
+
+
 class ScenarioStep:
-    """Inject scenario-declared context faults without replacing DFlashStep."""
+    """Inject context faults through the DecodeContext public interface."""
 
     def __init__(
         self,
@@ -201,187 +222,164 @@ class ScenarioStep:
     def run(self, session: SessionHandle, ctx: DecodeContext) -> None:
         if self.finish_at == 0 and self.finish_reason is not None:
             ctx.finish(self.finish_reason)
-        original_stage = ctx.stage
-        staged = 0
-
-        def stage(token: int, verdict: Verdict | None = None) -> Verdict:
-            nonlocal staged
-            staged += 1
-            result = original_stage(token, verdict)
-            if self.cancel_after_accept == staged and self.native.cancel_event is not None:
-                self.native.cancel_event.set()
-            return result
-
-        ctx.__dict__["stage"] = stage
-        calls = 0
-
-        def finish_hook(view: LogitsView) -> None:
-            nonlocal calls
-            calls += 1
-            if self.finish_at == calls and self.finish_reason is not None:
-                ctx.finish(self.finish_reason)
-
-        ctx._job = replace(ctx._job, logits_hooks=(*ctx._job.logits_hooks, finish_hook))
-        self.inner.run(session, ctx)
+        context = _ScenarioContext(ctx, self.native, self.finish_at, self.finish_reason, self.cancel_after_accept)
+        self.inner.run(session, cast("DecodeContext", context))
 
 
-def run_scenario(scenario: Scenario) -> ScenarioResult:  # noqa: C901, PLR0912 - Keep branch reporting in one dispatch.
+def _run_snapshot_parity(
+    wrapper: satyrn_agent.SatyrnEngine,
+    session: Session,
+    scenario: Scenario,
+    native: ScenarioFakeNative,
+    recorder: MetadataRecorder,
+) -> list[RoundResult]:
+    round = scenario["rounds"][0]
+    serial, speculative, _ = serial_then_speculative(
+        wrapper,
+        session,
+        round["prompt"],
+        max_tokens=round["max_tokens"],
+        sampling=session.engine.sampling_defaults,
+        recorder=recorder,
+        scripted_native=native,
+    )
+    assert speculative.token_ids == serial.token_ids
+    assert speculative.reason == serial.reason
+    assert speculative.rng == serial.rng
+    assert normalized_events(speculative.events) == normalized_events(serial.events)
+    assert recorder.speculative == recorder.serial
+    return [
+        _from_snapshot(serial, session, recorder.serial, DFlashMetrics()),
+        _from_snapshot(
+            speculative,
+            session,
+            recorder.speculative,
+            wrapper.dflash_metrics or DFlashMetrics(),
+        ),
+    ]
+
+
+def _run_rounds(
+    wrapper: satyrn_agent.SatyrnEngine,
+    session: Session,
+    scenario: Scenario,
+    native: ScenarioFakeNative,
+    recorder: MetadataRecorder,
+) -> list[RoundResult]:
+    hook_error_at: int | None = None
+    hook_calls = 0
+
+    def hook(view: LogitsView) -> None:
+        nonlocal hook_calls
+        hook_calls += 1
+        recorder(view)
+        if hook_error_at == hook_calls:
+            raise RuntimeError("hook injected")
+
+    if any(round["expect"]["metadata"] or round.get("hook_error_at") is not None for round in scenario["rounds"]):
+        session.add_logits_hook(hook)
+    results = []
+    for round in scenario["rounds"]:
+        native.cancel_after_samples = round.get("cancel_after_samples")
+        hook_error_at = round.get("hook_error_at")
+        if wrapper.decode_step is not None and (
+            round.get("finish_at") is not None
+            or round.get("finish_reason") is not None
+            or round.get("cancel_after_accept") is not None
+        ):
+            session.set_decode_step(
+                ScenarioStep(
+                    wrapper.decode_step,
+                    native,
+                    round.get("finish_at"),
+                    round.get("finish_reason"),
+                    round.get("cancel_after_accept"),
+                )
+            )
+        metadata_start = len(recorder.calls)
+        observed = _observe(session, wrapper, native, round, recorder)
+        observed.metadata = observed.metadata[metadata_start:]
+        results.append(observed)
+        recorder.serial_count = len(recorder.calls)
+    return results
+
+
+def _metric_branches(native: ScenarioFakeNative, wrapper: satyrn_agent.SatyrnEngine) -> set[str]:
+    labels = set[str]()
+    metrics = wrapper.dflash_metrics or DFlashMetrics()
+    if any(count == 0 for count in native.draft_results):
+        labels.add("zero-drafts")
+    if metrics.drafts_accepted < metrics.drafts_offered:
+        labels.add("partial-acceptance")
+    if metrics.drafts_offered > 0 and metrics.drafts_accepted == metrics.drafts_offered:
+        labels.add("full-acceptance")
+    if metrics.replacement_anchors:
+        labels.add("replacement-anchor")
+    if metrics.discarded_tails:
+        labels.add("discarded-tail")
+    return labels
+
+
+def _infer_branches(
+    results: list[RoundResult],
+    native: ScenarioFakeNative,
+    recorder: MetadataRecorder,
+    wrapper: satyrn_agent.SatyrnEngine,
+) -> set[str]:
+    labels = set(native.operations)
+    if native.operations:
+        labels.add("anchor")
+    if isinstance(wrapper.decode_step, PlainStep):
+        labels.add("plain-step")
+    elif isinstance(wrapper.decode_step, DFlashStep):
+        labels.add("dflash-step")
+    if recorder.calls:
+        labels.add("metadata")
+    labels.update(_metric_branches(native, wrapper))
+    labels.update(round.reason for round in results if round.reason is not None)
+    if any(isinstance(event, Interrupted) for round in results for event in round.events):
+        labels.add("interrupted")
+    if any(isinstance(round.error, WorkerPoisonedError) for round in results):
+        labels.add("poison")
+    if any(isinstance(round.error, DFlashError) for round in results):
+        labels.add("native-error")
+    if any(isinstance(round.error, DFlashUnavailable | ConfigurationError) for round in results):
+        labels.add("policy-error")
+    if any(isinstance(round.error, EngineError) for round in results):
+        labels.add("engine-error")
+    return labels
+
+
+def run_scenario(scenario: Scenario) -> ScenarioResult:
     try:
         config = _raw_config(scenario["raw_config"]) if "raw_config" in scenario else _config(scenario["config"])
     except Exception as error:  # noqa: BLE001 - Preserve setup failure as a scenario observation.
         return ScenarioResult(
-            [
-                RoundResult(
-                    events=[],
-                    transcript=(),
-                    native_position=0,
-                    rng=1,
-                    token_ids=(),
-                    token_positions=[],
-                    reason=f"{type(error).__name__}: {error}",
-                    error=error,
-                    sampling=SamplingPolicy(),
-                    metrics=DFlashMetrics(),
-                    metadata=[],
-                    native_calls=[],
-                )
-            ],
+            [failed_round(error, SamplingPolicy())],
             reached_branches={"config-error" if "raw_config" in scenario else "policy-error"},
         )
     native = ScenarioFakeNative(scenario["native"], scenario["backend"])
-    cancel_event = threading.Event()
-    native.cancel_event = cancel_event
+    native.cancel_event = threading.Event()
     recorder = MetadataRecorder()
-    results: list[RoundResult] = []
     with satyrn_agent.open(
         "scenario.gguf",
         config=config,
         native=native,
         seed=1,
         think=scenario.get("think", ThinkMode.HIGH),
-        cancel=cancel_event,
+        cancel=native.cancel_event,
     ) as wrapper:
         try:
             session = wrapper.session()
         except Exception as error:  # noqa: BLE001 - Preserve setup failure as a scenario observation.
-            results.append(
-                RoundResult(
-                    events=[],
-                    transcript=(),
-                    native_position=0,
-                    rng=1,
-                    token_ids=(),
-                    token_positions=[],
-                    reason=f"{type(error).__name__}: {error}",
-                    error=error,
-                    sampling=wrapper._engine.sampling_defaults,
-                    metrics=DFlashMetrics(),
-                    metadata=[],
-                    native_calls=[],
-                )
-            )
+            results = [failed_round(error, wrapper.sampling_defaults)]
         else:
-            hook_error_at: int | None = None
-            hook_calls = 0
-
-            def hook(view: LogitsView) -> None:
-                nonlocal hook_calls
-                hook_calls += 1
-                recorder(view)
-                if hook_error_at == hook_calls:
-                    raise RuntimeError("hook injected")
-
-            if not scenario.get("snapshot_parity", False) and any(
-                round["expect"]["metadata"]
-                or round.get("hook_error_at") is not None
-                or round.get("finish_at") is not None
-                or round.get("finish_reason") is not None
-                or round.get("cancel_after_accept")
-                for round in scenario["rounds"]
-            ):
-                session.add_logits_hook(hook)
             if scenario.get("snapshot_parity", False):
-                round = scenario["rounds"][0]
-                serial, speculative, _ = serial_then_speculative(
-                    wrapper,
-                    session,
-                    round["prompt"],
-                    max_tokens=round["max_tokens"],
-                    sampling=session.engine.sampling_defaults,
-                    recorder=recorder,
-                    scripted_native=native,
-                )
-                assert speculative.token_ids == serial.token_ids
-                assert speculative.reason == serial.reason
-                assert speculative.rng == serial.rng
-                assert normalized_events(speculative.events) == normalized_events(serial.events)
-                assert recorder.speculative == recorder.serial
-                results.append(_from_snapshot(serial, session, recorder.serial, DFlashMetrics()))
-                results.append(
-                    _from_snapshot(
-                        speculative,
-                        session,
-                        recorder.speculative,
-                        wrapper.dflash_metrics or DFlashMetrics(),
-                    )
-                )
+                results = _run_snapshot_parity(wrapper, session, scenario, native, recorder)
             else:
-                for round in scenario["rounds"]:
-                    native.cancel_after_samples = round.get("cancel_after_samples")
-                    hook_error_at = round.get("hook_error_at")
-                    if wrapper._step is not None and (
-                        round.get("finish_at") is not None
-                        or round.get("finish_reason") is not None
-                        or round.get("cancel_after_accept") is not None
-                    ):
-                        session.set_decode_step(
-                            ScenarioStep(
-                                wrapper._step,
-                                native,
-                                round.get("finish_at"),
-                                round.get("finish_reason"),
-                                round.get("cancel_after_accept"),
-                            )
-                        )
-                    metadata_start = len(recorder.calls)
-                    observed = _observe(session, wrapper, native, round, recorder)
-                    observed.metadata = observed.metadata[metadata_start:]
-                    results.append(observed)
-                    recorder.serial_count = len(recorder.calls)
-
-    result = ScenarioResult(results)
-    result.reached_branches.update(native.operations)
-    if native.operations:
-        result.reached_branches.add("anchor")
-    if isinstance(wrapper._step, PlainStep):
-        result.reached_branches.add("plain-step")
-    elif isinstance(wrapper._step, DFlashStep):
-        result.reached_branches.add("dflash-step")
-    if recorder.calls:
-        result.reached_branches.add("metadata")
-    metrics = wrapper.dflash_metrics or DFlashMetrics()
-    if any(count == 0 for count in native.draft_results):
-        result.reached_branches.add("zero-drafts")
-    if metrics.drafts_accepted < metrics.drafts_offered:
-        result.reached_branches.add("partial-acceptance")
-    if metrics.drafts_offered > 0 and metrics.drafts_accepted == metrics.drafts_offered:
-        result.reached_branches.add("full-acceptance")
-    if metrics.replacement_anchors:
-        result.reached_branches.add("replacement-anchor")
-    if metrics.discarded_tails:
-        result.reached_branches.add("discarded-tail")
-    result.reached_branches.update(round.reason for round in results if round.reason is not None)
-    if any(isinstance(event, Interrupted) for round in results for event in round.events):
-        result.reached_branches.add("interrupted")
-    if any(isinstance(round.error, WorkerPoisonedError) for round in results):
-        result.reached_branches.add("poison")
-    if any(isinstance(round.error, DFlashError) for round in results):
-        result.reached_branches.add("native-error")
-    if any(isinstance(round.error, DFlashUnavailable | ConfigurationError) for round in results):
-        result.reached_branches.add("policy-error")
-    if any(isinstance(round.error, EngineError) for round in results):
-        result.reached_branches.add("engine-error")
-    return result
+                results = _run_rounds(wrapper, session, scenario, native, recorder)
+        branches = _infer_branches(results, native, recorder, wrapper)
+    return ScenarioResult(results, branches)
 
 
 def _expected_metadata(expectation: Expectation) -> list[SampleMetadata]:

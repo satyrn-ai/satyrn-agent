@@ -16,13 +16,13 @@ class RoundResult:
     native_position: int
     rng: int
     token_ids: tuple[int, ...]
-    token_positions: list[int]
     reason: str | None
     error: Exception | None
     sampling: SamplingPolicy
     metrics: DFlashMetrics
-    metadata: list[SampleMetadata]
-    native_calls: list[dict[str, object]]
+    token_positions: list[int] = field(default_factory=list)
+    metadata: list[SampleMetadata] = field(default_factory=list)
+    native_calls: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -30,26 +30,16 @@ class ScenarioResult:
     rounds: list[RoundResult]
     reached_branches: set[str] = field(default_factory=set)
 
-    @property
-    def events(self) -> list[Event]:
-        return [event for result in self.rounds for event in result.events]
 
-    @property
-    def transcript(self) -> tuple[int, ...]:
-        return self.rounds[-1].transcript
-
-    @property
-    def native_position(self) -> int:
-        return self.rounds[-1].native_position
-
-    @property
-    def rng(self) -> int:
-        return self.rounds[-1].rng
-
-    @property
-    def metrics(self) -> DFlashMetrics:
-        return self.rounds[-1].metrics
-
-    @property
-    def metadata(self) -> list[SampleMetadata]:
-        return [item for result in self.rounds for item in result.metadata]
+def failed_round(error: Exception, sampling: SamplingPolicy) -> RoundResult:
+    return RoundResult(
+        events=[],
+        transcript=(),
+        native_position=0,
+        rng=1,
+        token_ids=(),
+        reason=f"{type(error).__name__}: {error}",
+        error=error,
+        sampling=sampling,
+        metrics=DFlashMetrics(),
+    )

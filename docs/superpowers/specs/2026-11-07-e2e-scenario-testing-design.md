@@ -84,14 +84,14 @@ Use handwritten frozen dataclasses for scenario definitions. This avoids JSON
 Schema and generation but duplicates schema maintenance as scenario shapes grow
 and does not provide declarative validation for JSON-authored scenarios.
 
-### B. JSON scenarios, generated TypedDict, handwritten validation — selected
+### B. JSON scenarios, generated TypedDict, schema validation — selected
 
 Use JSON Schema as the external scenario contract, generate TypedDicts with
-`datamodel-code-generator`, and parse `object` input with focused `TypeIs`
-validators and explicit conversion functions. Execute every scenario through one
-public-flow runner. The generator is a development-only dependency. No Pydantic
-BaseModel or TypeAdapter is used; runtime validation remains explicit Python
-logic.
+`datamodel-code-generator`, and validate `object` input with `jsonschema`.
+Keep only explicit conversion for JSON arrays represented as sets in the typed
+scenario. Execute every scenario through one public-flow runner. The generator
+and validator are development-only dependencies. No Pydantic BaseModel or
+TypeAdapter is used.
 
 ### C. JSON scenarios, generated Pydantic models
 
@@ -101,7 +101,7 @@ Rejected for this change. The project has decided not to use Pydantic models.
 
 Rejected because a growing scenario DSL would duplicate every type definition
 between JSON Schema and handwritten Python. Generating the TypedDict boundary
-keeps the schema authoritative while handwritten runtime checks enforce it.
+keeps the schema authoritative while `jsonschema` enforces it at runtime.
 
 ## 6. Scenario schema and generated TypedDict boundary
 
@@ -120,11 +120,11 @@ Create a versioned JSON Schema for model-free scenarios. The schema includes:
 - `expected_branches`, matched against the shared runner's observed branch set.
 
 Generate test-only TypedDicts with `closed=True`, `Required`, and `NotRequired`
-as appropriate. Scenario loading parses JSON into `object`, then uses focused
-`TypeIs` validators and explicit conversion functions before any field access.
-The validators check required fields, scalar types including boolean/integer
-ambiguity, unions, nested operation records, and cross-field invariants. No
-TypeAdapter, BaseModel, or generated validation layer is used.
+as appropriate. Scenario loading parses JSON into `object`, validates the whole
+document with `jsonschema`, then explicitly converts the three array fields
+represented as sets. The schema checks required fields, scalar types including
+boolean/integer ambiguity, unions, nested operation records, and cross-field
+invariants. No TypeAdapter, BaseModel, or generated validation layer is used.
 
 Pin `datamodel-code-generator==0.90.0` in the `dev` dependency group. Its
 transitive packages are allowed, but the implementation does not import or use
@@ -152,8 +152,8 @@ generation/check command to reject stale generated files.
 
 The checked-in JSON Schema provides the external document contract and prek
 schema validation. Generated TypedDicts provide the static Python contract.
-Focused valid and invalid fixtures prove that the schema and handwritten runtime
-checks accept and reject the same inputs.
+Focused valid and invalid fixtures prove rejection and typed conversion behavior
+without maintaining a second handwritten validator.
 
 ## 7. Shared E2E runner
 

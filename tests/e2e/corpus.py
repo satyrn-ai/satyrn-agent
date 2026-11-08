@@ -3,11 +3,14 @@
 import json
 import math
 from pathlib import Path
-from typing import NotRequired, TypeIs
+from typing import NotRequired, TypeIs, cast
 
 import pytest
 from ds4py._json import is_string_key_mapping
 from typing_extensions import TypedDict
+
+from satyrn_agent.config import ThinkBudgetConfig
+from satyrn_agent.errors import ConfigurationError
 
 CORPUS_PATH = Path(__file__).with_name("corpus.json")
 
@@ -43,13 +46,11 @@ def _string_list(value: object) -> TypeIs[list[str]]:
 def _think_budget(value: object) -> TypeIs[ThinkBudgetCase]:
     if not is_string_key_mapping(value):
         return False
-    max_tokens = value.get("max_tokens")
-    if type(max_tokens) is not int or max_tokens <= 0:
+    try:
+        ThinkBudgetConfig(**cast("ThinkBudgetCase", value))
+    except TypeError, ConfigurationError:
         return False
-    bias = value.get("bias")
-    if not isinstance(bias, int | float) or isinstance(bias, bool):
-        return False
-    return math.isfinite(bias) and bias > 0
+    return True
 
 
 def is_corpus_case(value: object) -> TypeIs[CorpusCase]:  # noqa: PLR0911 - Each field needs an independent runtime proof.

@@ -231,9 +231,9 @@ def serial_then_speculative(
 ) -> tuple[RoundObservation, RoundObservation, int]:
     import time
 
-    if not isinstance(wrapper._step, DFlashStep):
+    if not isinstance(wrapper.decode_step, DFlashStep):
         pytest.fail("the parity fixture requires a configured DFlashStep")
-    step = wrapper._step
+    step = wrapper.decode_step
     prompt_tokens = prepare_chat(session, prompt, tools=tools)
     if scripted_native is not None:
         session._worker.call(lambda engine, native: native.sync(session.transcript.tokens)).result()

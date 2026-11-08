@@ -138,9 +138,9 @@ devenv shell -- uv run --frozen datamodel-codegen
 
 The project uses `practical-py314-20261104`. Review `--recommend-options` when
 the schema changes substantially. Generated TypedDicts use no Pydantic models or
-TypeAdapter. Handwritten `TypeIs` validators and conversion logic perform
-runtime validation. prek rejects stale generated files and invalid scenario
-documents.
+TypeAdapter. `jsonschema` validates scenario documents, followed by explicit
+conversion of JSON arrays to sets. prek rejects stale generated files and
+invalid scenario documents.
 
 ### Production config schema
 
