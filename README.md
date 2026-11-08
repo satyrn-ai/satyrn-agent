@@ -107,3 +107,8 @@ it before any materialization. It must point at a dense qwen35 GGUF whose
 `general.architecture` metadata is exactly `qwen35`. Ubuntu CI continues to run
 only the no-model shell suite and CPU builds; this model-backed gate is run
 explicitly on a machine with the model available.
+
+## Research reference
+
+See the [Django customer-tracker reference guide](docs/superpowers/research/2026-11-07-customer-tracker-reference-guide.md)
+for the isolated domain-first example app, held-out tasks, and CPU-only checks.
