@@ -707,10 +707,10 @@ The Metal E2E suite covers:
    `PlainStep` and speculative `DFlashStep` token streams for greedy and seeded
    stochastic decoding, including parser/hook operation and RNG continuation.
 4. **Boundaries:** real generation covers full and partial draft acceptance,
-   mismatch replacement, zero drafts, max tokens, stop tokens, tool-call close,
-   parser error, stop sequence where supported, context reserve, and cancel.
-   Assertions compare transcript, native position, emitted events, tool calls,
-   and RNG continuation after every case.
+   mismatch replacement, max tokens, stop tokens, tool-call close, parser error,
+   stop sequence where supported, context reserve, and cancel. Assertions compare
+   transcript, native position, emitted events, tool calls, and RNG continuation
+   after every case.
 5. **Capabilities:** native Qwen defaults affect real samples unless explicitly
    overridden; a low think budget changes real decoding through the closing
    marker's logit without injecting the marker into the transcript.
@@ -718,6 +718,16 @@ The Metal E2E suite covers:
    a documented prompt corpus compares serial/speculative wall time and
    acceptance rate. Speed is reported with machine, backend, model, quant, and
    drafter; a noisy timing regression alone is not a correctness failure.
+
+Zero-draft returns are covered by model-free scenarios rather than a false live
+counterexample. Re-plan recorded 2026-11-09: the pinned native drafter clamps its
+return to zero only at the context cap, and the decode contract requires
+`STOP_AFTER` to publish the anchor with ordinary `session.eval()` and return before
+calling `draft()`. Consequently a native empty-draft return while real generation
+continues is unreachable for the pinned engine. The live corpus instead proves the
+ordinary reserve-anchor path and never equates zero draft requests with a native
+empty return. A future engine/corpus that can produce an empty return during
+continued real generation must add it here before this boundary is claimed live.
 
 Prompts and seeds must be checked into the E2E fixtures with the exact model
 and drafter identities. Check in a corpus-to-branch mapping showing which case

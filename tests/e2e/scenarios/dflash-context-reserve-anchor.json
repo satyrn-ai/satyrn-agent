@@ -5,15 +5,9 @@
   "ctx": 505,
   "native": {
     "script": [
-      10,
-      11
+      10
     ],
-    "calls": [
-      {
-        "op": "draft",
-        "tokens": []
-      }
-    ]
+    "calls": []
   },
   "config": {
     "dflash": "auto",
@@ -50,6 +44,12 @@
           "TextDelta",
           "ReserveReached",
           "Stopped"
+        ],
+        "native_calls": [
+          {
+            "op": "eval",
+            "token": 10
+          }
         ]
       }
     }

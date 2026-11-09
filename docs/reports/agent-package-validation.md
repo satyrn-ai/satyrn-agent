@@ -109,7 +109,10 @@ one accepted; emitted tokens equal committed blocks plus accepted drafts in the
 bounded cases. Metrics files under `tests/e2e/live/expected` are compared through
 one inline-snapshot assertion helper; updates require an explicit local review.
 The corpus pins the actual context and non-thinking settings needed to reach the
-parser, stop, and reserve branches.
+parser, stop, and reserve branches. The spec's 2026-11-09 re-plan records why native
+empty-draft returns stay model-free: the pinned real drafter only returns empty at
+the context cap, where `STOP_AFTER` requires ordinary anchor eval and immediate
+return. The live suite does not relabel zero draft requests as native empty drafts.
 
 ### Serial/speculative speed
 
@@ -155,8 +158,11 @@ native patch and ds4-py contracts. Changes made after that review include:
   checkpoint;
 - validate native sampling ranges as well as finite values;
 - make consecutive-round alignment use per-round assistant offsets;
-- require exact live terminal reasons and reached branches, including zero
-  drafts, parser error, context reserve, and cancellation;
+- require exact live terminal reasons and reached branches, including parser
+  error, context reserve, and cancellation; keep native empty-draft returns in
+  model-free scenarios because the pinned real engine only returns empty at the
+  context cap, where the decode contract requires an ordinary anchor eval and
+  immediate return rather than a draft request;
 - compare full normalized event sequences and canonical-plus-staged metadata;
 - open the exact ABI-built library for consecutive public rounds; and
 - reject sessions on a closed wrapper and preserve the `on` policy's missing
