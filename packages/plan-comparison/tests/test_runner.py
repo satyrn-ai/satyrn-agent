@@ -169,6 +169,8 @@ class ScriptedWorker:
         self.compiled_responses = ["return value", "return value + 1"]
         self.prose_feedback: list[tuple[str, ...]] = []
         self.prose_write_paths: list[tuple[str, ...]] = []
+        self.prose_read_paths: list[tuple[str, ...]] = []
+        self.compiled_read_paths: list[tuple[str, ...]] = []
         self.prose_test_present: list[bool] = []
         self.compiled_feedback: list[tuple[str, ...]] = []
         self.boundary_restores = 0
@@ -239,6 +241,7 @@ class ScriptedWorker:
     ) -> WorkerReply:
         self.prose_feedback.append(visible_feedback)
         self.prose_write_paths.append(allowed_write_paths)
+        self.prose_read_paths.append(allowed_read_paths)
         self.prose_test_present.append((workspace / "tests" / "test_ops.py").is_file())
         body = self.prose_responses.pop(0)
         self._meter(budget)
@@ -266,6 +269,7 @@ class ScriptedWorker:
         budget: BudgetTracker,
     ) -> WorkerReply:
         self.compiled_feedback.append(visible_feedback)
+        self.compiled_read_paths.append(allowed_read_paths)
         body = self.compiled_responses.pop(0)
         self._meter(budget)
         return WorkerReply(
@@ -415,6 +419,17 @@ def test_prose_arm_receives_the_visible_test_but_cannot_write_it(
     assert result.arms[0].status == "passed"
     assert worker.prose_test_present == [True, True]
     assert worker.prose_write_paths == [("ops.py",), ("ops.py",)]
+
+
+def test_both_arms_may_read_the_visible_test(tmp_path: Path) -> None:
+    inputs, runner, worker, task_port = _runner(tmp_path)
+
+    asyncio.run(
+        runner.run_pair(inputs, worker, task_port, seed=8, arm_order=("P", "C"))
+    )
+
+    assert all("tests/test_ops.py" in paths for paths in worker.prose_read_paths)
+    assert all("tests/test_ops.py" in paths for paths in worker.compiled_read_paths)
 
 
 def test_exhausted_compiled_arm_is_graded_on_its_last_attempt(tmp_path: Path) -> None:

@@ -1154,6 +1154,7 @@ class ExperimentRunner:
                 (declared_write_paths - test_paths) & set(inputs.worker_writable_paths)
             )
         )
+        readable_paths = tuple(sorted({*inputs.allowed_read_paths, *test_paths}))
         try:
             for _, packet in packets.values():
                 install_tests(packet, workspace)
@@ -1182,7 +1183,7 @@ class ExperimentRunner:
                     task_id=inputs.task_id,
                     plan=plan,
                     workspace=workspace,
-                    allowed_read_paths=inputs.allowed_read_paths,
+                    allowed_read_paths=readable_paths,
                     allowed_write_paths=allowed_write_paths,
                     visible_gates=self._visible_gates(inputs.task_id, packets),
                     visible_feedback=feedback,
@@ -1320,6 +1321,11 @@ class ExperimentRunner:
         )
         for execution in manifest.packets:
             packet_document, packet = packets[execution.packet_id]
+            readable_paths = tuple(
+                sorted(
+                    {*inputs.allowed_read_paths, *(test.path for test in packet.tests)}
+                )
+            )
             packet_started = time.monotonic()
             preparation_started = time.monotonic()
             packet_start = snapshot_workspace(workspace)
@@ -1469,7 +1475,7 @@ class ExperimentRunner:
                                 task_id=inputs.task_id,
                                 plan=plan,
                                 workspace=workspace,
-                                allowed_read_paths=inputs.allowed_read_paths,
+                                allowed_read_paths=readable_paths,
                                 slot=slot,
                                 signature_prefill=produced.declaration,
                                 visible_feedback=feedback,
@@ -1481,7 +1487,7 @@ class ExperimentRunner:
                                 task_id=inputs.task_id,
                                 plan=plan,
                                 workspace=workspace,
-                                allowed_read_paths=inputs.allowed_read_paths,
+                                allowed_read_paths=readable_paths,
                                 slot=slot,
                                 instruction=packet.task,
                                 visible_feedback=feedback,

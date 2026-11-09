@@ -19,6 +19,10 @@ from pydantic_ai.models import Model, ModelRequestParameters, StreamedResponse
 from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.settings import ModelSettings
 
+from plan_comparison.adapters.think_budget import (
+    THINKING_BUDGET_CLOSE,
+    ThinkingBudgetHook,
+)
 from plan_comparison.contracts import (
     BoundaryEvidence,
     BudgetTracker,
@@ -181,33 +185,20 @@ def build_restricted_agents(model: DS4Model, gate_policy: GatePolicy) -> Ds4Agen
     def install_read_tool(agent: ToolAgentPort) -> None:
         @agent.tool(sequential=True)
         async def read_file(ctx: RunContext[_ToolContext], path: str) -> str:
-            target = _workspace_file(ctx.deps.workspace, path)
-            if path not in ctx.deps.readable_paths:
-                raise ValueError(f"Read path is not allowlisted: {path}")
-            if not target.is_file():
-                raise FileNotFoundError(path)
-            content = target.read_bytes()
-            if len(content) > ctx.deps.max_file_read_bytes:
-                raise ValueError(f"Read exceeds configured limit: {path}")
-            return content.decode("utf-8")
+            return _read_file_result(ctx.deps, path)
 
     def install_write_tools(agent: ToolAgentPort) -> None:
         @agent.tool(sequential=True)
         async def write_file(
             ctx: RunContext[_ToolContext], path: str, content: str
         ) -> str:
-            target = _workspace_file(ctx.deps.workspace, path)
-            if path not in ctx.deps.writable_paths:
-                raise ValueError(f"Write path is not allowlisted: {path}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
-            return f"Wrote {path}."
+            return _write_file_result(ctx.deps, path, content)
 
         @agent.tool(sequential=True)
         async def run_visible_gate(ctx: RunContext[_ToolContext], gate_id: str) -> str:
             spec = ctx.deps.gates.get(gate_id)
             if spec is None:
-                raise ValueError(f"Visible gate is not allowlisted: {gate_id}")
+                return f"error: visible gate is not allowlisted: {gate_id}"
             ctx.deps.budget.ensure_capacity()
             result = run_gate(
                 ctx.deps.workspace,
@@ -232,6 +223,35 @@ def build_restricted_agents(model: DS4Model, gate_policy: GatePolicy) -> Ds4Agen
         prose=prose_agent,
         compiled=compiled_agent,
     )
+
+
+def _read_file_result(context: _ToolContext, path: str) -> str:
+    """Return the file, or a refusal the model can act on."""
+    try:
+        target = _workspace_file(context.workspace, path)
+        if path not in context.readable_paths:
+            raise ValueError(f"Read path is not allowlisted: {path}")
+        if not target.is_file():
+            raise FileNotFoundError(path)
+        content = target.read_bytes()
+        if len(content) > context.max_file_read_bytes:
+            raise ValueError(f"Read exceeds configured limit: {path}")
+        return content.decode("utf-8")
+    except (OSError, ValueError) as error:
+        return f"error: {type(error).__name__}: {error}"
+
+
+def _write_file_result(context: _ToolContext, path: str, content: str) -> str:
+    """Write the file, or return a refusal without touching the workspace."""
+    try:
+        target = _workspace_file(context.workspace, path)
+        if path not in context.writable_paths:
+            raise ValueError(f"Write path is not allowlisted: {path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    except (OSError, ValueError) as error:
+        return f"error: {type(error).__name__}: {error}"
+    return f"Wrote {path}."
 
 
 def _workspace_file(workspace: Path, relative_path: str) -> Path:
@@ -266,11 +286,31 @@ class Ds4WorkerAdapter(WorkerPort):
         runtime_revision: str,
         tokenizer_revision: str,
         gate_policy: GatePolicy,
+        thinking_budget: int = 4096,
         max_file_read_bytes: int = 50_000,
         serial_tools: bool = True,
     ) -> None:
+        if (
+            not isinstance(thinking_budget, int)
+            or isinstance(thinking_budget, bool)
+            or thinking_budget < 0
+        ):
+            raise ValueError("thinking budget must be a non-negative integer")
+
         self.model = model
         self.session = model.session
+        self.thinking_budget = thinking_budget
+        if thinking_budget:
+            engine = self.session.engine
+            close_tokens = engine.tokenize(THINKING_BUDGET_CLOSE, rendered=True)
+            self._thinking_budget_hook: ThinkingBudgetHook | None = ThinkingBudgetHook(
+                budget_tokens=thinking_budget,
+                closing_tokens=close_tokens,
+                vocab_size=engine.info.vocab_size,
+            )
+            self.session.add_logits_hook(self._thinking_budget_hook)
+        else:
+            self._thinking_budget_hook = None
         self.binder: MessageBinder = model.binder
         self.agents = agents
         self.model_id = model_id
@@ -331,7 +371,8 @@ class Ds4WorkerAdapter(WorkerPort):
                 )
                 prompt = (
                     f"Task id: {task_id}\nShared plan:\n{plan}\n"
-                    "Read the shared task context and relevant source files, "
+                    + _paths_prompt(allowed_read_paths, ())
+                    + "Read the shared task context and relevant source files, "
                     "then summarize established interfaces without proposing edits."
                 )
                 await self._run_agent(self.agents.context, prompt, scope, budget)
@@ -436,7 +477,7 @@ class Ds4WorkerAdapter(WorkerPort):
             )
             prompt = _worker_prompt(
                 task_id, plan, visible_feedback, visible_gates=visible_gates
-            )
+            ) + _paths_prompt(allowed_read_paths, allowed_write_paths)
             output, evidence = await self._run_agent(
                 self.agents.prose, prompt, scope, budget
             )
@@ -536,7 +577,7 @@ class Ds4WorkerAdapter(WorkerPort):
     ) -> tuple[str, BoundaryEvidence | None]:
         events: list[object] = []
         unsubscribe = self.session.on_event(
-            events.append,
+            lambda envelope: events.append(envelope.payload.get("event")),
             kinds=("Synced", "Prefill", "Token"),
         )
         try:
@@ -653,6 +694,13 @@ def _worker_prompt(
     )
 
 
+def _paths_prompt(readable: tuple[str, ...], writable: tuple[str, ...]) -> str:
+    text = "Readable files:\n" + "\n".join(sorted(readable)) + "\n"
+    if writable:
+        text += "Writable files:\n" + "\n".join(sorted(writable)) + "\n"
+    return text
+
+
 def _feedback_prompt(feedback: tuple[str, ...]) -> str:
     if not feedback:
         return ""
@@ -685,7 +733,9 @@ def _segment_provenance(segment: TranscriptSegmentPort) -> SegmentProvenance:
 
 
 def _message_bytes(messages: tuple[ModelMessage, ...]) -> bytes:
-    document = ModelMessagesTypeAdapter.dump_python(list(messages), warnings=False)
+    document = ModelMessagesTypeAdapter.dump_python(
+        list(messages), mode="json", warnings=False
+    )
     return json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 

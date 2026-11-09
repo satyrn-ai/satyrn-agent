@@ -38,6 +38,13 @@ authorization reference. The optional ds4 adapter currently reports paired
 execution as blocked because upstream cancellation rewind semantics remain
 unverified; a fake-worker pass is not native Qwen or RNG evidence.
 
+The DS4 worker adapter enforces a hard budget of 4,096 thinking tokens per
+assistant reply by default. When the budget is reached, it forces the Qwen
+model-card closing sentence and `</think>` one token at a time; pass
+`thinking_budget=0` to disable the hook, or set a different non-negative token
+limit. This does not bypass request, context, or output-token caps, which can
+still interrupt generation before the close sequence is complete.
+
 Both arms run against the same visible packet tests: the prose arm has them
 installed before its first attempt and may not write them. Arms that exhaust
 their retries or budget are graded on the files their last attempt left behind.
