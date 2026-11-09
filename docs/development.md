@@ -129,14 +129,17 @@ the behavior the scenario must reach. The shared runner executes public
 bindings are scripted. Do not add scenario-specific expected values to the
 runner.
 
-`tests/e2e/schema/scenario.schema.json` is the external contract. After editing
-it, regenerate the checked-in TypedDicts:
+`tests/e2e/schema/scenario.schema.json` is the external contract. We use
+[datamodel-code-generator](https://github.com/koxudaxi/datamodel-code-generator)
+to generate TypedDict types from JSON Schema documents. After editing the schema,
+regenerate the checked-in TypedDicts:
 
 ```bash
 devenv shell -- uv run --frozen datamodel-codegen
 ```
 
-The project uses `practical-py314-20261104`. Review `--recommend-options` when
+The project uses the `practical-py314-20261104` datamodel-code-generator preset.
+Review `--recommend-options` when
 the schema changes substantially. Generated TypedDicts use no Pydantic models or
 TypeAdapter. `jsonschema` validates scenario documents, followed by explicit
 conversion of JSON arrays to sets. prek rejects stale generated files and
