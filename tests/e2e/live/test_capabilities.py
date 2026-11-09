@@ -56,4 +56,9 @@ def test_soft_think_budget_changes_real_decode_without_injection(live_settings: 
 
     assert budgeted.token_ids != baseline.token_ids
     assert len(recorder.calls) >= len(budgeted.token_ids)
-    require_branches(case, {"think-budget-every-row", "soft-bias-without-injection"})
+    reached = set()
+    if len(recorder.calls) >= len(budgeted.token_ids):
+        reached.add("think-budget-every-row")
+    if budgeted.token_ids != baseline.token_ids:
+        reached.add("soft-bias-without-injection")
+    require_branches(case, reached)

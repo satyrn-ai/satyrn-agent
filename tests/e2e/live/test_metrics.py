@@ -51,6 +51,7 @@ def test_metrics_reconcile_with_committed_stream(live_settings: LiveSettings) ->
     assert 0 <= metrics.drafts_accepted <= metrics.drafts_offered
     assert metrics.discarded_tails == metrics.drafts_offered - metrics.drafts_accepted
     assert metrics.acceptance_rate == pytest.approx(metrics.drafts_accepted / metrics.drafts_offered)
+    assert len(speculative.token_ids) == metrics.committed_blocks + metrics.drafts_accepted
     reached = {"anchor", "native-commit-publication"}
     if metrics.drafts_accepted > 0:
         reached.add("matching-draft")
@@ -74,12 +75,33 @@ def test_metrics_reconcile_with_committed_stream(live_settings: LiveSettings) ->
         assert_alignment(session, full)
 
     assert full_metrics is not None
+    assert len(full.token_ids) == full_metrics.committed_blocks + full_metrics.drafts_accepted
     full_reached = set()
     if full_metrics.committed_blocks > 0:
         full_reached.add("native-commit-publication")
     if full_metrics.drafts_offered > 0 and full_metrics.drafts_accepted == full_metrics.drafts_offered:
         full_reached.add("full-acceptance")
     require_branches(full_case, full_reached)
+
+    partial_case = cases["partial-acceptance"]
+    partial_config = _config(live_settings, partial_case)
+    with configured_session(live_settings, partial_config, seed=partial_case["seed"]) as (wrapper, session):
+        _, partial, _ = serial_then_speculative(
+            wrapper,
+            session,
+            partial_case["prompt"],
+            max_tokens=partial_case["max_tokens"],
+            sampling=_policy(partial_case),
+        )
+        partial_metrics = wrapper.dflash_metrics
+        assert_alignment(session, partial)
+
+    assert partial_metrics is not None
+    assert len(partial.token_ids) == partial_metrics.committed_blocks + partial_metrics.drafts_accepted
+    assert partial_metrics.committed_blocks == 1
+    assert partial_metrics.drafts_offered == 2
+    assert partial_metrics.drafts_accepted == 1
+    require_branches(partial_case, {"native-commit-publication", "partial-acceptance"})
 
 
 def test_external_serial_speculative_timing_metadata(live_settings: LiveSettings, tmp_path: Path) -> None:
@@ -118,6 +140,7 @@ def test_external_serial_speculative_timing_metadata(live_settings: LiveSettings
     assert serial.wall_seconds > 0
     assert speculative.wall_seconds > 0
     assert metrics is not None
+    assert len(speculative.token_ids) == metrics.committed_blocks + metrics.drafts_accepted
     reached = {"external-timing"}
     if metrics.drafts_accepted < metrics.drafts_offered:
         reached.add("partial-acceptance")

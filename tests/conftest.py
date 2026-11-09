@@ -212,7 +212,6 @@ def observe_round(
 def assert_alignment(
     session: Session,
     observation: RoundObservation,
-    scripted_native: ScenarioFakeNative | None = None,
 ) -> None:
     generated = observation.token_ids
     assert observation.assistant_tokens[observation.assistant_start :] == generated
@@ -270,13 +269,13 @@ def serial_then_speculative(
     started = time.perf_counter()
     try:
         serial = observe_round(session, max_tokens=max_tokens, sampling=sampling, started=started)
-        assert_alignment(session, serial, scripted_native)
+        assert_alignment(session, serial)
         if recorder is not None:
             recorder.serial_count = len(recorder.calls)
         restore_snapshot(session, prompt_tokens, snapshot, rng, step, scripted_native)
         started = time.perf_counter()
         speculative = observe_round(session, max_tokens=max_tokens, sampling=sampling, started=started)
-        assert_alignment(session, speculative, scripted_native)
+        assert_alignment(session, speculative)
     finally:
         snapshot.close()
     return serial, speculative, prompt_tokens

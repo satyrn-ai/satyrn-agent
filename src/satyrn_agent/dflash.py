@@ -109,7 +109,8 @@ class DFlashStep:
                 return
 
             try:
-                block.drafts = tuple(self._native.draft(session.raw, block.anchor, self._maximum))
+                drafts = tuple(self._native.draft(session.raw, block.anchor, self._maximum))
+                block.drafts = () if ctx.reason == "context_reserve" else drafts
                 self._native.verify(session.raw, block.anchor, block.drafts)
             except BaseException as error:  # noqa: BLE001 - Native graph failure can invalidate the checkpoint.
                 ctx.discard()

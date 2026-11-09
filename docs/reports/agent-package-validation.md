@@ -36,20 +36,20 @@ All commands ran from the repository root through devenv.
   including Ruff, ty, ShellCheck, configuration, and workflow checks.
 - `uv run --frozen pytest tests/e2e/model_free --cov=satyrn_agent
   --cov-branch --cov-report=term-missing --cov-fail-under=100 -q` —
-  **116 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
-  including 59 JSON scenarios and production config-boundary tests through the
+  **117 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
+  including 60 JSON scenarios and production config-boundary tests through the
   shared public-flow runner.
 - `uv run --frozen --no-sync pytest tests/abnormal -q` — **27 passed** in the
   separate exception suite.
 - `uv run --frozen pytest tests/e2e/live -q -rA` — **17 passed, 0 skipped** in
-  109.72 seconds with the real inputs and GPU lock below.
+  109.48 seconds with the real inputs and GPU lock below.
 - `uv build --wheel` — passed; the wheel contains the native adapter, DFlash
   step, engine factory, and `ds4py.bindings` entry-point metadata.
 - `actionlint .github/workflows/ci.yml .github/workflows/ds4-tools.yml` — passed.
 - `bash tests/ds4_tools_test.sh` — **49 passed, 0 failed**.
 - `git diff --check` — passed.
 
-The 116 model-free tests combine public-flow scenarios with direct parser,
+The 117 model-free tests combine public-flow scenarios with direct parser,
 schema, and generation checks. Public scenarios use `satyrn_agent.open()` and
 real ds4-py worker/session/decode code; only the external native library is
 scripted. The 100% result does not convert those doubles into normal-path
@@ -104,9 +104,10 @@ RNG continuation), tool-close and parser-error behavior, stop token/sequence,
 max-token, native empty-draft/bonus-row, context-reserve, and cancellation cases.
 Cancellation is triggered by the real cancellation event during the first verify-row
 sample. Full, partial, and mismatch-replacement acceptance are asserted from real
-metrics. The corpus pins the actual context and non-thinking settings needed to
-reach the parser, stop, and reserve branches. Metrics reconcile with the committed
-stream.
+metrics. The dedicated partial case commits one block with two drafts offered and
+one accepted; emitted tokens equal committed blocks plus accepted drafts in the
+bounded cases. The corpus pins the actual context and non-thinking settings needed
+to reach the parser, stop, and reserve branches.
 
 ### Serial/speculative speed
 
@@ -123,8 +124,8 @@ timing JSON into the retained log:
   "backend": "metal",
   "model": "/Volumes/WD_Black_SN8100/models/Qwen3.8-27B-Q4_K_M.gguf",
   "drafter": "/Volumes/WD_Black_SN8100/models/dflash-Qwen3.8-27B-Q4_0.gguf",
-  "serial_seconds": 3.11832766700536,
-  "speculative_seconds": 1.0575361247174442,
+  "serial_seconds": 3.140690665692091,
+  "speculative_seconds": 1.034128624945879,
   "serial_tokens": 48,
   "speculative_tokens": 48,
   "drafts_offered": 84,
@@ -136,7 +137,7 @@ timing JSON into the retained log:
 
 | Machine | Backend | Target | Drafter | Serial | Speculative | Speedup | Acceptance |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Apple M4 Max, 36 GiB, macOS 15.7.1 | Metal | `Qwen3.8-27B-Q4_K_M.gguf`, Q4_K_M | `dflash-Qwen3.8-27B-Q4_0.gguf`, Q4_0 | 3.118328 s | 1.057536 s | 2.949x | 42.857% |
+| Apple M4 Max, 36 GiB, macOS 15.7.1 | Metal | `Qwen3.8-27B-Q4_K_M.gguf`, Q4_K_M | `dflash-Qwen3.8-27B-Q4_0.gguf`, Q4_0 | 3.140691 s | 1.034129 s | 3.037x | 42.857% |
 
 `tests/e2e/README.md` and `tests/e2e/corpus.json` retain the identities, prompts,
 seeds, expected terminal reasons, and branch mapping. The separate model-free
