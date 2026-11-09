@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "id": "dflash-cancel-before-first-anchor",
+  "backend": "metal",
+  "native": {
+    "script": [],
+    "calls": []
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 2,
+      "cancel_after_samples": -3,
+      "expect": {
+        "reason": null,
+        "token_ids": [],
+        "native_position": 0,
+        "rng": 1,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Interrupted"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "dflash-step",
+    "interrupted"
+  ]
+}

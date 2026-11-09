@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "id": "native-verify-status",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      },
+      {
+        "op": "verify",
+        "status": 1
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "DFlashError: ds4_session_verify: native operation failed",
+        "token_ids": [],
+        "native_position": 1,
+        "rng": 1,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "dflash-step",
+    "draft",
+    "native-error",
+    "verify"
+  ]
+}

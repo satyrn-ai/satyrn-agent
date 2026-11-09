@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ConfigDocument",
+  "description": "External JSON configuration for the Satyrn agent.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "dflash": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "on",
+        "off"
+      ],
+      "default": "auto"
+    },
+    "drafter_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "draft_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "sampling": {
+      "$ref": "#/$defs/SamplingOverridesDocument"
+    },
+    "think_budget": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ThinkBudgetDocument"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "dflash"
+        ],
+        "properties": {
+          "dflash": {
+            "const": "on"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "drafter_path"
+        ],
+        "properties": {
+          "drafter_path": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "SamplingOverridesDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0
+        },
+        "top_k": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "min_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "ThinkBudgetDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_tokens",
+        "bias"
+      ],
+      "properties": {
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bias": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  }
+}

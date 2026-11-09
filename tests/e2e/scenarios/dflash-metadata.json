@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "id": "dflash-metadata",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10,
+      11,
+      12,
+      13
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11,
+          12
+        ]
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 4,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          10,
+          11,
+          12,
+          13
+        ],
+        "native_position": 5,
+        "rng": 16321491304643971414,
+        "metrics": {
+          "committed_blocks": 2,
+          "drafts_offered": 2,
+          "drafts_accepted": 2,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [
+          {
+            "position": 1,
+            "think_tokens": 0,
+            "sampled_tokens": []
+          },
+          {
+            "position": 2,
+            "think_tokens": 0,
+            "sampled_tokens": [
+              10
+            ]
+          },
+          {
+            "position": 3,
+            "think_tokens": 0,
+            "sampled_tokens": [
+              10,
+              11
+            ]
+          },
+          {
+            "position": 4,
+            "think_tokens": 0,
+            "sampled_tokens": [
+              10,
+              11,
+              12
+            ]
+          }
+        ],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Token",
+          "Token",
+          "Token",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "draft",
+    "eval",
+    "full-acceptance",
+    "max_tokens",
+    "metadata",
+    "row",
+    "select",
+    "verify"
+  ]
+}

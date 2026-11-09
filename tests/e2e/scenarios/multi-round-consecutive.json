@@ -1,0 +1,245 @@
+{
+  "version": 1,
+  "id": "multi-round-consecutive",
+  "backend": "metal",
+  "native": {
+    "script": [
+      10,
+      11,
+      12
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "first",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          10,
+          11
+        ],
+        "native_position": 3,
+        "rng": 6791897765849424158,
+        "metrics": {
+          "committed_blocks": 1,
+          "drafts_offered": 1,
+          "drafts_accepted": 1,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Token",
+          "Stopped"
+        ],
+        "transcript": [
+          1,
+          10,
+          11
+        ],
+        "native_calls": [
+          {
+            "op": "draft",
+            "anchor": 10,
+            "maximum": 7
+          },
+          {
+            "op": "verify",
+            "anchor": 10,
+            "drafts": [
+              11
+            ]
+          },
+          {
+            "op": "select",
+            "row": 0
+          },
+          {
+            "op": "commit",
+            "rows": 2
+          }
+        ],
+        "token_positions": [
+          3,
+          3
+        ],
+        "events": [
+          {
+            "type": "Prefill",
+            "payload": {
+              "done": 0,
+              "total": 1,
+              "cached_prefix": 0,
+              "tps": 0.0
+            }
+          },
+          {
+            "type": "Synced",
+            "payload": {
+              "pos": 1,
+              "plan": {
+                "kind": "rebuild",
+                "reused": 0,
+                "to_prefill": 1,
+                "fits": true,
+                "checkpoint": null
+              },
+              "prefilled": 1
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 10,
+              "text_bytes": [
+                9
+              ]
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 11,
+              "text_bytes": [
+                10
+              ]
+            }
+          },
+          {
+            "type": "Stopped",
+            "payload": {
+              "reason": "max_tokens"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "prompt": "second",
+      "mode": "raw",
+      "max_tokens": 3,
+      "expect": {
+        "reason": "stop_token",
+        "token_ids": [
+          12
+        ],
+        "native_position": 5,
+        "rng": 16321491304643971414,
+        "metrics": {
+          "committed_blocks": 2,
+          "drafts_offered": 1,
+          "drafts_accepted": 1,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Stopped"
+        ],
+        "transcript": [
+          1,
+          10,
+          11,
+          1,
+          12
+        ],
+        "native_calls": [
+          {
+            "op": "draft",
+            "anchor": 12,
+            "maximum": 7
+          },
+          {
+            "op": "verify",
+            "anchor": 12,
+            "drafts": []
+          },
+          {
+            "op": "select",
+            "row": 0
+          },
+          {
+            "op": "commit",
+            "rows": 1
+          }
+        ],
+        "token_positions": [
+          5
+        ],
+        "events": [
+          {
+            "type": "Prefill",
+            "payload": {
+              "done": 0,
+              "total": 1,
+              "cached_prefix": 3,
+              "tps": 0.0
+            }
+          },
+          {
+            "type": "Synced",
+            "payload": {
+              "pos": 4,
+              "plan": {
+                "kind": "extend",
+                "reused": 3,
+                "to_prefill": 1,
+                "fits": true,
+                "checkpoint": null
+              },
+              "prefilled": 1
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 12,
+              "text_bytes": [
+                11
+              ]
+            }
+          },
+          {
+            "type": "Stopped",
+            "payload": {
+              "reason": "stop_token"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "draft",
+    "full-acceptance",
+    "max_tokens",
+    "row",
+    "select",
+    "stop_token",
+    "verify",
+    "zero-drafts"
+  ]
+}

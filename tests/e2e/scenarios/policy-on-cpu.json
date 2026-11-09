@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "id": "policy-on-cpu",
+  "backend": "cpu",
+  "native": {
+    "script": [
+      10
+    ],
+    "calls": []
+  },
+  "config": {
+    "dflash": "on",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 1,
+      "expect": {
+        "reason": "DFlashUnavailable: DFlash requires Metal, not cpu",
+        "token_ids": [],
+        "native_position": 0,
+        "rng": 1,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": []
+      }
+    }
+  ],
+  "expected_branches": [
+    "policy-error"
+  ]
+}

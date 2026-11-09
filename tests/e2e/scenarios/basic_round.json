@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "id": "basic-round",
+  "description": "One full-acceptance DFlash block through the public session.",
+  "backend": "metal",
+  "native": {
+    "script": [
+      11,
+      12
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          12
+        ]
+      }
+    ],
+    "sampling_defaults": {
+      "temperature": 0.6,
+      "top_k": 20,
+      "top_p": 0.95,
+      "min_p": 0.0
+    }
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "Say hello.",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "max_tokens",
+        "token_ids": [
+          11,
+          12
+        ],
+        "native_position": 3,
+        "rng": 6791897765849424158,
+        "metrics": {
+          "committed_blocks": 1,
+          "drafts_offered": 1,
+          "drafts_accepted": 1,
+          "replacement_anchors": 0,
+          "discarded_tails": 0,
+          "acceptance_rate": 1.0
+        },
+        "metadata": [
+          {
+            "position": 1,
+            "think_tokens": 0,
+            "sampled_tokens": []
+          },
+          {
+            "position": 2,
+            "think_tokens": 0,
+            "sampled_tokens": [
+              11
+            ]
+          }
+        ],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "Token",
+          "Token",
+          "Stopped"
+        ],
+        "transcript": [
+          1,
+          11,
+          12
+        ],
+        "native_calls": [
+          {
+            "op": "draft",
+            "anchor": 11,
+            "maximum": 7
+          },
+          {
+            "op": "verify",
+            "anchor": 11,
+            "drafts": [
+              12
+            ]
+          },
+          {
+            "op": "select",
+            "row": 0
+          },
+          {
+            "op": "commit",
+            "rows": 2
+          }
+        ],
+        "token_positions": [
+          3,
+          3
+        ],
+        "events": [
+          {
+            "type": "Prefill",
+            "payload": {
+              "done": 0,
+              "total": 1,
+              "cached_prefix": 0,
+              "tps": 0.0
+            }
+          },
+          {
+            "type": "Synced",
+            "payload": {
+              "pos": 1,
+              "plan": {
+                "kind": "rebuild",
+                "reused": 0,
+                "to_prefill": 1,
+                "fits": true,
+                "checkpoint": null
+              },
+              "prefilled": 1
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 11,
+              "text_bytes": [
+                10
+              ]
+            }
+          },
+          {
+            "type": "Token",
+            "payload": {
+              "id": 12,
+              "text_bytes": [
+                11
+              ]
+            }
+          },
+          {
+            "type": "Stopped",
+            "payload": {
+              "reason": "max_tokens"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "commit",
+    "dflash-step",
+    "draft",
+    "full-acceptance",
+    "max_tokens",
+    "metadata",
+    "row",
+    "select",
+    "verify"
+  ]
+}

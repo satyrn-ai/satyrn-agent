@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "id": "failure-negative-anchor",
+  "backend": "metal",
+  "native": {
+    "script": [
+      -1
+    ],
+    "calls": []
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "raw",
+      "max_tokens": 2,
+      "expect": {
+        "reason": "EngineError: cannot sample DFlash anchor: the session state is not valid; sync first",
+        "token_ids": [],
+        "native_position": 1,
+        "rng": 10451216379200822465,
+        "metrics": {
+          "committed_blocks": 0,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "dflash-step",
+    "engine-error"
+  ]
+}
