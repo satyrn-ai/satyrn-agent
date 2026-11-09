@@ -5,6 +5,7 @@ import pytest
 from ds4py import ThinkMode
 from ds4py.engine.events import ReserveReached, ToolCalls
 from ds4py.engine.logits import LogitsView
+from ds4py.engine.prompt import PromptBuilder
 from ds4py.engine.tool_prompt import ToolDefinition
 
 from tests.conftest import (
@@ -112,7 +113,12 @@ def test_context_reserve_commits_only_the_anchor(live_settings: LiveSettings) ->
         seed=case["seed"],
         ctx=case.get("ctx", 100_000),
     ) as (wrapper, session):
-        prepare_chat(session, case["prompt"])
+        prompt_tokens = prepare_chat(session, case["prompt"])
+        assistant_prefix = PromptBuilder(session.engine).assistant_prefix(session.transcript.tokens)
+        assert prompt_tokens + len(assistant_prefix) == case["ctx"] - 1, (
+            "ctx must leave one native row after the assistant prefix; "
+            f"got {prompt_tokens} prompt tokens and {len(assistant_prefix)} prefix tokens"
+        )
         observation = observe_round(
             session,
             max_tokens=case["max_tokens"],
@@ -158,7 +164,9 @@ def test_context_reserve_is_required(live_settings: LiveSettings) -> None:
     prompt = f"{case['prompt']} " + "token transaction " * 1500
 
     with configured_session(live_settings, config, seed=case["seed"], ctx=case.get("ctx", 4096)) as (_, session):
-        prepare_chat(session, prompt)
+        prompt_tokens = prepare_chat(session, prompt)
+        # Greedy generation reaches EOS at native position 3435; 3400 forces the reserve first.
+        assert prompt_tokens < case["ctx"], "the context-reserve prompt must fit before generation"
         observation = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
         assert_alignment(session, observation)
 

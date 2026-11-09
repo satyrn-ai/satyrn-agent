@@ -33,6 +33,7 @@ def test_native_qwen_sampling_defaults(live_settings: LiveSettings) -> None:
 
 def test_soft_think_budget_changes_real_decode_without_injection(live_settings: LiveSettings) -> None:
     case = corpus_cases()["think-budget"]
+    # A bias of 32 exceeds the measured 21-point marker-logit gap without forcing a stop.
     baseline_config = corpus_config(live_settings, case)
     budget_config = replace(
         baseline_config,

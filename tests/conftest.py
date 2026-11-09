@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Generator, Iterable, Mapping, Sequence
+from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
@@ -153,6 +153,7 @@ def _assistant_tokens(transcript: TranscriptView) -> tuple[int, ...]:
 
 
 def _event_value(value: object) -> object:
+    # ToolCall.args is a MappingProxyType; dataclasses.asdict() fails on its deep copy.
     if is_dataclass(value) and not isinstance(value, type):
         return {field.name: _event_value(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
@@ -172,7 +173,7 @@ def normalized_events(events: Iterable[Event]) -> list[tuple[str, dict[str, obje
             continue
         payload = {field.name: _event_value(getattr(event, field.name)) for field in fields(event)}
         if isinstance(event, Prefill):
-            payload["tps"] = 0.0
+            payload["tps"] = 0.0  # Wall clock only; serial and speculative prefill times differ.
         normalized.append((type(event).__name__, payload))
     return normalized
 
@@ -231,7 +232,9 @@ def assert_alignment(
     assert observation.native_position == len(observation.transcript) - unevaluated_eos
 
 
-def prepare_chat(session: Session, prompt: str, *, tools: Iterable[ToolDefinition] = ()) -> int:
+def prepare_chat(session: Session, prompt: str, *, tools: Collection[ToolDefinition] = ()) -> int:
+    if session.transcript.chat and tools:
+        raise ValueError("tools must be supplied before the chat is started")
     if not session.transcript.chat:
         session.start_chat(tools=tools)
     session.append_user(prompt)
@@ -261,7 +264,7 @@ def serial_then_speculative(
     *,
     max_tokens: int,
     sampling: SamplingPolicy,
-    tools: Iterable[ToolDefinition] = (),
+    tools: Collection[ToolDefinition] = (),
     recorder: MetadataRecorder | None = None,
     scripted_native: ScenarioFakeNative | None = None,
 ) -> tuple[RoundObservation, RoundObservation, int]:

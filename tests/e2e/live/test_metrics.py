@@ -48,6 +48,7 @@ def test_external_serial_speculative_timing_metadata(live_settings: LiveSettings
         metrics = wrapper.dflash_metrics
         assert_alignment(session, speculative)
 
+    assert metrics is not None
     evidence = {
         "machine": platform.machine(),
         "platform": platform.platform(),
@@ -58,15 +59,14 @@ def test_external_serial_speculative_timing_metadata(live_settings: LiveSettings
         "speculative_seconds": speculative.wall_seconds,
         "serial_tokens": len(serial.token_ids),
         "speculative_tokens": len(speculative.token_ids),
-        "drafts_offered": metrics.drafts_offered if metrics is not None else None,
-        "drafts_accepted": metrics.drafts_accepted if metrics is not None else None,
-        "replacement_anchors": metrics.replacement_anchors if metrics is not None else None,
-        "acceptance_rate": metrics.acceptance_rate if metrics is not None else None,
+        "drafts_offered": metrics.drafts_offered,
+        "drafts_accepted": metrics.drafts_accepted,
+        "replacement_anchors": metrics.replacement_anchors,
+        "acceptance_rate": metrics.acceptance_rate,
     }
     rendered = json.dumps(evidence, indent=2) + "\n"
     (tmp_path / "timing.json").write_text(rendered)
     print(f"timing.json:\n{rendered}", end="")
     assert serial.wall_seconds > 0
     assert speculative.wall_seconds > 0
-    assert metrics is not None
     require_branches(case, metric_branches(metrics) | {"external-timing"})

@@ -48,6 +48,10 @@ def _string_list(value: object) -> TypeIs[list[str]]:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
+def _optional_int(value: object, minimum: int) -> bool:
+    return value is None or (type(value) is int and value >= minimum)
+
+
 def _think_budget(value: object) -> TypeIs[ThinkBudgetCase]:
     if not is_string_key_mapping(value):
         return False
@@ -74,13 +78,11 @@ def is_corpus_case(value: object) -> TypeIs[CorpusCase]:  # noqa: PLR0911 - Each
         return False
     if not _string_list(value.get("branches")):
         return False
-    if (ctx := value.get("ctx")) is not None and (type(ctx) is not int or ctx <= 0):
-        return False
-    if (draft_tokens := value.get("draft_tokens")) is not None and (type(draft_tokens) is not int or draft_tokens <= 0):
+    if not _optional_int(value.get("ctx"), 1) or not _optional_int(value.get("draft_tokens"), 1):
         return False
     if (reason := value.get("expected_reason")) is not None and not isinstance(reason, str):
         return False
-    if (think := value.get("think")) is not None and type(think) is not int:
+    if not _optional_int(value.get("think"), 0):
         return False
     if (budget := value.get("think_budget")) is not None and not _think_budget(budget):
         return False

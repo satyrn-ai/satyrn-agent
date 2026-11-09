@@ -42,7 +42,7 @@ All commands ran from the repository root through devenv.
 - `uv run --frozen --no-sync pytest tests/abnormal -q` — **27 passed** in the
   separate exception suite.
 - `uv run --frozen pytest tests/e2e/live -q -rA` — **19 passed, 0 skipped** in
-  108.23 seconds with the real inputs and GPU lock below.
+  114.21 seconds with the real inputs and GPU lock below.
 - `uv build --wheel` — passed; the wheel contains the native adapter, DFlash
   step, engine factory, and `ds4py.bindings` entry-point metadata.
 - `actionlint .github/workflows/ci.yml .github/workflows/ds4-tools.yml` — passed.
@@ -129,8 +129,8 @@ timing JSON into the retained log:
   "backend": "metal",
   "model": "/Volumes/WD_Black_SN8100/models/Qwen3.8-27B-Q4_K_M.gguf",
   "drafter": "/Volumes/WD_Black_SN8100/models/dflash-Qwen3.8-27B-Q4_0.gguf",
-  "serial_seconds": 3.1099357497878373,
-  "speculative_seconds": 1.0600684587843716,
+  "serial_seconds": 3.1119451662525535,
+  "speculative_seconds": 1.0415856670588255,
   "serial_tokens": 48,
   "speculative_tokens": 48,
   "drafts_offered": 84,
@@ -142,7 +142,7 @@ timing JSON into the retained log:
 
 | Machine | Backend | Target | Drafter | Serial | Speculative | Speedup | Acceptance |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Apple M4 Max, 36 GiB, macOS 15.7.1 | Metal | `Qwen3.8-27B-Q4_K_M.gguf`, Q4_K_M | `dflash-Qwen3.8-27B-Q4_0.gguf`, Q4_0 | 3.109936 s | 1.060068 s | 2.934x | 42.857% |
+| Apple M4 Max, 36 GiB, macOS 15.7.1 | Metal | `Qwen3.8-27B-Q4_K_M.gguf`, Q4_K_M | `dflash-Qwen3.8-27B-Q4_0.gguf`, Q4_0 | 3.111945 s | 1.041586 s | 2.988x | 42.857% |
 
 `tests/e2e/README.md` and `tests/e2e/corpus.json` retain the identities, prompts,
 seeds, expected terminal reasons, and branch mapping. The separate model-free
