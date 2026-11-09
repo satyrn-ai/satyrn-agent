@@ -22,6 +22,27 @@ class ThinkBudgetCase(TypedDict, closed=True):
     bias: float
 
 
+class SamplingDefaults(TypedDict, closed=True):
+    temperature: float
+    top_k: int
+    top_p: float
+    min_p: float
+
+
+class TargetIdentity(TypedDict, closed=True):
+    architecture: str
+    path_env: str
+    sha256: str
+    quantization: str
+    sampling_defaults: SamplingDefaults
+
+
+class DrafterIdentity(TypedDict, closed=True):
+    path_env: str
+    sha256: str
+    quantization: str
+
+
 class CorpusCase(TypedDict, closed=True):
     name: str
     prompt: str
@@ -39,8 +60,8 @@ class CorpusCase(TypedDict, closed=True):
 
 class Corpus(TypedDict, closed=True):
     format_version: int
-    target: dict[str, object]
-    drafter: dict[str, object]
+    target: TargetIdentity
+    drafter: DrafterIdentity
     cases: list[CorpusCase]
 
 
@@ -50,6 +71,42 @@ def _string_list(value: object) -> TypeIs[list[str]]:
 
 def _optional_int(value: object, minimum: int) -> bool:
     return value is None or (type(value) is int and value >= minimum)
+
+
+def _finite_number(value: object) -> TypeIs[int | float]:
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _probability(value: object) -> TypeIs[int | float]:
+    return _finite_number(value) and 0.0 <= value <= 1.0
+
+
+def is_sampling_defaults(value: object) -> TypeIs[SamplingDefaults]:
+    if not is_string_key_mapping(value):
+        return False
+    temperature = value.get("temperature")
+    top_k = value.get("top_k")
+    top_p = value.get("top_p")
+    min_p = value.get("min_p")
+    if not _finite_number(temperature) or temperature < 0.0:
+        return False
+    if type(top_k) is not int or top_k < 0:
+        return False
+    return _probability(top_p) and _probability(min_p)
+
+
+def is_target_identity(value: object) -> TypeIs[TargetIdentity]:
+    return (
+        is_string_key_mapping(value)
+        and all(isinstance(value.get(key), str) for key in ("architecture", "path_env", "sha256", "quantization"))
+        and is_sampling_defaults(value.get("sampling_defaults"))
+    )
+
+
+def is_drafter_identity(value: object) -> TypeIs[DrafterIdentity]:
+    return is_string_key_mapping(value) and all(
+        isinstance(value.get(key), str) for key in ("path_env", "sha256", "quantization")
+    )
 
 
 def _think_budget(value: object) -> TypeIs[ThinkBudgetCase]:
@@ -92,7 +149,7 @@ def is_corpus_case(value: object) -> TypeIs[CorpusCase]:  # noqa: PLR0911 - Each
 def is_corpus(value: object) -> TypeIs[Corpus]:
     if not is_string_key_mapping(value) or value.get("format_version") != 1:
         return False
-    if not is_string_key_mapping(value.get("target")) or not is_string_key_mapping(value.get("drafter")):
+    if not is_target_identity(value.get("target")) or not is_drafter_identity(value.get("drafter")):
         return False
     cases = value.get("cases")
     return isinstance(cases, list) and all(is_corpus_case(case) for case in cases)
@@ -124,13 +181,9 @@ def corpus_config(settings: DrafterSettings, case: CorpusCase) -> SatyrnConfig:
 
 def corpus_sampling(case: CorpusCase) -> SamplingPolicy:
     defaults = load_corpus()["target"]["sampling_defaults"]
-    if not is_string_key_mapping(defaults):
-        raise ValueError("invalid native sampling defaults in live corpus")
     top_k = defaults["top_k"]
     top_p = defaults["top_p"]
     min_p = defaults["min_p"]
-    if type(top_k) is not int or not isinstance(top_p, int | float) or not isinstance(min_p, int | float):
-        raise ValueError("invalid native sampling defaults in live corpus")
     greedy = case["temperature"] == 0
     return SamplingPolicy(
         temperature=case["temperature"],

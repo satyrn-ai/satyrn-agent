@@ -1,4 +1,7 @@
-from tests.e2e.corpus import CorpusCase, is_corpus_case
+import pytest
+from ds4py._json import is_string_key_mapping
+
+from tests.e2e.corpus import CorpusCase, is_corpus, is_corpus_case
 
 
 def _case() -> CorpusCase:
@@ -10,6 +13,60 @@ def _case() -> CorpusCase:
         "max_tokens": 1,
         "branches": [],
     }
+
+
+def _document() -> dict[str, object]:
+    return {
+        "format_version": 1,
+        "target": {
+            "architecture": "qwen35",
+            "path_env": "SATYRN_TEST_MODEL",
+            "sha256": "a" * 64,
+            "quantization": "Q4_K_M",
+            "sampling_defaults": {
+                "temperature": 0.6,
+                "top_k": 20,
+                "top_p": 0.95,
+                "min_p": 0.0,
+            },
+        },
+        "drafter": {
+            "path_env": "SATYRN_TEST_DRAFTER",
+            "sha256": "b" * 64,
+            "quantization": "Q4_0",
+        },
+        "cases": [],
+    }
+
+
+def test_valid_document_is_accepted() -> None:
+    assert is_corpus(_document())
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("temperature", float("nan")),
+        ("top_k", True),
+        ("top_k", -1),
+        ("top_p", "0.95"),
+        ("top_p", 1.1),
+        ("min_p", -0.1),
+    ],
+)
+def test_sampling_defaults_are_validated(field: str, value: object) -> None:
+    document = _document()
+    raw_target = document["target"]
+    assert is_string_key_mapping(raw_target)
+    target = dict(raw_target)
+    raw_defaults = target["sampling_defaults"]
+    assert is_string_key_mapping(raw_defaults)
+    defaults = dict(raw_defaults)
+    defaults[field] = value
+    target["sampling_defaults"] = defaults
+    document["target"] = target
+
+    assert not is_corpus(document)
 
 
 def test_think_must_be_nonnegative() -> None:
