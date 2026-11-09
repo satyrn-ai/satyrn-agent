@@ -12,7 +12,7 @@ from uuid import uuid4
 from ds4py.binding import MessageBinder, ModelMessagesTypeAdapter, SegmentProvenance
 from ds4py.engine.events import Checkpointed, Interrupted, Stopped, Synced, Token
 from ds4py.engine.worker import SyncJob
-from ds4py.model import DS4Model
+from ds4py.model import DS4Model, ResponseTerminalError
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.models import Model, ModelRequestParameters, StreamedResponse
@@ -23,10 +23,13 @@ from plan_comparison.adapters.think_budget import (
     THINKING_BUDGET_CLOSE,
     ThinkingBudgetHook,
 )
+from plan_comparison.budget import BudgetExhausted
 from plan_comparison.contracts import (
     BoundaryEvidence,
     BudgetTracker,
+    ContextPreparationFailure,
     GateResult,
+    ModelResponseFailure,
     Slot,
     VisibleGateSpec,
     WorkerBoundary,
@@ -54,6 +57,7 @@ class _ToolContext:
     budget: BudgetTracker
     max_file_read_bytes: int
     gate_results: list[GateResult]
+    on_write: Callable[[], None] | None = None
 
 
 class AgentRunResult(Protocol):
@@ -157,29 +161,21 @@ class _PydanticModelProxy(Model):
 def build_restricted_agents(model: DS4Model, gate_policy: GatePolicy) -> Ds4Agents:
     model_proxy = _PydanticModelProxy(model)
 
-    def new_agent(instructions: str) -> ToolAgentPort:
-        return cast(
-            ToolAgentPort,
-            Agent(
-                model_proxy,
-                output_type=str,
-                deps_type=_ToolContext,
-                instructions=instructions,
-                max_concurrency=1,
+    agent = cast(
+        ToolAgentPort,
+        Agent(
+            model_proxy,
+            output_type=str,
+            deps_type=_ToolContext,
+            instructions=(
+                "Follow the current phase's user instructions. Use only the "
+                "supplied file tools and visible test gates within that phase's "
+                "allowlists. Never access protected evaluation material or use "
+                "a shell. Read-only phases must not write files or run gates. "
+                "For edit slots, return only the requested replacement content."
             ),
-        )
-
-    context_agent = new_agent(
-        "Read only the supplied plan and allowed source files. Summarize relevant "
-        "interfaces. Do not edit files or run commands."
-    )
-    prose_agent = new_agent(
-        "Complete the prose plan using only the supplied file tools and visible "
-        "test gates. Never access protected evaluation material or use a shell."
-    )
-    compiled_agent = new_agent(
-        "Complete only the supplied edit slot. Read only allowed task files. "
-        "Never access protected evaluation material or use a shell."
+            max_concurrency=1,
+        ),
     )
 
     def install_read_tool(agent: ToolAgentPort) -> None:
@@ -214,14 +210,12 @@ def build_restricted_agents(model: DS4Model, gate_policy: GatePolicy) -> Ds4Agen
                 f"exit={result.exit_code}\n{result.output_excerpt}"
             )
 
-    install_read_tool(context_agent)
-    install_read_tool(prose_agent)
-    install_write_tools(prose_agent)
-    install_read_tool(compiled_agent)
+    install_read_tool(agent)
+    install_write_tools(agent)
     return Ds4Agents(
-        context=context_agent,
-        prose=prose_agent,
-        compiled=compiled_agent,
+        context=agent,
+        prose=agent,
+        compiled=agent,
     )
 
 
@@ -251,6 +245,8 @@ def _write_file_result(context: _ToolContext, path: str, content: str) -> str:
         target.write_text(content, encoding="utf-8")
     except (OSError, ValueError) as error:
         return f"error: {type(error).__name__}: {error}"
+    if context.on_write is not None:
+        context.on_write()
     return f"Wrote {path}."
 
 
@@ -287,6 +283,8 @@ class Ds4WorkerAdapter(WorkerPort):
         tokenizer_revision: str,
         gate_policy: GatePolicy,
         thinking_budget: int = 4096,
+        think_until_first_write: bool = False,
+        context_retry_limit: int = 2,
         max_file_read_bytes: int = 50_000,
         serial_tools: bool = True,
     ) -> None:
@@ -299,6 +297,20 @@ class Ds4WorkerAdapter(WorkerPort):
 
         self.model = model
         self.session = model.session
+        if not isinstance(think_until_first_write, bool):
+            raise ValueError("think_until_first_write must be a boolean")
+        self.think_until_first_write = think_until_first_write
+        if (
+            not isinstance(context_retry_limit, int)
+            or isinstance(context_retry_limit, bool)
+            or not 0 <= context_retry_limit <= 2
+        ):
+            raise ValueError(
+                "context retry limit must be an integer between zero and two"
+            )
+        self.context_retry_limit = context_retry_limit
+        self._context_failures: list[str] = []
+        self._thinking_suppressed = False
         self.thinking_budget = thinking_budget
         if thinking_budget:
             engine = self.session.engine
@@ -311,6 +323,19 @@ class Ds4WorkerAdapter(WorkerPort):
             self.session.add_logits_hook(self._thinking_budget_hook)
         else:
             self._thinking_budget_hook = None
+        if think_until_first_write:
+            engine = self.session.engine
+            immediate_close = ThinkingBudgetHook(
+                budget_tokens=1,
+                closing_tokens=engine.tokenize("</think>", rendered=True),
+                vocab_size=engine.info.vocab_size,
+                force_close=True,
+            )
+            self.session.add_logits_hook(
+                lambda view: (
+                    immediate_close(view) if self._thinking_suppressed else None
+                )
+            )
         self.binder: MessageBinder = model.binder
         self.agents = agents
         self.model_id = model_id
@@ -375,8 +400,28 @@ class Ds4WorkerAdapter(WorkerPort):
                     + "Read the shared task context and relevant source files, "
                     "then summarize established interfaces without proposing edits."
                 )
-                await self._run_agent(self.agents.context, prompt, scope, budget)
-            return self._capture_boundary()
+                self._context_failures.clear()
+                for attempt in range(self.context_retry_limit + 1):
+                    budget.ensure_capacity()
+                    try:
+                        await self._run_agent(
+                            self.agents.context, prompt, scope, budget
+                        )
+                        break
+                    except ModelResponseFailure as error:
+                        self._context_failures.append(error.reason)
+                        self.session.truncate(0)
+                        binder = MessageBinder(self.session)
+                        binder.note_provider = self.binder.note_provider
+                        self.binder = self.model.binder = binder
+                        self._message_history.clear()
+                        self._thinking_suppressed = False
+                        budget.ensure_capacity()
+                        if attempt == self.context_retry_limit:
+                            raise ContextPreparationFailure(
+                                error.reason, attempt + 1
+                            ) from error
+            return self._capture_boundary(budget)
 
     async def restore_boundary(
         self, boundary: WorkerBoundary, *, budget: BudgetTracker
@@ -452,6 +497,7 @@ class Ds4WorkerAdapter(WorkerPort):
                 }
 
             restore()
+            self._thinking_suppressed = False
             budget.ensure_capacity()
 
     async def execute_prose(
@@ -580,38 +626,77 @@ class Ds4WorkerAdapter(WorkerPort):
             lambda envelope: events.append(envelope.payload.get("event")),
             kinds=("Synced", "Prefill", "Token"),
         )
+        pending_error: BaseException | None = None
         try:
-            result = await agent.run(
-                prompt,
-                deps=scope,
-                message_history=copy.deepcopy(self._message_history) or None,
-            )
+            budget.ensure_capacity()
+            try:
+                result = await agent.run(
+                    prompt,
+                    deps=scope,
+                    message_history=copy.deepcopy(self._message_history) or None,
+                )
+            except ResponseTerminalError as error:
+                if error.reason not in ("max_tokens", "parser_error"):
+                    raise
+                raise ModelResponseFailure(error.reason) from error
+        except BaseException as error:
+            pending_error = error
+            raise
         finally:
             unsubscribe()
+            try:
+                self._record_usage(events, budget)
+            except BudgetExhausted:
+                # Preserve the cause so callers roll failed transactions back.
+                # Usage is already charged; capacity is checked after rollback.
+                if pending_error is None:
+                    raise
         output = result.output
         if not isinstance(output, str):
             raise WorkerAdapterError("Pydantic AI agent did not return text output.")
         self._message_history = copy.deepcopy(result.all_messages())
-        sync_events = [event for event in events if isinstance(event, Synced)]
-        if not sync_events:
+        if not self._last_sync_events:
             raise WorkerAdapterError(
                 "No native synchronization telemetry was observed."
             )
-        reused = sum(event.plan.reused for event in sync_events)
-        prefilled = sum(event.prefilled for event in sync_events)
-        generated = sum(isinstance(event, Token) for event in events)
-        for _ in sync_events:
-            budget.record_model_call()
-        budget.record_tokens(reused + prefilled + generated)
-        self._last_sync_events = tuple(sync_events)
         return output, None
 
-    def _capture_boundary(self) -> WorkerBoundary:
+    def _record_usage(self, events: list[object], budget: BudgetTracker) -> None:
+        sync_events = tuple(event for event in events if isinstance(event, Synced))
+        self._last_sync_events = sync_events
+        tokens = sum(event.plan.reused + event.prefilled for event in sync_events)
+        tokens += sum(isinstance(event, Token) for event in events)
+        exhausted: BudgetExhausted | None = None
+        for _ in sync_events:
+            try:
+                budget.record_model_call()
+            except BudgetExhausted as error:
+                exhausted = error
+        try:
+            budget.record_tokens(tokens)
+        except BudgetExhausted as error:
+            exhausted = error
+        if exhausted is not None:
+            raise exhausted
+
+    def _capture_boundary(self, budget: BudgetTracker) -> WorkerBoundary:
+        tokens = tuple(self.session.transcript.tokens)
+        if self.session.ctx_used != len(tokens):
+            events = tuple(self.session._job_events(SyncJob(tokens)))
+            synced = next(
+                (event for event in events if isinstance(event, Synced)), None
+            )
+            if synced is None or synced.pos != len(tokens):
+                raise WorkerAdapterError(
+                    "Could not sync the complete checkpoint prefix."
+                )
+            budget.record_tokens(synced.prefilled)
+            self._last_sync_events += (synced,)
         key = f"{self.session.id}:{uuid4().hex}"
         checkpoint = self.session.checkpoint(key)
         if not isinstance(checkpoint, Checkpointed):
             raise WorkerAdapterError("DS4 did not return a checkpoint confirmation.")
-        if checkpoint.tokens != self.session.ctx_used:
+        if checkpoint.tokens != len(tokens):
             raise WorkerAdapterError(
                 "Checkpoint token count differs from the transcript."
             )
@@ -636,9 +721,11 @@ class Ds4WorkerAdapter(WorkerPort):
             rng_state=int(self.session._rng.state.value),
             session_id=self._session_owner_id,
         )
-        native_events = tuple(
-            _sync_event_text(event) for event in self._last_sync_events
-        ) + (f"Checkpointed:{checkpoint.tokens}:{checkpoint.bytes}",)
+        native_events = (
+            tuple(_sync_event_text(event) for event in self._last_sync_events)
+            + tuple(f"ContextRetry:{reason}" for reason in self._context_failures)
+            + (f"Checkpointed:{checkpoint.tokens}:{checkpoint.bytes}",)
+        )
         evidence = BoundaryEvidence(
             model_id=self.model_id,
             model_revision=self.model_revision,
@@ -672,7 +759,12 @@ class Ds4WorkerAdapter(WorkerPort):
             budget=budget,
             max_file_read_bytes=self.max_file_read_bytes,
             gate_results=[],
+            on_write=self.workspace_written,
         )
+
+    def workspace_written(self) -> None:
+        if self.think_until_first_write:
+            self._thinking_suppressed = True
 
     def _ensure_open(self) -> None:
         if self._closed:

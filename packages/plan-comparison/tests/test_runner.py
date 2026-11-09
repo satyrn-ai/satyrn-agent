@@ -178,6 +178,10 @@ class ScriptedWorker:
         self.restored_tokens: list[object] = []
         self.capability_calls = 0
         self.closed = False
+        self.workspace_writes = 0
+
+    def workspace_written(self) -> None:
+        self.workspace_writes += 1
 
     async def capabilities(self, *, budget: BudgetTracker) -> WorkerCapabilities:
         self.capability_calls += 1
@@ -374,12 +378,14 @@ def test_pair_runs_both_arms_with_monotonic_retries_and_persistent_records(
         result.arms[1].attempts[0].budget.tokens
         < result.arms[1].attempts[1].budget.tokens
     )
-    assert worker.boundary_restores == 3
-    assert worker.restored_tokens[:2] == [
+    assert worker.boundary_restores == 4
+    assert worker.workspace_writes == 2
+    assert worker.restored_tokens == [
         worker.captured_boundaries[0].opaque_token,
+        worker.captured_boundaries[1].opaque_token,
         worker.captured_boundaries[0].opaque_token,
+        worker.captured_boundaries[-1].opaque_token,
     ]
-    assert worker.restored_tokens[2] == worker.captured_boundaries[-1].opaque_token
     assert [path.name for path in task_port.created] == [
         "cpu-fixture-19-P",
         "cpu-fixture-19-C",
@@ -430,6 +436,232 @@ def test_both_arms_may_read_the_visible_test(tmp_path: Path) -> None:
 
     assert all("tests/test_ops.py" in paths for paths in worker.prose_read_paths)
     assert all("tests/test_ops.py" in paths for paths in worker.compiled_read_paths)
+
+
+@pytest.mark.parametrize("arm", ["P", "C"])
+@pytest.mark.parametrize("error_type", [RuntimeError, OSError, RunnerHarnessFault])
+def test_harness_faults_keep_host_only_exception_details(
+    tmp_path: Path, arm: Arm, error_type: type[Exception]
+) -> None:
+    inputs, runner, worker, task_port = _runner(tmp_path)
+
+    async def fail(**kwargs):
+        raise error_type("host-only sentinel cause")
+
+    if arm == "P":
+        worker.execute_prose = fail
+    else:
+        worker.fill_body = fail
+    order = (arm, "C" if arm == "P" else "P")
+    result = asyncio.run(
+        runner.run_pair(inputs, worker, task_port, seed=8, arm_order=order)
+    )
+
+    attempt = result.arms[0].attempts[0]
+    assert attempt.status == "harness_fault"
+    assert attempt.harness_fault.exception_type == error_type.__name__
+    assert attempt.harness_fault.message == "host-only sentinel cause"
+    assert all("sentinel" not in item for item in attempt.visible_feedback)
+    document = json.loads(
+        (tmp_path / "records" / f"attempt-{attempt.attempt_id}.json").read_text()
+    )
+    assert document["record"]["harness_fault"] == {
+        "exception_type": error_type.__name__,
+        "message": "host-only sentinel cause",
+    }
+
+
+@pytest.mark.parametrize("arm", ["P", "C"])
+@pytest.mark.parametrize("reason", ["max_tokens", "parser_error"])
+def test_model_response_failures_retry_with_rollback_and_metering(
+    tmp_path: Path, arm: Arm, reason: str
+) -> None:
+    from plan_comparison.contracts import ModelResponseFailure
+
+    inputs, runner, worker, task_port = _runner(tmp_path)
+    original = worker.execute_prose if arm == "P" else worker.fill_body
+    calls = []
+
+    async def fail_once(**kwargs):
+        calls.append(kwargs["budget"].snapshot())
+        if len(calls) == 1:
+            worker._meter(kwargs["budget"])
+            if arm == "P":
+                (kwargs["workspace"] / "ops.py").write_text("failed partial write")
+            raise ModelResponseFailure(reason)
+        assert (
+            "failed partial write" not in (kwargs["workspace"] / "ops.py").read_text()
+        )
+        return await original(**kwargs)
+
+    if arm == "P":
+        worker.execute_prose = fail_once
+        worker.prose_responses = ["return value + 1"]
+    else:
+        worker.fill_body = fail_once
+        worker.compiled_responses = ["return value + 1"]
+    order = (arm, "C" if arm == "P" else "P")
+    result = asyncio.run(
+        runner.run_pair(inputs, worker, task_port, seed=8, arm_order=order)
+    )
+
+    attempts = result.arms[0].attempts
+    assert [attempt.status for attempt in attempts] == ["failed", "passed"]
+    assert attempts[0].harness_fault is None
+    assert reason in attempts[1].visible_feedback[0]
+    assert len(attempts[1].visible_feedback[0]) <= runner.config.max_feedback_characters
+    assert calls[1].tokens > calls[0].tokens
+    assert calls[1].model_calls > calls[0].model_calls
+    assert worker.boundary_restores >= 2
+
+
+def test_shared_context_exhaustion_is_a_distinct_pair_failure(tmp_path: Path) -> None:
+    from plan_comparison.contracts import ContextPreparationFailure
+
+    inputs, runner, worker, task_port = _runner(tmp_path)
+
+    async def fail(**kwargs):
+        worker._meter(kwargs["budget"])
+        raise ContextPreparationFailure("parser_error", 2)
+
+    worker.capture_boundary = fail
+    result = asyncio.run(
+        runner.run_pair(inputs, worker, task_port, seed=8, arm_order=("P", "C"))
+    )
+    assert result.status == "context_failed"
+    assert result.registration_diagnostics[0].code == "runner.context_failed"
+    assert "parser_error" in result.registration_diagnostics[0].message
+    assert result.shared_budget.model_calls == 1
+    assert not task_port.created
+
+
+def test_shared_context_harness_fault_keeps_its_cause(tmp_path: Path) -> None:
+    inputs, runner, worker, task_port = _runner(tmp_path)
+
+    async def fail(**kwargs):
+        raise OSError("host-only context cause")
+
+    worker.capture_boundary = fail
+    result = asyncio.run(
+        runner.run_pair(inputs, worker, task_port, seed=8, arm_order=("P", "C"))
+    )
+    assert result.status == "harness_fault"
+    assert result.harness_fault.exception_type == "OSError"
+    assert result.harness_fault.message == "host-only context cause"
+    assert not task_port.created
+
+
+def test_packet_context_failure_restores_an_existing_boundary(tmp_path: Path) -> None:
+    from plan_comparison.contracts import ModelResponseFailure
+
+    inputs, runner, worker, task_port = _runner(tmp_path)
+    original = worker.capture_boundary
+    calls = 0
+
+    async def fail_packet_once(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            worker._meter(kwargs["budget"])
+            raise ModelResponseFailure("parser_error")
+        return await original(**kwargs)
+
+    worker.capture_boundary = fail_packet_once
+    worker.compiled_responses = ["return value + 1"]
+    result = asyncio.run(
+        runner.run_pair(inputs, worker, task_port, seed=8, arm_order=("C", "P"))
+    )
+    assert result.arms[0].status == "passed"
+    assert worker.boundary_restores >= 3
+
+
+@pytest.mark.parametrize("arm", ["P", "C"])
+@pytest.mark.parametrize("limited_budget", [None, "calls", "tokens"])
+def test_model_response_retries_are_bounded_by_attempts_and_budget(
+    tmp_path: Path, arm: Arm, limited_budget: str | None
+) -> None:
+    from plan_comparison.contracts import ModelResponseFailure
+
+    inputs, runner, worker, task_port = _runner(tmp_path)
+    calls = 0
+    if limited_budget:
+        runner.config = replace(
+            runner.config,
+            budgets=BudgetLimits(
+                wall_seconds=120,
+                tokens=1 if limited_budget == "tokens" else 100,
+                model_calls=1 if limited_budget == "calls" else 20,
+            ),
+        )
+
+    async def fail(**kwargs):
+        nonlocal calls
+        calls += 1
+        from plan_comparison.budget import BudgetExhausted
+
+        try:
+            worker._meter(kwargs["budget"])
+        except BudgetExhausted:
+            # DS4 retains the response failure after recording an overrun.
+            pass
+        if arm == "P":
+            (kwargs["workspace"] / "ops.py").write_text("failed partial write")
+        raise ModelResponseFailure("max_tokens")
+
+    if arm == "P":
+        worker.execute_prose = fail
+    else:
+        worker.fill_body = fail
+    order = (arm, "C" if arm == "P" else "P")
+    result = asyncio.run(
+        runner.run_pair(inputs, worker, task_port, seed=8, arm_order=order)
+    )
+    assert result.arms[0].status == ("budget_exhausted" if limited_budget else "failed")
+    assert calls == (1 if limited_budget else 2)
+    assert result.arms[0].attempts[0].budget.model_calls == 1
+    assert "failed partial write" not in (task_port.created[0] / "ops.py").read_text()
+
+
+@pytest.mark.parametrize("arm", ["P", "C"])
+def test_response_retry_restore_failure_keeps_host_cause(
+    tmp_path: Path, arm: Arm
+) -> None:
+    from plan_comparison.contracts import ModelResponseFailure
+
+    inputs, runner, worker, task_port = _runner(tmp_path)
+    original_restore = worker.restore_boundary
+    failed = False
+
+    async def fail(**kwargs):
+        nonlocal failed
+        failed = True
+        worker._meter(kwargs["budget"])
+        raise ModelResponseFailure("parser_error")
+
+    async def restore(boundary, *, budget):
+        if failed:
+            raise OSError("host-only restore cause")
+        await original_restore(boundary, budget=budget)
+
+    worker.restore_boundary = restore
+    if arm == "P":
+        worker.execute_prose = fail
+    else:
+        worker.fill_body = fail
+    result = asyncio.run(
+        runner.run_pair(
+            inputs,
+            worker,
+            task_port,
+            seed=8,
+            arm_order=(arm, "C" if arm == "P" else "P"),
+        )
+    )
+    attempt = result.arms[0].attempts[0]
+    assert attempt.status == "harness_fault"
+    assert attempt.harness_fault.exception_type == "OSError"
+    assert attempt.harness_fault.message == "host-only restore cause"
+    assert not attempt.visible_feedback
 
 
 def test_exhausted_compiled_arm_is_graded_on_its_last_attempt(tmp_path: Path) -> None:
@@ -776,7 +1008,7 @@ def test_failed_retry_restore_is_a_harness_fault(tmp_path: Path) -> None:
     original_restore = worker.restore_boundary
 
     async def fail_compiled_retry(boundary, *, budget) -> None:
-        if worker.boundary_restores == 2:
+        if worker.compiled_feedback:
             raise RuntimeError("synthetic restore failure")
         await original_restore(boundary, budget=budget)
 
@@ -949,6 +1181,17 @@ def test_exhausted_packet_retries_preserve_prior_packet_success(
         RunStore(tmp_path / "records"),
     )
 
+    recovery_boundary = asyncio.run(
+        worker.capture_boundary(
+            task_id=inputs.task_id,
+            plan=plan_path.read_text(),
+            workspace=workspace,
+            allowed_read_paths=inputs.allowed_read_paths,
+            budget=MonotonicBudget(
+                BudgetLimits(wall_seconds=120, tokens=100, model_calls=20)
+            ),
+        )
+    )
     status, attempts = asyncio.run(
         runner._run_compiled_arm(
             inputs,
@@ -958,6 +1201,7 @@ def test_exhausted_packet_retries_preserve_prior_packet_success(
             workspace,
             worker,
             MonotonicBudget(BudgetLimits(wall_seconds=120, tokens=100, model_calls=20)),
+            recovery_boundary,
         )
     )
 

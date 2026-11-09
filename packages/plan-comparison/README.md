@@ -42,8 +42,38 @@ The DS4 worker adapter enforces a hard budget of 4,096 thinking tokens per
 assistant reply by default. When the budget is reached, it forces the Qwen
 model-card closing sentence and `</think>` one token at a time; pass
 `thinking_budget=0` to disable the hook, or set a different non-negative token
-limit. This does not bypass request, context, or output-token caps, which can
+limit. Usage accumulates across all thinking blocks in a reply. This does not
+bypass request, context, or output-token caps, which can
 still interrupt generation before the close sequence is complete.
+
+The optional `think_until_first_write=True` adapter setting closes thinking
+immediately on subsequent generations after the first successful workspace
+write. Rejected writes do not activate it. Both prose tool writes and host-applied
+compiled slot writes count. Restoring a boundary for a repair retry re-enables
+thinking. This setting defaults to `False` so it can be evaluated separately
+from retry and prompt changes. It uses logits hooks without changing the engine
+thinking mode or rendered system prefix.
+
+Context, prose, and compiled phases share one system instruction and tool schema.
+Per-request allowlists enforce read-only context and compiled requests. Native
+checkpoints include the complete host transcript, including the reply suffix,
+so the next phase can reuse the full prefix.
+
+DS4 `max_tokens` and `parser_error` responses consume the existing arm retry
+allowance. Failed generations count against aggregate tokens and model calls.
+Before retrying, the runner restores the pre-attempt workspace and native/host
+boundary; budgets remain monotonic. Initial context preparation has no boundary,
+so it clears the session and starts fresh, with `context_retry_limit=2` by
+default (allowed range: 0–2). Exhaustion produces a distinct `context_failed`
+pair result and stops the schedule. Packet context preparation retries from the
+existing boundary using the compiled retry limit. Infrastructure failures remain
+terminal, with exception type and message stored in host-only `harness_fault`
+fields on attempt, arm, or pair records. These details are not worker feedback.
+
+Private baseline drivers calling `_run_prose_arm` must pass the complete
+`WorkerBoundary` returned by `capture_boundary`, replacing `boundary.evidence`
+with `boundary`. A new experimental batch should retain the default thinking
+policy unless it explicitly measures `think_until_first_write=True`.
 
 Both arms run against the same visible packet tests: the prose arm has them
 installed before its first attempt and may not write them. Arms that exhaust

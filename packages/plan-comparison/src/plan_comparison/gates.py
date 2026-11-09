@@ -22,6 +22,11 @@ class GateCleanupError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class GatePolicy:
+    """Host gate limits; pytest commands should include ``-p no:cacheprovider``.
+
+    Pytest's cache otherwise creates undeclared files in the worker workspace.
+    """
+
     allowed_commands: tuple[str, ...]
     environment: tuple[tuple[str, str], ...]
     timeout_seconds: float

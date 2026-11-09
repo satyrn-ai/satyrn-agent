@@ -1,6 +1,7 @@
 """Optional DS4 adapter checks; all cases use the upstream FakeNative engine."""
 
 import asyncio
+from dataclasses import replace
 from inspect import signature
 
 import pytest
@@ -8,12 +9,20 @@ import pytest
 pytestmark = pytest.mark.ds4_runtime
 
 
-def _fake_adapter(*, thinking_budget: int | None = None):
+def _fake_adapter(
+    *,
+    thinking_budget: int | None = None,
+    think_until_first_write: bool = False,
+    response: bytes = b"done",
+    family: str = "deepseek4",
+    context_retry_limit: int = 2,
+    thinking: bool = False,
+):
     pytest.importorskip("ds4py")
     pytest.importorskip("pydantic_ai")
     import ds4py
     from ds4py import ThinkMode
-    from ds4py._native.fake import FakeNative
+    from ds4py._native.fake import FakeNative, reply
     from ds4py.engine.sampling import SamplingPolicy
     from ds4py.model import DS4Model
 
@@ -23,8 +32,13 @@ def _fake_adapter(*, thinking_budget: int | None = None):
     )
     from plan_comparison.gates import GatePolicy
 
+    native = FakeNative(script=reply(response))
+    native._info = replace(native._info, family=family, is_qwen4=family == "qwen")
     engine = ds4py.open(
-        "fake.gguf", ctx=8192, think=ThinkMode.NONE, native=FakeNative()
+        "fake.gguf",
+        ctx=8192,
+        think=ThinkMode.LOW if thinking else ThinkMode.NONE,
+        native=native,
     )
     model = DS4Model(engine.session(), sampling=SamplingPolicy(seed=1))
     gate_policy = GatePolicy(
@@ -45,6 +59,8 @@ def _fake_adapter(*, thinking_budget: int | None = None):
             runtime_revision="fake-runtime",
             tokenizer_revision="fake-tokenizer",
             gate_policy=gate_policy,
+            think_until_first_write=think_until_first_write,
+            context_retry_limit=context_retry_limit,
             **options,
         )
     except BaseException:
@@ -57,6 +73,73 @@ def test_adapter_registers_a_default_thinking_budget_hook() -> None:
     engine, adapter = _fake_adapter()
     try:
         assert len(adapter.session._logits_hooks) == 1
+    finally:
+        engine.close()
+
+
+def test_phase_changes_reuse_the_shared_prefix_and_keep_its_checkpoint(
+    tmp_path,
+) -> None:
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import (
+        BudgetLimits,
+        CallableBodyExtent,
+        CallableBodyTarget,
+        Slot,
+    )
+
+    engine, adapter = _fake_adapter()
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=30, tokens=100_000, model_calls=10)
+    )
+    slot = Slot(
+        slot_id="body",
+        path="app.py",
+        kind="callable_body",
+        operation="replace_body",
+        target=CallableBodyTarget("f"),
+        extent=CallableBodyExtent(),
+        preimage_sha256=None,
+    )
+
+    async def exercise():
+        boundary = await adapter.capture_boundary(
+            task_id="fake",
+            plan="Implement f.",
+            workspace=tmp_path,
+            allowed_read_paths=(),
+            budget=budget,
+        )
+        await adapter.execute_prose(
+            task_id="fake",
+            plan="Implement f.",
+            workspace=tmp_path,
+            allowed_read_paths=(),
+            allowed_write_paths=("app.py",),
+            visible_gates=(),
+            visible_feedback=(),
+            budget=budget,
+        )
+        assert adapter._last_sync_events[0].plan.kind in ("extend", "restore")
+        assert adapter._last_sync_events[0].plan.reused >= boundary.evidence.token_count
+        assert boundary.evidence.checkpoint_key in adapter.session._checkpoint_tokens
+        await adapter.restore_boundary(boundary, budget=budget)
+        await adapter.fill_body(
+            task_id="fake",
+            plan="Implement f.",
+            workspace=tmp_path,
+            allowed_read_paths=(),
+            slot=slot,
+            signature_prefill="def f():",
+            visible_feedback=(),
+            budget=budget,
+        )
+        assert adapter._last_sync_events[0].plan.kind in ("extend", "restore")
+        assert adapter._last_sync_events[0].plan.reused >= boundary.evidence.token_count
+        assert boundary.evidence.checkpoint_key in adapter.session._checkpoint_tokens
+
+    try:
+        asyncio.run(exercise())
     finally:
         engine.close()
 
@@ -190,7 +273,9 @@ def test_fake_boundary_round_trip_restores_rng_and_binder_state() -> None:
     assert sync_events
     initial_rng = int(adapter.session._rng.state.value)
     initial_tokens = tuple(adapter.session.transcript.tokens)
-    boundary = adapter._capture_boundary()
+    boundary = adapter._capture_boundary(
+        MonotonicBudget(BudgetLimits(wall_seconds=10, tokens=100, model_calls=10))
+    )
     adapter.session._rng.state.value = initial_rng + 1
 
     asyncio.run(
@@ -238,6 +323,324 @@ def _tool_context(tmp_path, readable, writable):
         max_file_read_bytes=64,
         gate_results=[],
     )
+
+
+def test_thinking_until_first_write_is_optional_and_resets_on_restore(tmp_path) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from plan_comparison.adapters.ds4 import _write_file_result
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    for enabled in (False, True):
+        engine, adapter = _fake_adapter(think_until_first_write=enabled)
+        budget = MonotonicBudget(
+            BudgetLimits(wall_seconds=30, tokens=100_000, model_calls=10)
+        )
+        try:
+            boundary = asyncio.run(
+                adapter.capture_boundary(
+                    task_id="fake",
+                    plan="Implement f.",
+                    workspace=tmp_path,
+                    allowed_read_paths=(),
+                    budget=budget,
+                )
+            )
+            context = adapter._tool_context(tmp_path, (), ("ok.py",), (), budget)
+            assert _write_file_result(context, "refused.py", "x").startswith("error:")
+            assert not adapter._thinking_suppressed
+            assert _write_file_result(context, "ok.py", "x") == "Wrote ok.py."
+            assert adapter._thinking_suppressed is enabled
+            asyncio.run(adapter.restore_boundary(boundary, budget=budget))
+            assert not adapter._thinking_suppressed
+        finally:
+            engine.close()
+
+
+def test_first_write_suppresses_native_thinking_without_rebuilding_prefix(
+    tmp_path,
+) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from ds4py._native.fake import FAKE_EOS
+
+    from plan_comparison.adapters.ds4 import _write_file_result
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    engine, adapter = _fake_adapter(think_until_first_write=True, thinking=True)
+    close = engine.tokenize("</think>", rendered=True)[0]
+    thought = engine.tokenize("deliberate", rendered=True)
+    answer = engine.tokenize("done", rendered=True)
+
+    def script(prompt, generated):
+        if close in generated:
+            offset = len(generated) - generated.index(close) - 1
+            return answer[offset] if offset < len(answer) else FAKE_EOS
+        return thought[len(generated)] if len(generated) < len(thought) else close
+
+    engine.native.script = script
+    emitted = []
+    adapter.session.on_event(
+        lambda envelope: emitted.append(envelope.payload["event"].id), kinds=("Token",)
+    )
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=30, tokens=100_000, model_calls=10)
+    )
+
+    async def exercise():
+        boundary = await adapter.capture_boundary(
+            task_id="fake",
+            plan="Implement f.",
+            workspace=tmp_path,
+            allowed_read_paths=(),
+            budget=budget,
+        )
+        assert emitted == thought + [close] + answer
+        context = adapter._tool_context(tmp_path, (), ("ok.py",), (), budget)
+        assert _write_file_result(context, "ok.py", "x") == "Wrote ok.py."
+
+        async def generate():
+            emitted.clear()
+            reply = await adapter.execute_prose(
+                task_id="fake",
+                plan="Implement f.",
+                workspace=tmp_path,
+                allowed_read_paths=(),
+                allowed_write_paths=("ok.py",),
+                visible_gates=(),
+                visible_feedback=(),
+                budget=budget,
+            )
+            assert reply.content == "done"
+            assert adapter._last_sync_events[0].plan.kind in ("extend", "restore")
+            assert (
+                adapter._last_sync_events[0].plan.reused
+                >= boundary.evidence.token_count
+            )
+
+        await generate()
+        assert emitted == [close] + answer
+        await adapter.restore_boundary(boundary, budget=budget)
+        await generate()
+        assert emitted == thought + [close] + answer
+        adapter.workspace_written()
+        await generate()
+        assert emitted == [close] + answer
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        engine.close()
+
+
+@pytest.mark.parametrize("reason", ["max_tokens", "parser_error"])
+@pytest.mark.parametrize("token_limit", [1, 100_000])
+def test_failed_responses_are_classified_and_metered(
+    tmp_path, reason, token_limit
+) -> None:
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits, ModelResponseFailure
+
+    response = (
+        b"unfinished reply"
+        if reason == "max_tokens"
+        else b"<tool_call><function=read_file><parameter=path>unfinished"
+    )
+    engine, adapter = _fake_adapter(response=response, family="qwen")
+    if reason == "max_tokens":
+        adapter.model.max_tokens = 2
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=30, tokens=token_limit, model_calls=10)
+    )
+    try:
+        with pytest.raises(ModelResponseFailure) as caught:
+            asyncio.run(
+                adapter.execute_prose(
+                    task_id="fake",
+                    plan="Implement f.",
+                    workspace=tmp_path,
+                    allowed_read_paths=(),
+                    allowed_write_paths=("app.py",),
+                    visible_gates=(),
+                    visible_feedback=(),
+                    budget=budget,
+                )
+            )
+        assert caught.value.reason == reason
+        assert budget.snapshot().model_calls == 1
+        assert budget.snapshot().tokens > 2
+        assert not adapter._message_history
+    finally:
+        engine.close()
+
+
+@pytest.mark.parametrize("reason", ["max_tokens", "parser_error"])
+def test_context_failures_restart_empty_and_keep_failed_usage(tmp_path, reason) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from ds4py._native.fake import FAKE_EOS
+
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    engine, adapter = _fake_adapter(family="qwen")
+    adapter.model.max_tokens = 3 if reason == "max_tokens" else 1000
+    calls = 0
+    prompts = []
+
+    def script(prompt, generated):
+        nonlocal calls
+        if not generated:
+            calls += 1
+            prompts.append(tuple(prompt))
+        response = (
+            (
+                b"unfinished"
+                if reason == "max_tokens"
+                else b"<tool_call><function=read_file><parameter=path>unfinished"
+            )
+            if calls == 1
+            else b"ok"
+        )
+        return (
+            response[len(generated)] + 1 if len(generated) < len(response) else FAKE_EOS
+        )
+
+    engine.native.script = script
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=30, tokens=100_000, model_calls=10)
+    )
+    try:
+        boundary = asyncio.run(
+            adapter.capture_boundary(
+                task_id="fake",
+                plan="Summarize.",
+                workspace=tmp_path,
+                allowed_read_paths=(),
+                budget=budget,
+            )
+        )
+        assert calls == 2
+        assert prompts[0] == prompts[1]
+        assert budget.snapshot().model_calls == 2
+        assert budget.snapshot().tokens > boundary.evidence.token_count
+        assert f"ContextRetry:{reason}" in boundary.evidence.native_sync_events
+    finally:
+        engine.close()
+
+
+def test_context_retry_exhaustion_is_distinct_and_bounded(tmp_path) -> None:
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits, ContextPreparationFailure
+
+    engine, adapter = _fake_adapter(context_retry_limit=1)
+    adapter.model.max_tokens = 2
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=30, tokens=100_000, model_calls=10)
+    )
+    try:
+        with pytest.raises(ContextPreparationFailure) as caught:
+            asyncio.run(
+                adapter.capture_boundary(
+                    task_id="fake",
+                    plan="Summarize.",
+                    workspace=tmp_path,
+                    allowed_read_paths=(),
+                    budget=budget,
+                )
+            )
+        assert caught.value.reason == "max_tokens"
+        assert caught.value.attempts == 2
+        assert budget.snapshot().model_calls == 2
+        assert budget.snapshot().tokens > 4
+        assert not adapter.session.transcript.tokens
+        assert not adapter._message_history
+    finally:
+        engine.close()
+
+
+def test_failed_context_over_budget_is_cleared_without_retry(tmp_path) -> None:
+    from plan_comparison.budget import BudgetExhausted, MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    engine, adapter = _fake_adapter()
+    adapter.model.max_tokens = 2
+    budget = MonotonicBudget(BudgetLimits(wall_seconds=30, tokens=1, model_calls=10))
+    try:
+        with pytest.raises(BudgetExhausted):
+            asyncio.run(
+                adapter.capture_boundary(
+                    task_id="fake",
+                    plan="Summarize.",
+                    workspace=tmp_path,
+                    allowed_read_paths=(),
+                    budget=budget,
+                )
+            )
+        assert budget.snapshot().model_calls == 1
+        assert budget.snapshot().tokens > 1
+        assert not adapter.session.transcript.tokens
+        assert not adapter._message_history
+    finally:
+        engine.close()
+
+
+def test_shared_tool_schema_still_refuses_read_only_writes_and_gates(tmp_path) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from ds4py._native.fake import FAKE_EOS
+    from pydantic_ai.messages import ToolReturnPart
+
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    engine, adapter = _fake_adapter(family="qwen")
+    responses = [
+        b"<tool_call><function=write_file><parameter=path>app.py</parameter>"
+        b"<parameter=content>bad</parameter></function></tool_call>",
+        b"<tool_call><function=run_visible_gate><parameter=gate_id>unknown</parameter>"
+        b"</function></tool_call>",
+        b"done",
+    ]
+    round_number = -1
+
+    def script(prompt, generated):
+        nonlocal round_number
+        if not generated:
+            round_number += 1
+        response = responses[round_number]
+        return (
+            response[len(generated)] + 1 if len(generated) < len(response) else FAKE_EOS
+        )
+
+    engine.native.script = script
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=30, tokens=100_000, model_calls=10)
+    )
+    try:
+        asyncio.run(
+            adapter.capture_boundary(
+                task_id="fake",
+                plan="Summarize.",
+                workspace=tmp_path,
+                allowed_read_paths=(),
+                budget=budget,
+            )
+        )
+        results = [
+            part.content
+            for message in adapter._message_history
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        assert len(results) == 2
+        assert all(result.startswith("error:") for result in results)
+        assert not (tmp_path / "app.py").exists()
+        assert adapter.agents.context is adapter.agents.prose is adapter.agents.compiled
+    finally:
+        engine.close()
 
 
 def test_read_failures_return_to_the_model(tmp_path) -> None:

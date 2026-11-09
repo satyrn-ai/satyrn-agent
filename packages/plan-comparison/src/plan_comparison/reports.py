@@ -104,7 +104,9 @@ def build_report(
     if status is None:
         if any(pair.status == "harness_fault" for pair in pairs):
             status = "harness_fault"
-        elif preflight_diagnostics or any(pair.status == "blocked" for pair in pairs):
+        elif preflight_diagnostics or any(
+            pair.status in ("blocked", "context_failed") for pair in pairs
+        ):
             status = "blocked"
         else:
             status = "completed"

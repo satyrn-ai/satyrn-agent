@@ -29,13 +29,17 @@ from plan_comparison.contracts import (
     BoundaryEvidence,
     BudgetLimits,
     BudgetSnapshot,
+    BudgetTracker,
     CallableBodyTarget,
     CapabilityCheckRecord,
+    ContextPreparationFailure,
     ExecutionManifest,
     GateResult,
+    HarnessFault,
     HostGrade,
     ManifestDiagnostic,
     ManifestInputs,
+    ModelResponseFailure,
     PacketDigest,
     PairResult,
     PublicTaskInputs,
@@ -81,6 +85,20 @@ from plan_comparison.workspace import (
 
 class RunnerHarnessFault(RuntimeError):
     pass
+
+
+def _harness_fault(error: Exception) -> HarnessFault:
+    return HarnessFault(type(error).__name__, str(error))
+
+
+def _gate_fault(gates: tuple[GateResult, ...]) -> HarnessFault | None:
+    failures = [gate for gate in gates if gate.status in ("error", "timed_out")]
+    if not failures:
+        return None
+    return HarnessFault(
+        "GateError",
+        "\n".join(f"{gate.gate_id}: {gate.output_excerpt}" for gate in failures),
+    )
 
 
 type ArmRunStatus = Literal[
@@ -400,7 +418,12 @@ class ExperimentRunner:
                 registered_artifacts=tuple(actuals),
             )
             pairs.append(result)
-            if result.status in ("blocked", "harness_fault", "interrupted"):
+            if result.status in (
+                "blocked",
+                "harness_fault",
+                "interrupted",
+                "context_failed",
+            ):
                 break
         if diagnostics:
             report_status: Literal["completed", "blocked", "harness_fault"] = (
@@ -601,6 +624,7 @@ class ExperimentRunner:
                 diagnostic=self._diagnostic(
                     "runner.failure", str(error), field="/runner"
                 ),
+                harness_fault=_harness_fault(error),
             )
         try:
             await worker.close(budget=shared_budget)
@@ -608,6 +632,7 @@ class ExperimentRunner:
             result = replace(
                 result,
                 status="harness_fault",
+                harness_fault=result.harness_fault or _harness_fault(error),
                 registration_diagnostics=result.registration_diagnostics
                 + (self._diagnostic("worker.close", str(error), field="/worker"),),
             )
@@ -617,6 +642,7 @@ class ExperimentRunner:
             return replace(
                 result,
                 status="harness_fault",
+                harness_fault=result.harness_fault or _harness_fault(error),
                 registration_diagnostics=result.registration_diagnostics
                 + (
                     self._diagnostic(
@@ -669,6 +695,7 @@ class ExperimentRunner:
                 diagnostic=self._diagnostic(
                     "runner.input_invalid", str(error), field="/inputs"
                 ),
+                harness_fault=_harness_fault(error),
             )
         if manifest.task_id != inputs.task_id:
             return self._empty_pair(
@@ -755,6 +782,7 @@ class ExperimentRunner:
                 diagnostic=self._diagnostic(
                     "runner.packet_load", str(error), field="/packets"
                 ),
+                harness_fault=_harness_fault(error),
             )
         access_diagnostics = _task_access_diagnostics(inputs, manifest, packets)
         if access_diagnostics:
@@ -890,6 +918,19 @@ class ExperimentRunner:
                 capabilities=capabilities,
                 boundary=boundary,
             )
+        except ContextPreparationFailure as error:
+            return self._empty_pair(
+                inputs.task_id,
+                seed,
+                pair_id,
+                arm_order,
+                "context_failed",
+                shared_budget.snapshot(),
+                capabilities=capabilities,
+                diagnostic=self._diagnostic(
+                    "runner.context_failed", str(error), field="/boundary"
+                ),
+            )
         except Exception as error:
             return self._empty_pair(
                 inputs.task_id,
@@ -903,6 +944,7 @@ class ExperimentRunner:
                 diagnostic=self._diagnostic(
                     "runner.common_boundary", str(error), field="/boundary"
                 ),
+                harness_fault=_harness_fault(error),
             )
 
         assert capabilities is not None
@@ -1079,16 +1121,39 @@ class ExperimentRunner:
         task_port: ReferenceTaskPort,
     ) -> ArmResult:
         arm_started = time.monotonic()
-        workspace = task_port.create_workspace(inputs.task_id, arm, seed)
+        try:
+            workspace = task_port.create_workspace(inputs.task_id, arm, seed)
+        except Exception as error:
+            return self._empty_arm(
+                inputs.task_id, arm, "harness_fault", _harness_fault(error)
+            )
         if _is_within(self.store.root, workspace):
-            return self._empty_arm(inputs.task_id, arm, "harness_fault")
+            return self._empty_arm(
+                inputs.task_id,
+                arm,
+                "harness_fault",
+                HarnessFault(
+                    "RunnerHarnessFault", "Worker workspace contains host records."
+                ),
+            )
         try:
             start_snapshot = snapshot_workspace(workspace)
-        except WorkspaceError:
-            return self._empty_arm(inputs.task_id, arm, "harness_fault")
+        except WorkspaceError as error:
+            return self._empty_arm(
+                inputs.task_id, arm, "harness_fault", _harness_fault(error)
+            )
         if workspace_sha256(start_snapshot) != expected_workspace_hash:
-            return self._empty_arm(inputs.task_id, arm, "harness_fault")
+            return self._empty_arm(
+                inputs.task_id,
+                arm,
+                "harness_fault",
+                HarnessFault(
+                    "RunnerHarnessFault",
+                    "Worker workspace differs from the frozen start.",
+                ),
+            )
         budget = MonotonicBudget(self.config.budgets)
+        fault: HarnessFault | None = None
         try:
             await worker.restore_boundary(common_boundary, budget=budget)
             budget.ensure_capacity()
@@ -1098,7 +1163,7 @@ class ExperimentRunner:
                     manifest,
                     packets,
                     plan,
-                    common_boundary.evidence,
+                    common_boundary,
                     workspace,
                     worker,
                     budget,
@@ -1112,13 +1177,15 @@ class ExperimentRunner:
                     workspace,
                     worker,
                     budget,
+                    common_boundary,
                 )
         except BudgetExhausted:
             status, attempts = "budget_exhausted", ()
         except asyncio.CancelledError:
             status, attempts = "interrupted", ()
-        except Exception:
+        except Exception as error:
             status, attempts = "harness_fault", ()
+            fault = _harness_fault(error)
         return self._arm_result(
             inputs.task_id,
             arm,
@@ -1128,6 +1195,7 @@ class ExperimentRunner:
             task_port,
             seed,
             duration_seconds=time.monotonic() - arm_started,
+            harness_fault=fault,
         )
 
     async def _run_prose_arm(
@@ -1136,7 +1204,7 @@ class ExperimentRunner:
         manifest: ExecutionManifest,
         packets: dict[str, tuple[bytes, Packet]],
         plan: str,
-        common_boundary: BoundaryEvidence,
+        common_boundary: WorkerBoundary,
         workspace: Path,
         worker: WorkerPort,
         budget: MonotonicBudget,
@@ -1155,14 +1223,27 @@ class ExperimentRunner:
             )
         )
         readable_paths = tuple(sorted({*inputs.allowed_read_paths, *test_paths}))
+        preparation_start = snapshot_workspace(workspace)
         try:
             for _, packet in packets.values():
                 install_tests(packet, workspace)
-        except (PreparationError, OSError):
-            return "harness_fault", ()
+        except (PreparationError, OSError) as error:
+            attempt = self._preparation_fault_record(
+                inputs.task_id,
+                "prose",
+                preparation_start,
+                budget,
+                str(error),
+                harness_fault=_harness_fault(error),
+                arm="P",
+            )
+            self._persist_attempt(attempt)
+            return "harness_fault", (attempt,)
         attempts: list[AttemptRecord] = []
         feedback: tuple[str, ...] = ()
+        retry_boundary = common_boundary
         for attempt_number in range(1, self.config.p_repair_policy.max_retries + 2):
+            fault: HarnessFault | None = None
             started_at = _timestamp()
             attempt_started = time.monotonic()
             before = snapshot_workspace(workspace)
@@ -1178,6 +1259,8 @@ class ExperimentRunner:
             generation_seconds = 0.0
             try:
                 budget.ensure_capacity()
+                if attempt_number > 1:
+                    await worker.restore_boundary(retry_boundary, budget=budget)
                 generation_started = time.monotonic()
                 reply = await worker.execute_prose(
                     task_id=inputs.task_id,
@@ -1237,31 +1320,45 @@ class ExperimentRunner:
                     all_gates, self.config.max_feedback_characters
                 )
                 budget.ensure_capacity()
+            except ModelResponseFailure as error:
+                status = "failed"
+                error_feedback = (str(error)[: self.config.max_feedback_characters],)
+                try:
+                    restore_workspace(workspace, before)
+                    await worker.restore_boundary(retry_boundary, budget=budget)
+                except BudgetExhausted:
+                    status = "budget_exhausted"
+                except Exception as restore_error:
+                    status = "harness_fault"
+                    fault = _harness_fault(restore_error)
             except BudgetExhausted:
                 status = "budget_exhausted"
             except asyncio.CancelledError:
                 status = "interrupted"
                 restore_workspace(workspace, before)
-            except RunnerHarnessFault:
+            except RunnerHarnessFault as error:
                 status = "harness_fault"
+                fault = _harness_fault(error)
                 try:
                     restore_workspace(workspace, before)
                 except WorkspaceError:
                     pass
-            except (WorkspaceError, OSError):
+            except (WorkspaceError, OSError) as error:
                 status = "harness_fault"
+                fault = _harness_fault(error)
                 try:
                     restore_workspace(workspace, before)
                 except WorkspaceError:
                     pass
             except Exception as error:
                 status = "harness_fault"
-                error_feedback = (f"Worker or gate harness error: {error}",)
+                fault = _harness_fault(error)
             try:
                 after = snapshot_workspace(workspace)
-            except WorkspaceError:
+            except WorkspaceError as error:
                 after = before
                 status = "harness_fault"
+                fault = fault or _harness_fault(error)
             attempt = self._attempt_record(
                 inputs.task_id,
                 "P",
@@ -1276,8 +1373,9 @@ class ExperimentRunner:
                 budget.snapshot(),
                 round_boundary.evidence
                 if round_boundary is not None
-                else common_boundary,
+                else retry_boundary.evidence,
                 feedback,
+                harness_fault=fault or _gate_fault(visible_results + gates),
                 timing=AttemptTiming(
                     preparation_seconds=0.0,
                     generation_seconds=generation_seconds,
@@ -1294,6 +1392,8 @@ class ExperimentRunner:
             )
             self._persist_attempt(attempt)
             attempts.append(attempt)
+            if round_boundary is not None:
+                retry_boundary = round_boundary
             if status == "passed":
                 return "passed", tuple(attempts)
             if status != "failed":
@@ -1310,6 +1410,7 @@ class ExperimentRunner:
         workspace: Path,
         worker: WorkerPort,
         budget: MonotonicBudget,
+        recovery_boundary: WorkerBoundary,
     ) -> tuple[ArmRunStatus, tuple[AttemptRecord, ...]]:
         attempts: list[AttemptRecord] = []
         context = ValidationContext(
@@ -1339,6 +1440,7 @@ class ExperimentRunner:
                     packet_start,
                     budget,
                     str(error),
+                    harness_fault=_harness_fault(error),
                     timing=AttemptTiming(
                         preparation_seconds=preparation_seconds,
                         generation_seconds=0.0,
@@ -1383,13 +1485,36 @@ class ExperimentRunner:
                 return "harness_fault", tuple(attempts)
             try:
                 budget.ensure_capacity()
-                packet_boundary = await worker.capture_boundary(
+                packet_boundary = await self._capture_packet_boundary(
+                    worker,
+                    recovery_boundary,
                     task_id=inputs.task_id,
                     plan=plan,
                     workspace=workspace,
                     allowed_read_paths=inputs.allowed_read_paths,
                     budget=budget,
                 )
+                recovery_boundary = packet_boundary
+            except ContextPreparationFailure as error:
+                record = self._attempt_record(
+                    inputs.task_id,
+                    "C",
+                    execution.packet_id,
+                    0,
+                    "failed",
+                    _timestamp(),
+                    workspace_sha256(packet_start),
+                    packet_start,
+                    snapshot_workspace(workspace),
+                    red_gates,
+                    budget.snapshot(),
+                    recovery_boundary.evidence,
+                    (str(error)[: self.config.max_feedback_characters],),
+                )
+                self._persist_attempt(record)
+                attempts.append(record)
+                restore_workspace(workspace, packet_start)
+                return "failed", tuple(attempts)
             except BudgetExhausted:
                 restore_workspace(workspace, packet_start)
                 return "budget_exhausted", tuple(attempts)
@@ -1403,6 +1528,7 @@ class ExperimentRunner:
                     packet_start,
                     budget,
                     f"Could not capture packet boundary: {error}",
+                    harness_fault=_harness_fault(error),
                     gates=red_gates,
                     timing=AttemptTiming(
                         preparation_seconds=preparation_seconds,
@@ -1420,12 +1546,15 @@ class ExperimentRunner:
             feedback: tuple[str, ...] = ()
             retries = self.config.c_retry_limit
             for attempt_number in range(1, retries + 2):
+                fault: HarnessFault | None = None
                 repair_started = time.monotonic()
                 if attempt_number > 1:
                     try:
                         restore_workspace(workspace, prepared_baseline)
                         await worker.restore_boundary(packet_boundary, budget=budget)
                         budget.ensure_capacity()
+                    except BudgetExhausted:
+                        return "budget_exhausted", tuple(attempts)
                     except Exception as error:
                         record = self._preparation_fault_record(
                             inputs.task_id,
@@ -1433,6 +1562,7 @@ class ExperimentRunner:
                             packet_start,
                             budget,
                             f"Could not restore retry boundary: {error}",
+                            harness_fault=_harness_fault(error),
                         )
                         self._persist_attempt(record)
                         attempts.append(record)
@@ -1497,6 +1627,7 @@ class ExperimentRunner:
                         _verify_metered_reply(budget, reply, before_reply)
                         boundary_evidence = reply.boundary_evidence or boundary_evidence
                         current = apply_slot_edit(current, slot.slot_id, reply.content)
+                        worker.workspace_written()
                     attempt_gates = self._run_packet_gates(
                         inputs.task_id,
                         {execution.packet_id: packets[execution.packet_id]},
@@ -1516,10 +1647,28 @@ class ExperimentRunner:
                 except SlotEditError as error:
                     status = "failed"
                     error_feedback = (f"Slot rejected: {error}",)
+                except ModelResponseFailure as error:
+                    status = "failed"
+                    error_feedback = (
+                        str(error)[: self.config.max_feedback_characters],
+                    )
+                    try:
+                        restore_workspace(workspace, before)
+                        await worker.restore_boundary(packet_boundary, budget=budget)
+                    except BudgetExhausted:
+                        status = "budget_exhausted"
+                    except Exception as restore_error:
+                        status = "harness_fault"
+                        fault = _harness_fault(restore_error)
                 except Exception as error:
                     status = "harness_fault"
-                    error_feedback = (f"Harness failure: {error}",)
-                after = snapshot_workspace(workspace)
+                    fault = _harness_fault(error)
+                try:
+                    after = snapshot_workspace(workspace)
+                except WorkspaceError as error:
+                    after = before
+                    status = "harness_fault"
+                    fault = fault or _harness_fault(error)
                 attempt = self._attempt_record(
                     inputs.task_id,
                     "C",
@@ -1534,6 +1683,7 @@ class ExperimentRunner:
                     budget.snapshot(),
                     boundary_evidence,
                     feedback,
+                    harness_fault=fault or _gate_fault(attempt_gates),
                     timing=AttemptTiming(
                         preparation_seconds=(
                             preparation_seconds if attempt_number == 1 else 0.0
@@ -1628,6 +1778,35 @@ class ExperimentRunner:
                 )
         return tuple(results)
 
+    async def _capture_packet_boundary(
+        self,
+        worker: WorkerPort,
+        recovery_boundary: WorkerBoundary,
+        *,
+        task_id: str,
+        plan: str,
+        workspace: Path,
+        allowed_read_paths: tuple[str, ...],
+        budget: BudgetTracker,
+    ) -> WorkerBoundary:
+        for attempt in range(self.config.c_retry_limit + 1):
+            budget.ensure_capacity()
+            try:
+                return await worker.capture_boundary(
+                    task_id=task_id,
+                    plan=plan,
+                    workspace=workspace,
+                    allowed_read_paths=allowed_read_paths,
+                    budget=budget,
+                )
+            except ModelResponseFailure as error:
+                await worker.restore_boundary(recovery_boundary, budget=budget)
+                if attempt == self.config.c_retry_limit:
+                    raise ContextPreparationFailure(
+                        error.reason, attempt + 1
+                    ) from error
+        raise AssertionError("Context retry loop did not return or raise.")
+
     def _visible_gates(
         self,
         task_id: str,
@@ -1653,13 +1832,15 @@ class ExperimentRunner:
         *,
         gates: tuple[GateResult, ...] = (),
         timing: AttemptTiming | None = None,
+        harness_fault: HarnessFault | None = None,
+        arm: Arm = "C",
     ) -> AttemptRecord:
         now = _timestamp()
         digest = workspace_sha256(before)
         return AttemptRecord(
             attempt_id=uuid.uuid4().hex,
             task_id=task_id,
-            arm="C",
+            arm=arm,
             packet_id=packet_id,
             attempt_number=0,
             status="harness_fault",
@@ -1670,9 +1851,14 @@ class ExperimentRunner:
             gates=gates,
             budget=budget.snapshot(),
             boundary_evidence=None,
-            visible_feedback=(message[: self.config.max_feedback_characters],),
+            visible_feedback=(),
             artifact_refs=(),
             timing=timing or AttemptTiming(0.0, 0.0, 0.0, 0.0, 0.0),
+            harness_fault=(
+                harness_fault
+                or _gate_fault(gates)
+                or HarnessFault("PreparationError", message)
+            ),
         )
 
     def _attempt_record(
@@ -1693,6 +1879,7 @@ class ExperimentRunner:
         boundary: BoundaryEvidence | None,
         feedback: tuple[str, ...],
         timing: AttemptTiming | None = None,
+        harness_fault: HarnessFault | None = None,
     ) -> AttemptRecord:
         return AttemptRecord(
             attempt_id=uuid.uuid4().hex,
@@ -1711,6 +1898,7 @@ class ExperimentRunner:
             visible_feedback=feedback,
             artifact_refs=(),
             timing=timing or AttemptTiming(0.0, 0.0, 0.0, 0.0, 0.0),
+            harness_fault=harness_fault,
         )
 
     def _persist_attempt(self, attempt: AttemptRecord) -> None:
@@ -1734,11 +1922,14 @@ class ExperimentRunner:
         seed: int,
         *,
         duration_seconds: float,
+        harness_fault: HarnessFault | None = None,
     ) -> ArmResult:
+        if harness_fault is None and attempts:
+            harness_fault = attempts[-1].harness_fault
         try:
             snapshot = snapshot_workspace(workspace)
             digest = workspace_sha256(snapshot)
-        except WorkspaceError:
+        except WorkspaceError as error:
             return ArmResult(
                 task_id=task_id,
                 arm=arm,
@@ -1747,13 +1938,15 @@ class ExperimentRunner:
                 attempts=attempts,
                 host_grade=None,
                 duration_seconds=duration_seconds,
+                harness_fault=harness_fault or _harness_fault(error),
             )
         grade: HostGrade | None = None
         if status in ("passed", "failed", "budget_exhausted"):
             try:
                 grade = task_port.grade_protected(task_id, arm, seed, workspace)
-            except Exception:
+            except Exception as error:
                 status = "harness_fault"
+                harness_fault = _harness_fault(error)
         return ArmResult(
             task_id=task_id,
             arm=arm,
@@ -1762,6 +1955,7 @@ class ExperimentRunner:
             attempts=attempts,
             host_grade=grade,
             duration_seconds=duration_seconds,
+            harness_fault=harness_fault,
         )
 
     def _empty_arm(
@@ -1769,6 +1963,7 @@ class ExperimentRunner:
         task_id: str,
         arm: Arm,
         status: Literal["blocked", "harness_fault", "budget_exhausted", "interrupted"],
+        harness_fault: HarnessFault | None = None,
     ) -> ArmResult:
         return ArmResult(
             task_id=task_id,
@@ -1777,6 +1972,7 @@ class ExperimentRunner:
             workspace_sha256=None,
             attempts=(),
             host_grade=None,
+            harness_fault=harness_fault,
         )
 
     def _empty_pair(
@@ -1785,13 +1981,20 @@ class ExperimentRunner:
         seed: int,
         pair_id: str,
         arm_order: tuple[Arm, Arm],
-        status: Literal["blocked", "harness_fault", "budget_exhausted", "interrupted"],
+        status: Literal[
+            "blocked",
+            "harness_fault",
+            "budget_exhausted",
+            "interrupted",
+            "context_failed",
+        ],
         budget: BudgetSnapshot,
         *,
         capabilities: WorkerCapabilities | None = None,
         boundary: WorkerBoundary | None = None,
         diagnostic: ManifestDiagnostic | None = None,
         diagnostics: tuple[ManifestDiagnostic, ...] = (),
+        harness_fault: HarnessFault | None = None,
     ) -> PairResult:
         if diagnostic is not None:
             diagnostics = diagnostics + (diagnostic,)
@@ -1804,10 +2007,16 @@ class ExperimentRunner:
             capabilities=capabilities,
             common_boundary=boundary.evidence if boundary else None,
             shared_budget=budget,
-            arms=tuple(self._empty_arm(task_id, arm, status) for arm in arm_order),
+            arms=tuple(
+                self._empty_arm(
+                    task_id, arm, "blocked" if status == "context_failed" else status
+                )
+                for arm in arm_order
+            ),
             live_authorization_ref=self.config.live_authorization_ref,
             disposable_policy_ref=self.config.disposable_policy_ref,
             registration_diagnostics=diagnostics,
+            harness_fault=harness_fault,
         )
 
     def _diagnostic(self, code: str, message: str, *, field: str) -> ManifestDiagnostic:

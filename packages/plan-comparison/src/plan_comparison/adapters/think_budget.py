@@ -22,6 +22,7 @@ class ThinkingBudgetHook:
         budget_tokens: int,
         closing_tokens: Sequence[int],
         vocab_size: int,
+        force_close: bool = False,
     ) -> None:
         if (
             not isinstance(budget_tokens, int)
@@ -48,6 +49,7 @@ class ThinkingBudgetHook:
             raise ValueError("thinking budget close sequence has an invalid token")
 
         self.budget_tokens = budget_tokens
+        self.force_close = force_close
         self.closing_tokens = tokens
         self._mask = array("f", [-inf]) * vocab_size
         self._reply_origin: int | None = None
@@ -117,7 +119,7 @@ class ThinkingBudgetHook:
             self._force_start = None
             self._force_prefix = None
             return
-        if thinking_usage < self.budget_tokens:
+        if not self.force_close and thinking_usage < self.budget_tokens:
             self._force_start = None
             self._force_prefix = None
             return

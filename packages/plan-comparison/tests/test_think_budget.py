@@ -87,6 +87,22 @@ def test_budget_hook_leaves_sampling_untouched_until_the_limit() -> None:
     assert _selected_token(view) == 11
 
 
+def test_immediate_close_does_not_allow_a_thinking_token() -> None:
+    hook = _thinking_budget_hook_type()(
+        budget_tokens=1, closing_tokens=(11, 12), vocab_size=32, force_close=True
+    )
+    view = _FakeLogitsView(
+        position=100, in_think=True, think_tokens=0, sampled_tokens=()
+    )
+    hook(view)
+    assert _selected_token(view) == 11
+    hook(view)
+    assert _selected_token(view) == 11
+    view.update(position=101, in_think=True, think_tokens=1, sampled_tokens=(11,))
+    hook(view)
+    assert _selected_token(view) == 12
+
+
 def test_budget_hook_counts_thinking_across_blocks() -> None:
     hook_type = _thinking_budget_hook_type()
     hook = hook_type(budget_tokens=2, closing_tokens=(11, 12), vocab_size=32)

@@ -40,9 +40,31 @@ type PairStatus = Literal[
     "harness_fault",
     "budget_exhausted",
     "interrupted",
+    "context_failed",
 ]
 type CapabilityCheckStatus = Literal["passed", "blocked", "failed"]
 type RunMode = Literal["cpu", "pilot", "deciding"]
+
+
+class ModelResponseFailure(RuntimeError):
+    """A model response failed and may consume the configured repair retry."""
+
+    def __init__(self, reason: str) -> None:
+        if reason not in ("max_tokens", "parser_error"):
+            raise ValueError(f"Not a retryable model response reason: {reason}")
+        self.reason = reason
+        super().__init__(f"Model response ended with {reason}.")
+
+
+class ContextPreparationFailure(ModelResponseFailure):
+    """Shared context could not be prepared within its bounded retries."""
+
+    def __init__(self, reason: str, attempts: int) -> None:
+        self.attempts = attempts
+        super().__init__(reason)
+        self.args = (
+            f"Context preparation failed after {attempts} attempts: {reason}.",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,6 +372,12 @@ class AttemptTiming:
 
 
 @dataclass(frozen=True, slots=True)
+class HarnessFault:
+    exception_type: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
 class AttemptRecord:
     attempt_id: str
     task_id: str
@@ -367,6 +395,7 @@ class AttemptRecord:
     visible_feedback: tuple[str, ...]
     artifact_refs: tuple[str, ...]
     timing: AttemptTiming = AttemptTiming(0.0, 0.0, 0.0, 0.0, 0.0)
+    harness_fault: HarnessFault | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,6 +426,7 @@ class ArmResult:
     attempts: tuple[AttemptRecord, ...]
     host_grade: HostGrade | None
     duration_seconds: float = 0.0
+    harness_fault: HarnessFault | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,6 +443,7 @@ class PairResult:
     live_authorization_ref: str | None = None
     disposable_policy_ref: str | None = None
     registration_diagnostics: tuple[ManifestDiagnostic, ...] = ()
+    harness_fault: HarnessFault | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +461,10 @@ class CapabilityCheckRecord:
 
 
 class WorkerPort(Protocol):
+    def workspace_written(self) -> None:
+        """Notify the worker after a successful host-applied workspace edit."""
+        ...
+
     async def capabilities(self, *, budget: BudgetTracker) -> WorkerCapabilities: ...
 
     async def capture_boundary(

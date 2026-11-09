@@ -172,3 +172,19 @@ def test_report_store_persists_versioned_summary(tmp_path: Path) -> None:
     assert '"record_kind":"report"' in document
     assert '"report_version":0' in document
     assert '"pairs":[]' in document
+
+
+def test_context_failure_cannot_produce_a_completed_report() -> None:
+    pair = PairResult(
+        pair_id="context-failure",
+        task_id="H3",
+        seed=2,
+        arm_order=("P", "C"),
+        status="context_failed",
+        capabilities=None,
+        common_boundary=None,
+        shared_budget=BudgetSnapshot(elapsed_seconds=60, tokens=100, model_calls=3),
+        arms=(),
+    )
+    report = build_report((pair,), experiment_id="context-failure")
+    assert report.status == "blocked"
