@@ -5,22 +5,43 @@ from pathlib import Path
 import pytest
 from ds4py.engine.sampling import SamplingPolicy
 
-from satyrn_agent.config import SatyrnConfig
+from satyrn_agent.config import SamplingOverrides, SatyrnConfig
 from tests.conftest import LiveSettings, assert_alignment, configured_session, serial_then_speculative
+from tests.e2e.corpus import CorpusCase, corpus_cases, require_branches
 
 pytestmark = pytest.mark.live
 
 
-def test_metrics_reconcile_with_committed_stream(live_settings: LiveSettings) -> None:
-    config = SatyrnConfig(drafter_path=live_settings.drafter)
+def _config(settings: LiveSettings, case: CorpusCase) -> SatyrnConfig:
+    return SatyrnConfig(
+        drafter_path=settings.drafter,
+        draft_tokens=case.get("draft_tokens", 0),
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
 
-    with configured_session(live_settings, config) as (wrapper, session):
+
+def _policy(case: CorpusCase) -> SamplingPolicy:
+    return SamplingPolicy(
+        temperature=case["temperature"],
+        top_k=0 if case["temperature"] == 0 else 20,
+        top_p=1.0 if case["temperature"] == 0 else 0.95,
+        min_p=0.0,
+        seed=case["seed"],
+    )
+
+
+def test_metrics_reconcile_with_committed_stream(live_settings: LiveSettings) -> None:
+    cases = corpus_cases()
+    case = cases["greedy-parity"]
+    config = _config(live_settings, case)
+
+    with configured_session(live_settings, config, seed=case["seed"]) as (wrapper, session):
         _, speculative, _ = serial_then_speculative(
             wrapper,
             session,
-            "List three properties of a reliable token transaction.",
-            max_tokens=48,
-            sampling=SamplingPolicy(temperature=0.0, top_k=0, top_p=1.0, min_p=0.0, seed=1),
+            case["prompt"],
+            max_tokens=case["max_tokens"],
+            sampling=_policy(case),
         )
         metrics = wrapper.dflash_metrics
         assert_alignment(session, speculative)
@@ -30,20 +51,51 @@ def test_metrics_reconcile_with_committed_stream(live_settings: LiveSettings) ->
     assert 0 <= metrics.drafts_accepted <= metrics.drafts_offered
     assert metrics.discarded_tails == metrics.drafts_offered - metrics.drafts_accepted
     assert metrics.acceptance_rate == pytest.approx(metrics.drafts_accepted / metrics.drafts_offered)
+    reached = {"anchor", "native-commit-publication"}
+    if metrics.drafts_accepted > 0:
+        reached.add("matching-draft")
+    if metrics.drafts_accepted < metrics.drafts_offered:
+        reached.add("partial-acceptance")
+    if metrics.replacement_anchors > 0:
+        reached.update({"mismatch-or-bonus", "mismatch-replacement"})
+    require_branches(case, reached)
+
+    full_case = cases["full-acceptance"]
+    full_config = _config(live_settings, full_case)
+    with configured_session(live_settings, full_config, seed=full_case["seed"]) as (wrapper, session):
+        _, full, _ = serial_then_speculative(
+            wrapper,
+            session,
+            full_case["prompt"],
+            max_tokens=full_case["max_tokens"],
+            sampling=_policy(full_case),
+        )
+        full_metrics = wrapper.dflash_metrics
+        assert_alignment(session, full)
+
+    assert full_metrics is not None
+    full_reached = set()
+    if full_metrics.committed_blocks > 0:
+        full_reached.add("native-commit-publication")
+    if full_metrics.drafts_offered > 0 and full_metrics.drafts_accepted == full_metrics.drafts_offered:
+        full_reached.add("full-acceptance")
+    require_branches(full_case, full_reached)
 
 
 def test_external_serial_speculative_timing_metadata(live_settings: LiveSettings, tmp_path: Path) -> None:
-    config = SatyrnConfig(drafter_path=live_settings.drafter)
+    case = corpus_cases()["external-timing"]
+    config = _config(live_settings, case)
 
-    with configured_session(live_settings, config) as (wrapper, session):
+    with configured_session(live_settings, config, seed=case["seed"]) as (wrapper, session):
         serial, speculative, _ = serial_then_speculative(
             wrapper,
             session,
-            "Explain speculative decoding in two concise sentences.",
-            max_tokens=48,
-            sampling=SamplingPolicy(temperature=0.0, top_k=0, top_p=1.0, min_p=0.0, seed=1),
+            case["prompt"],
+            max_tokens=case["max_tokens"],
+            sampling=_policy(case),
         )
         metrics = wrapper.dflash_metrics
+        assert_alignment(session, speculative)
 
     evidence = {
         "machine": platform.machine(),
@@ -53,8 +105,22 @@ def test_external_serial_speculative_timing_metadata(live_settings: LiveSettings
         "drafter": str(live_settings.drafter),
         "serial_seconds": serial.wall_seconds,
         "speculative_seconds": speculative.wall_seconds,
+        "serial_tokens": len(serial.token_ids),
+        "speculative_tokens": len(speculative.token_ids),
+        "drafts_offered": metrics.drafts_offered if metrics is not None else None,
+        "drafts_accepted": metrics.drafts_accepted if metrics is not None else None,
+        "replacement_anchors": metrics.replacement_anchors if metrics is not None else None,
         "acceptance_rate": metrics.acceptance_rate if metrics is not None else None,
     }
-    (tmp_path / "timing.json").write_text(json.dumps(evidence, indent=2) + "\n")
+    rendered = json.dumps(evidence, indent=2) + "\n"
+    (tmp_path / "timing.json").write_text(rendered)
+    print(f"timing.json:\n{rendered}", end="")
     assert serial.wall_seconds > 0
     assert speculative.wall_seconds > 0
+    assert metrics is not None
+    reached = {"external-timing"}
+    if metrics.drafts_accepted < metrics.drafts_offered:
+        reached.add("partial-acceptance")
+    if metrics.replacement_anchors > 0:
+        reached.add("mismatch-replacement")
+    require_branches(case, reached)

@@ -1,8 +1,10 @@
+import threading
 import time
 
 import pytest
 from ds4py import ThinkMode
 from ds4py.engine.events import ReserveReached, ToolCalls
+from ds4py.engine.logits import LogitsView
 from ds4py.engine.tool_prompt import ToolDefinition
 
 from satyrn_agent.config import SamplingOverrides, SatyrnConfig
@@ -123,16 +125,25 @@ def test_zero_drafts_reaches_bonus_anchor(live_settings: LiveSettings) -> None:
         seed=case["seed"],
         ctx=case.get("ctx", 100_000),
     ) as (wrapper, session):
+        recorder = MetadataRecorder()
         prepare_chat(session, case["prompt"])
-        observation = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
+        session.add_logits_hook(recorder)
+        observation = observe_round(
+            session,
+            max_tokens=case["max_tokens"],
+            started=time.perf_counter(),
+            resume_once_with_zero_reserve=True,
+        )
         assert_alignment(session, observation)
         metrics = wrapper.dflash_metrics
 
     reached = set()
     if metrics is not None and metrics.drafts_offered == 0:
         reached.add("zero-drafts")
-    if metrics is not None and metrics.committed_blocks > 0:
+    if len(recorder.calls) > 1 and recorder.calls[1].position > recorder.calls[0].position:
         reached.add("bonus-anchor")
+    assert metrics is not None and metrics.committed_blocks > 0
+    assert observation.reason == case["expected_reason"]
     require_branches(case, reached)
 
 
@@ -189,18 +200,25 @@ def test_cancellation_is_required_and_preserves_alignment(live_settings: LiveSet
         sampling=SamplingOverrides(temperature=case["temperature"]),
     )
 
-    with configured_session(live_settings, config, seed=case["seed"]) as (_, session):
+    cancel = threading.Event()
+    sample_calls = 0
+    fired_during_verify = False
+
+    def cancel_during_verify(_: LogitsView) -> None:
+        nonlocal sample_calls, fired_during_verify
+        sample_calls += 1
+        if sample_calls == 2:
+            fired_during_verify = True
+            cancel.set()
+
+    with configured_session(live_settings, config, seed=case["seed"], cancel=cancel) as (_, session):
         prepare_chat(session, case["prompt"])
-        observation = observe_round(
-            session,
-            max_tokens=case["max_tokens"],
-            started=time.perf_counter(),
-            cancel_after_first_token=True,
-        )
+        session.add_logits_hook(cancel_during_verify)
+        observation = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
         assert_alignment(session, observation)
 
     reached = set()
-    if observation.reason == "interrupted":
+    if observation.reason == "interrupted" and fired_during_verify:
         reached.add("cancellation-with-verify-open")
     if observation.token_ids:
         reached.add("accepted-prefix-commit")

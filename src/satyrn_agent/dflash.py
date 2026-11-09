@@ -100,7 +100,7 @@ class DFlashStep:
             block = _BlockState(pending.token)
             ctx.begin_staging()
             verdict = ctx.stage(block.anchor, ctx.accept(block.anchor))
-            if verdict is Verdict.STOP_AFTER:
+            if verdict is Verdict.STOP_AFTER and ctx.reason != "context_reserve":
                 self._publish_block(session, ctx, block, commit_rows=None)
                 return
             if ctx.cancelled():

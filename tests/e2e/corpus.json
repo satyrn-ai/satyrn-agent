@@ -28,7 +28,33 @@
         "anchor",
         "matching-draft",
         "mismatch-or-bonus",
+        "mismatch-replacement",
+        "partial-acceptance",
         "native-commit-publication"
+      ]
+    },
+    {
+      "name": "full-acceptance",
+      "prompt": "Explain speculative decoding in two concise sentences.",
+      "seed": 1,
+      "temperature": 0.0,
+      "max_tokens": 2,
+      "draft_tokens": 1,
+      "branches": [
+        "full-acceptance",
+        "native-commit-publication"
+      ]
+    },
+    {
+      "name": "external-timing",
+      "prompt": "Explain speculative decoding in two concise sentences.",
+      "seed": 1,
+      "temperature": 0.0,
+      "max_tokens": 48,
+      "branches": [
+        "external-timing",
+        "mismatch-replacement",
+        "partial-acceptance"
       ]
     },
     {
@@ -39,7 +65,9 @@
       "max_tokens": 40,
       "branches": [
         "seeded-rng-continuation",
-        "canonical-plus-staged-sampling"
+        "canonical-plus-staged-sampling",
+        "mismatch-replacement",
+        "partial-acceptance"
       ]
     },
     {
@@ -102,7 +130,9 @@
       "prompt": "Answer with one short token.",
       "seed": 13,
       "temperature": 0.0,
-      "max_tokens": 1,
+      "max_tokens": 2,
+      "ctx": 135,
+      "expected_reason": "context_exhausted",
       "branches": [
         "zero-drafts",
         "bonus-anchor"

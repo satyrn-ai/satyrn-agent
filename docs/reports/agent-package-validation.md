@@ -35,20 +35,20 @@ All commands ran from the repository root through devenv.
   including Ruff, ty, ShellCheck, configuration, and workflow checks.
 - `uv run --frozen pytest tests/e2e/model_free --cov=satyrn_agent
   --cov-branch --cov-report=term-missing --cov-fail-under=100 -q` —
-  **115 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
-  including 58 JSON scenarios and production config-boundary tests through the
+  **116 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
+  including 59 JSON scenarios and production config-boundary tests through the
   shared public-flow runner.
 - `uv run --frozen --no-sync pytest tests/abnormal -q` — **27 passed** in the
   separate exception suite.
-- `uv run --frozen pytest tests/e2e/live -q` — **17 passed, 0 skipped** in
-  117.56 seconds with the real inputs and GPU lock below.
+- `uv run --frozen pytest tests/e2e/live -q -rA` — **17 passed, 0 skipped** in
+  109.72 seconds with the real inputs and GPU lock below.
 - `uv build --wheel` — passed; the wheel contains the native adapter, DFlash
   step, engine factory, and `ds4py.bindings` entry-point metadata.
 - `actionlint .github/workflows/ci.yml .github/workflows/ds4-tools.yml` — passed.
 - `bash tests/ds4_tools_test.sh` — **49 passed, 0 failed**.
 - `git diff --check` — passed.
 
-The 115 model-free tests combine public-flow scenarios with direct parser,
+The 116 model-free tests combine public-flow scenarios with direct parser,
 schema, and generation checks. Public scenarios use `satyrn_agent.open()` and
 real ds4-py worker/session/decode code; only the external native library is
 scripted. The 100% result does not convert those doubles into normal-path
@@ -93,27 +93,49 @@ Every live invocation held an exclusive `fcntl` lock on
 `/Users/koudai/work/.dflash-locks/gpu`. The final command inside that lock was:
 
 ```bash
-devenv shell -- uv run --frozen pytest tests/e2e/live -q
+devenv shell -- uv run --frozen pytest tests/e2e/live -q -rA
 ```
 
 It produced **17 passed, 0 skipped**. This covers real auto/on/off policy,
 explicit-zero and native float32 sampling defaults, repeated rounds, greedy and
 seeded serial/speculative parity (tokens, events, metadata, terminal reason, and
 RNG continuation), tool-close and parser-error behavior, stop token/sequence,
-max-token, no-draft, context-reserve, and cancellation cases. The corpus pins the
-actual context and non-thinking settings needed to reach the parser, stop, and
-reserve branches. Metrics reconcile with the committed stream.
+max-token, native empty-draft/bonus-row, context-reserve, and cancellation cases.
+Cancellation is triggered by the real cancellation event during the first verify-row
+sample. Full, partial, and mismatch-replacement acceptance are asserted from real
+metrics. The corpus pins the actual context and non-thinking settings needed to
+reach the parser, stop, and reserve branches. Metrics reconcile with the committed
+stream.
 
 ### Serial/speculative speed
 
 The latest full-suite timing case used the documented greedy corpus prompt
 `Explain speculative decoding in two concise sentences.`, seed 1, and a 48-token
 limit. Timing excludes model loading and snapshot setup. A noisy timing change is
-not a correctness failure.
+not a correctness failure. Both rounds emitted 48 tokens. The run printed this
+timing JSON into the retained log:
+
+```json
+{
+  "machine": "arm64",
+  "platform": "macOS-15.7.1-arm64-arm-64bit-Mach-O",
+  "backend": "metal",
+  "model": "/Volumes/WD_Black_SN8100/models/Qwen3.8-27B-Q4_K_M.gguf",
+  "drafter": "/Volumes/WD_Black_SN8100/models/dflash-Qwen3.8-27B-Q4_0.gguf",
+  "serial_seconds": 3.11832766700536,
+  "speculative_seconds": 1.0575361247174442,
+  "serial_tokens": 48,
+  "speculative_tokens": 48,
+  "drafts_offered": 84,
+  "drafts_accepted": 36,
+  "replacement_anchors": 9,
+  "acceptance_rate": 0.42857142857142855
+}
+```
 
 | Machine | Backend | Target | Drafter | Serial | Speculative | Speedup | Acceptance |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Apple M4 Max, 36 GiB, macOS 15.7.1 | Metal | `Qwen3.8-27B-Q4_K_M.gguf`, Q4_K_M | `dflash-Qwen3.8-27B-Q4_0.gguf`, Q4_0 | 3.210391 s | 1.061504 s | 3.024x | 42.857% |
+| Apple M4 Max, 36 GiB, macOS 15.7.1 | Metal | `Qwen3.8-27B-Q4_K_M.gguf`, Q4_K_M | `dflash-Qwen3.8-27B-Q4_0.gguf`, Q4_0 | 3.118328 s | 1.057536 s | 2.949x | 42.857% |
 
 `tests/e2e/README.md` and `tests/e2e/corpus.json` retain the identities, prompts,
 seeds, expected terminal reasons, and branch mapping. The separate model-free

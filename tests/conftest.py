@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    import threading
+
     from tests.e2e.model_free._native import ScenarioFakeNative
 
 import pytest
@@ -96,6 +98,7 @@ def configured_session(
     seed: int = 1,
     ctx: int = 100_000,
     think: int = ThinkMode.HIGH,
+    cancel: threading.Event | None = None,
 ) -> Generator[tuple[SatyrnEngine, Session]]:
     with satyrn_agent.open(
         settings.model,
@@ -104,6 +107,7 @@ def configured_session(
         lib=settings.lib,
         seed=seed,
         think=think,
+        cancel=cancel,
     ) as wrapper:
         yield wrapper, wrapper.session()
 
@@ -179,18 +183,21 @@ def observe_round(
     sampling: SamplingPolicy | None = None,
     stop_sequences: Sequence[bytes] = (),
     started: float,
-    cancel_after_first_token: bool = False,
+    resume_once_with_zero_reserve: bool = False,
 ) -> RoundObservation:
     import time
 
     assistant_start = len(_assistant_tokens(session.transcript))
     events = []
+    resumed = False
     for event in session.run_round(max_tokens=max_tokens, sampling=sampling, stop_sequences=stop_sequences):
         if isinstance(event, ReserveReached):
-            event.fail()
+            if resume_once_with_zero_reserve and not resumed:
+                event.resume(0)
+                resumed = True
+            else:
+                event.fail()
         events.append(event)
-        if cancel_after_first_token and isinstance(event, Token):
-            session.cancel()
     return RoundObservation(
         events=events,
         transcript=session.transcript.tokens,
