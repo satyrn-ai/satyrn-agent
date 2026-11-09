@@ -115,5 +115,8 @@ Run the focused shell module or Python test for the subsystem you change, then
 run the complete static gate and portable shell suite. Existing tests must not be
 weakened to make a refactor pass.
 
+See `tests/e2e/README.md` for instructions to add model-free scenarios and live
+corpus cases, and to review and update inline-snapshot files.
+
 Do not commit generated build output, native libraries, traces, virtual
 environments, or local `.devenv` state.

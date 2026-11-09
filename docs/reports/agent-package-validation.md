@@ -6,7 +6,7 @@ Date: 2026-11-09
 
 - Agent implementation at validation: `test/live-metal-e2e` from `origin/main` at
   `c50f2c4fbe7eb87874df64832bdfdde638029beb`; validated implementation head
-  `04139cc5a8a6288a008d04317f5619c5f7492bb4`
+  `3243943ceb4b535c08cfdae3d88241a98aa14f90`
 - Quality-foundation base: `60baa62151fdfdd6f1b62ef955bfd6e7b4456ee0`
 - ds4-py companion: `5c98c6ac86cafef56780c3bcbb87c3ecaef52aef`
 - ds4 upstream pin: `antirez/ds4` at `5379c1c9ac315f1540371b06a3db88491d4059ff`
@@ -36,20 +36,20 @@ All commands ran from the repository root through devenv.
   including Ruff, ty, ShellCheck, configuration, and workflow checks.
 - `uv run --frozen pytest tests/e2e/model_free --cov=satyrn_agent
   --cov-branch --cov-report=term-missing --cov-fail-under=100 -q` —
-  **117 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
-  including 60 JSON scenarios and production config-boundary tests through the
+  **116 passed; 100% line and 100% branch coverage** over `satyrn_agent`,
+  including 59 JSON scenarios and production config-boundary tests through the
   shared public-flow runner.
 - `uv run --frozen --no-sync pytest tests/abnormal -q` — **27 passed** in the
   separate exception suite.
-- `uv run --frozen pytest tests/e2e/live -q -rA` — **17 passed, 0 skipped** in
-  109.48 seconds with the real inputs and GPU lock below.
+- `uv run --frozen pytest tests/e2e/live -q -rA` — **19 passed, 0 skipped** in
+  111.55 seconds with the real inputs and GPU lock below.
 - `uv build --wheel` — passed; the wheel contains the native adapter, DFlash
   step, engine factory, and `ds4py.bindings` entry-point metadata.
 - `actionlint .github/workflows/ci.yml .github/workflows/ds4-tools.yml` — passed.
 - `bash tests/ds4_tools_test.sh` — **49 passed, 0 failed**.
 - `git diff --check` — passed.
 
-The 117 model-free tests combine public-flow scenarios with direct parser,
+The 116 model-free tests combine public-flow scenarios with direct parser,
 schema, and generation checks. Public scenarios use `satyrn_agent.open()` and
 real ds4-py worker/session/decode code; only the external native library is
 scripted. The 100% result does not convert those doubles into normal-path
@@ -97,17 +97,22 @@ Every live invocation held an exclusive `fcntl` lock on
 devenv shell -- uv run --frozen pytest tests/e2e/live -q -rA
 ```
 
-It produced **17 passed, 0 skipped**. This covers real auto/on/off policy,
+It produced **19 passed, 0 skipped**. This covers real auto/on/off policy,
 explicit-zero and native float32 sampling defaults, repeated rounds, greedy and
 seeded serial/speculative parity (tokens, events, metadata, terminal reason, and
 RNG continuation), tool-close and parser-error behavior, stop token/sequence,
-max-token, native empty-draft/bonus-row, context-reserve, and cancellation cases.
+max-token, context-reserve anchor, and cancellation cases.
 Cancellation is triggered by the real cancellation event during the first verify-row
 sample. Full, partial, and mismatch-replacement acceptance are asserted from real
 metrics. The dedicated partial case commits one block with two drafts offered and
 one accepted; emitted tokens equal committed blocks plus accepted drafts in the
-bounded cases. The corpus pins the actual context and non-thinking settings needed
-to reach the parser, stop, and reserve branches.
+bounded cases. Metrics files under `tests/e2e/live/expected` are compared through
+one inline-snapshot assertion helper; updates require an explicit local review.
+The corpus pins the actual context and non-thinking settings needed to reach the
+parser, stop, and reserve branches. The spec's 2026-11-09 re-plan records why native
+empty-draft returns stay model-free: the pinned real drafter only returns empty at
+the context cap, where `STOP_AFTER` requires ordinary anchor eval and immediate
+return. The live suite does not relabel zero draft requests as native empty drafts.
 
 ### Serial/speculative speed
 
@@ -124,8 +129,8 @@ timing JSON into the retained log:
   "backend": "metal",
   "model": "/Volumes/WD_Black_SN8100/models/Qwen3.8-27B-Q4_K_M.gguf",
   "drafter": "/Volumes/WD_Black_SN8100/models/dflash-Qwen3.8-27B-Q4_0.gguf",
-  "serial_seconds": 3.140690665692091,
-  "speculative_seconds": 1.034128624945879,
+  "serial_seconds": 3.0867980420589447,
+  "speculative_seconds": 1.0281755831092596,
   "serial_tokens": 48,
   "speculative_tokens": 48,
   "drafts_offered": 84,
@@ -137,7 +142,7 @@ timing JSON into the retained log:
 
 | Machine | Backend | Target | Drafter | Serial | Speculative | Speedup | Acceptance |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Apple M4 Max, 36 GiB, macOS 15.7.1 | Metal | `Qwen3.8-27B-Q4_K_M.gguf`, Q4_K_M | `dflash-Qwen3.8-27B-Q4_0.gguf`, Q4_0 | 3.140691 s | 1.034129 s | 3.037x | 42.857% |
+| Apple M4 Max, 36 GiB, macOS 15.7.1 | Metal | `Qwen3.8-27B-Q4_K_M.gguf`, Q4_K_M | `dflash-Qwen3.8-27B-Q4_0.gguf`, Q4_0 | 3.086798 s | 1.028176 s | 3.002x | 42.857% |
 
 `tests/e2e/README.md` and `tests/e2e/corpus.json` retain the identities, prompts,
 seeds, expected terminal reasons, and branch mapping. The separate model-free
@@ -153,8 +158,11 @@ native patch and ds4-py contracts. Changes made after that review include:
   checkpoint;
 - validate native sampling ranges as well as finite values;
 - make consecutive-round alignment use per-round assistant offsets;
-- require exact live terminal reasons and reached branches, including zero
-  drafts, parser error, context reserve, and cancellation;
+- require exact live terminal reasons and reached branches, including parser
+  error, context reserve, and cancellation; keep native empty-draft returns in
+  model-free scenarios because the pinned real engine only returns empty at the
+  context cap, where the decode contract requires an ordinary anchor eval and
+  immediate return rather than a draft request;
 - compare full normalized event sequences and canonical-plus-staged metadata;
 - open the exact ABI-built library for consecutive public rounds; and
 - reject sessions on a closed wrapper and preserve the `on` policy's missing

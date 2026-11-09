@@ -10,24 +10,6 @@ from tests.conftest import LiveSettings
 
 pytestmark = [pytest.mark.build, pytest.mark.live]
 
-_BUILT_LIBRARY_ROUNDTRIP = """
-import sys
-import time
-from pathlib import Path
-
-from satyrn_agent.config import SatyrnConfig
-from tests.conftest import LiveSettings, assert_alignment, configured_session, observe_round, prepare_chat
-
-settings = LiveSettings(Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[1]), None)
-config = SatyrnConfig(drafter_path=settings.drafter)
-with configured_session(settings, config) as (wrapper, session):
-    assert wrapper.dflash_metrics is not None
-    for prompt in ("Say hello briefly.", "Say goodbye briefly."):
-        prepare_chat(session, prompt)
-        observation = observe_round(session, max_tokens=16, started=time.perf_counter())
-        assert_alignment(session, observation)
-"""
-
 
 def run(*args: str) -> None:
     subprocess.run(args, check=True)
@@ -64,9 +46,12 @@ def test_build_check_manifest_and_load_workflow(live_settings: LiveSettings, tmp
 
     run(
         sys.executable,
-        "-c",
-        _BUILT_LIBRARY_ROUNDTRIP,
+        "-m",
+        "tests.e2e.live._roundtrip",
+        "--lib",
         str(library),
+        "--model",
         str(live_settings.model),
+        "--drafter",
         str(live_settings.drafter),
     )

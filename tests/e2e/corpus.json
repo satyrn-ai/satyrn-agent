@@ -27,7 +27,6 @@
       "branches": [
         "anchor",
         "matching-draft",
-        "mismatch-or-bonus",
         "mismatch-replacement",
         "partial-acceptance",
         "native-commit-publication"
@@ -76,8 +75,6 @@
       "temperature": 0.6,
       "max_tokens": 40,
       "branches": [
-        "seeded-rng-continuation",
-        "canonical-plus-staged-sampling",
         "mismatch-replacement",
         "partial-acceptance"
       ]
@@ -138,7 +135,7 @@
       ]
     },
     {
-      "name": "zero-drafts",
+      "name": "context-anchor",
       "prompt": "Answer with one short token.",
       "seed": 13,
       "temperature": 0.0,
@@ -146,8 +143,8 @@
       "ctx": 135,
       "expected_reason": "context_exhausted",
       "branches": [
-        "zero-drafts",
-        "bonus-anchor"
+        "ordinary-anchor-eval",
+        "accepted-prefix-commit"
       ]
     },
     {

@@ -79,3 +79,78 @@ not compare DFlash-mode numerics with ordinary decode mode.
 
 Timing is measured externally and recorded with platform, model, and drafter
 metadata. There is no wall-time regression assertion.
+
+## Add a model-free scenario
+
+1. Add a JSON file in `tests/e2e/scenarios/` with `version`, `id`, `backend`,
+   `native`, `config`, `rounds`, and `expected_branches`.
+2. Put native inputs and expected observations in the scenario. Do not add
+   scenario-specific values to the shared runner.
+3. Use `expected_branches` to require real behavior. Do not use native call names
+   as substitutes for that behavior.
+4. If you change `tests/e2e/schema/scenario.schema.json`, regenerate both named
+   jobs:
+
+   ```bash
+   devenv shell -- uv run --frozen datamodel-codegen --all-jobs
+   ```
+
+5. Run the new scenario by ID, then run the full coverage gate:
+
+   ```bash
+   devenv shell -- uv run --frozen pytest \
+     'tests/e2e/model_free/test_scenarios.py::test_model_free_scenario[<scenario-id>]' \
+     -q
+   ```
+
+The prek checks validate scenario documents, generated types, and generated-model
+drift. The 100% line and branch gate must also pass.
+
+## Add a live corpus case
+
+1. Add a case to `tests/e2e/corpus.json` with `name`, `prompt`, `seed`,
+   `temperature`, `max_tokens`, and `branches`.
+2. Add optional values only when the case needs them: `ctx`, `draft_tokens`,
+   `think`, `think_budget`, `stop_sequence`, and `expected_reason`.
+3. Map branches to observable behavior. Do not map an early return with no draft
+   request to a native empty-draft return.
+4. If the case checks metrics, add its name to the parameter list in
+   `tests/e2e/live/test_metrics.py` and add `tests/e2e/live/expected/<case>.json`.
+   The file must contain all five nonnegative integer counters:
+   `committed_blocks`, `drafts_offered`, `drafts_accepted`,
+   `replacement_anchors`, and `discarded_tails`.
+5. Set the required model, drafter, library, and source variables. Hold
+   `/Users/koudai/work/.dflash-locks/gpu` with your local lock tool, then run the
+   focused test and the full live suite.
+
+`assert_metrics()` validates the metric snapshot before comparison. Use
+`assert_output()` for other text files or JSON mappings. A JSON mapping requires
+a `.json` path.
+
+## Update inline-snapshot files
+
+Inline-snapshot files live in `tests/e2e/live/expected`. The default configuration
+disables snapshot updates. CI also disables updates. Update snapshots only when
+you intend to change expected behavior.
+
+1. Review each proposed change interactively. If you use the live suite, set the
+   required environment variables and hold the GPU lock first:
+
+   ```bash
+   devenv shell -- uv run --frozen pytest tests/e2e/live/test_metrics.py \
+     --inline-snapshot=review
+   ```
+
+2. Apply only the changes that you reviewed:
+
+   ```bash
+   devenv shell -- uv run --frozen pytest tests/e2e/live/test_metrics.py \
+     --inline-snapshot=fix
+   ```
+
+3. Inspect `git diff` and run the complete checks, including the live suite and
+   `git diff --check`.
+
+Do not use `create` or `fix` to accept a regression without reviewing it. New
+snapshots still need schema, type, and branch checks. Metric snapshots do not
+need a datamodel-code-generator job.

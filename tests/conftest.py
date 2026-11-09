@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
-from collections.abc import Generator, Iterable, Mapping, Sequence
+from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, overload
 
 if TYPE_CHECKING:
     import threading
@@ -22,12 +23,13 @@ from ds4py.engine.logits import LogitsView
 from ds4py.engine.sampling import SamplingPolicy
 from ds4py.engine.tool_prompt import ToolDefinition
 from ds4py.engine.transcript import TranscriptView
+from inline_snapshot import external_file
 
 import satyrn_agent
 from satyrn_agent.config import SatyrnConfig
-from satyrn_agent.dflash import DFlashStep
+from satyrn_agent.dflash import DFlashMetrics, DFlashStep
 from satyrn_agent.engine import SatyrnEngine
-from tests.e2e.corpus import load_corpus
+from tests.e2e.corpus import is_expected_metrics, load_corpus
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +154,7 @@ def _assistant_tokens(transcript: TranscriptView) -> tuple[int, ...]:
 
 
 def _event_value(value: object) -> object:
+    # ToolCall.args is a MappingProxyType; dataclasses.asdict() fails on its deep copy.
     if is_dataclass(value) and not isinstance(value, type):
         return {field.name: _event_value(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
@@ -171,9 +174,37 @@ def normalized_events(events: Iterable[Event]) -> list[tuple[str, dict[str, obje
             continue
         payload = {field.name: _event_value(getattr(event, field.name)) for field in fields(event)}
         if isinstance(event, Prefill):
-            payload["tps"] = 0.0
+            payload["tps"] = 0.0  # Wall clock only; serial and speculative prefill times differ.
         normalized.append((type(event).__name__, payload))
     return normalized
+
+
+@overload
+def assert_output(output: str, expected_path: Path) -> None: ...
+
+
+@overload
+def assert_output(output: Mapping[str, object], expected_path: Path) -> None: ...
+
+
+def assert_output(output: object, expected_path: Path) -> None:
+    """Compare text or a JSON mapping with an external inline-snapshot file.
+
+    Mapping output is valid only when ``expected_path`` has a ``.json`` suffix.
+    """
+    if expected_path.suffix == ".json" and not isinstance(output, str):
+        assert output == external_file(expected_path)
+        return
+    if not isinstance(output, str):
+        pytest.fail(f"expected text output for {expected_path}, got {type(output).__name__}")
+    assert output.replace("\r\n", "\n") == external_file(expected_path)
+
+
+def assert_metrics(metrics: DFlashMetrics, expected_path: Path) -> None:
+    expected: object = json.loads(expected_path.read_text())
+    if not is_expected_metrics(expected):
+        pytest.fail(f"invalid metric snapshot: {expected_path}")
+    assert_output(asdict(metrics), expected_path)
 
 
 def observe_round(
@@ -220,7 +251,9 @@ def assert_alignment(
     assert observation.native_position == len(observation.transcript) - unevaluated_eos
 
 
-def prepare_chat(session: Session, prompt: str, *, tools: Iterable[ToolDefinition] = ()) -> int:
+def prepare_chat(session: Session, prompt: str, *, tools: Collection[ToolDefinition] = ()) -> int:
+    if session.transcript.chat and tools:
+        raise ValueError("tools must be supplied before the chat is started")
     if not session.transcript.chat:
         session.start_chat(tools=tools)
     session.append_user(prompt)
@@ -250,7 +283,7 @@ def serial_then_speculative(
     *,
     max_tokens: int,
     sampling: SamplingPolicy,
-    tools: Iterable[ToolDefinition] = (),
+    tools: Collection[ToolDefinition] = (),
     recorder: MetadataRecorder | None = None,
     scripted_native: ScenarioFakeNative | None = None,
 ) -> tuple[RoundObservation, RoundObservation, int]:
