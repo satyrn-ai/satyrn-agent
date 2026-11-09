@@ -35,14 +35,15 @@ from pathlib import Path
 
 import satyrn_agent
 
+model_dir = Path.home() / "models"
 config = satyrn_agent.SatyrnConfig(
     dflash=satyrn_agent.DFlashMode.AUTO,
-    drafter_path=Path("dflash.gguf"),
+    drafter_path=model_dir / "dflash-Qwen3.8-27B-Q4_0.gguf",
     think_budget=satyrn_agent.ThinkBudgetConfig(max_tokens=256, bias=2.0),
 )
 
 with satyrn_agent.open(
-    "qwen35.gguf",
+    model_dir / "Qwen3.8-27B-Q4_K_M.gguf",
     config=config,
     lib="out/libds4.dylib",
     seed=1,
@@ -64,6 +65,61 @@ versioned contract is `schemas/satyrn-config.schema.json`; datamodel-code-genera
 generates the TypedDict DTOs, and handwritten runtime validation converts them
 to the frozen domain config without Pydantic models or TypeAdapter. The E2E
 scenario config references the same production schema.
+
+## Models
+
+The live acceptance tests use a target model and a DFlash drafter model. The
+target generates tokens. The drafter proposes tokens for speculative decoding.
+`tests/e2e/corpus.json` pins the SHA-256 hash of each GGUF file.
+
+| Role | Hugging Face repository | File | Revision | SHA-256 |
+|---|---|---|---|---|
+| Target | `lmstudio-community/Qwen3.8-27B-GGUF` | `Qwen3.8-27B-Q4_K_M.gguf` | `5a7da681f60570ab5b439a587e912d2e5eddb582` | `e00082f779fa385cee8c68a3ec8833a75778cc87272240b942f74e0b8243e520` |
+| Drafter | `ggml-org/Qwen3.8-27B-GGUF` | `dflash-Qwen3.8-27B-Q4_0.gguf` | `a316ea527fde32c12487be7574e2db5ac2ad2a7e` | `0a994382adf17c720c9e5d4292f57344f3b445f058d3e9d5b0f601ae7d6ca3c4` |
+
+The target is not the fine-tuned model in `satyrn-ai/Qwen3.8-27B-py3.15`.
+
+Download both files with the Hugging Face CLI. The `--revision` option selects
+the exact repository commit.
+
+```bash
+MODEL_DIR="$HOME/models"
+mkdir -p "$MODEL_DIR"
+
+hf download lmstudio-community/Qwen3.8-27B-GGUF Qwen3.8-27B-Q4_K_M.gguf \
+  --revision 5a7da681f60570ab5b439a587e912d2e5eddb582 \
+  --local-dir "$MODEL_DIR"
+hf download ggml-org/Qwen3.8-27B-GGUF dflash-Qwen3.8-27B-Q4_0.gguf \
+  --revision a316ea527fde32c12487be7574e2db5ac2ad2a7e \
+  --local-dir "$MODEL_DIR"
+
+printf '%s  %s\n' \
+  'e00082f779fa385cee8c68a3ec8833a75778cc87272240b942f74e0b8243e520' "$MODEL_DIR/Qwen3.8-27B-Q4_K_M.gguf" \
+  '0a994382adf17c720c9e5d4292f57344f3b445f058d3e9d5b0f601ae7d6ca3c4' "$MODEL_DIR/dflash-Qwen3.8-27B-Q4_0.gguf" \
+  | shasum -a 256 -c -
+```
+
+The `shasum` command must report `OK` for both files.
+
+Do not download the drafter from the current `main` revision. `ggml-org`
+updated `dflash-Qwen3.8-27B-Q4_0.gguf` on 2026-11-08. The new file has a
+different SHA-256 hash and fails the corpus identity check. Revision
+`a316ea527fde32c12487be7574e2db5ac2ad2a7e` contains the pinned drafter.
+
+The example under *Agent package* passes the target path to
+`satyrn_agent.open()`. It passes the drafter path through
+`SatyrnConfig(drafter_path=...)`.
+
+For the live acceptance tests, map the same files to these environment
+variables:
+
+```bash
+export SATYRN_TEST_MODEL="$HOME/models/Qwen3.8-27B-Q4_K_M.gguf"
+export SATYRN_TEST_DRAFTER="$HOME/models/dflash-Qwen3.8-27B-Q4_0.gguf"
+```
+
+See [tests/e2e/README.md](tests/e2e/README.md) for the other required inputs and
+the test command.
 
 ## Layout
 
