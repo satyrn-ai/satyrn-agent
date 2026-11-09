@@ -22,6 +22,7 @@ from ds4py.engine.logits import LogitsView
 from ds4py.engine.sampling import SamplingPolicy
 from ds4py.engine.tool_prompt import ToolDefinition
 from ds4py.engine.transcript import TranscriptView
+from inline_snapshot import external_file
 
 import satyrn_agent
 from satyrn_agent.config import SatyrnConfig
@@ -174,6 +175,16 @@ def normalized_events(events: Iterable[Event]) -> list[tuple[str, dict[str, obje
             payload["tps"] = 0.0
         normalized.append((type(event).__name__, payload))
     return normalized
+
+
+def assert_output(output: object, expected_path: Path) -> None:
+    """Compare text or a JSON value with an external inline-snapshot file."""
+    if expected_path.suffix == ".json" and not isinstance(output, str):
+        assert output == external_file(expected_path)
+        return
+    if not isinstance(output, str):
+        pytest.fail(f"expected text output for {expected_path}, got {type(output).__name__}")
+    assert output.replace("\r\n", "\n") == external_file(expected_path)
 
 
 def observe_round(

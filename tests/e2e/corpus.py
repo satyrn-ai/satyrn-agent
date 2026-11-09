@@ -3,13 +3,15 @@
 import json
 import math
 from pathlib import Path
-from typing import NotRequired, TypeIs, cast
+from typing import NotRequired, Protocol, TypeIs, cast
 
 import pytest
 from ds4py._json import is_string_key_mapping
+from ds4py.engine.sampling import SamplingPolicy
 from typing_extensions import TypedDict
 
-from satyrn_agent.config import ThinkBudgetConfig
+from satyrn_agent.config import SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
+from satyrn_agent.dflash import DFlashMetrics
 from satyrn_agent.errors import ConfigurationError
 
 CORPUS_PATH = Path(__file__).with_name("corpus.json")
@@ -103,6 +105,53 @@ def load_corpus() -> Corpus:
 
 def corpus_cases() -> dict[str, CorpusCase]:
     return {case["name"]: case for case in load_corpus()["cases"]}
+
+
+class DrafterSettings(Protocol):
+    @property
+    def drafter(self) -> Path: ...
+
+
+def corpus_config(settings: DrafterSettings, case: CorpusCase) -> SatyrnConfig:
+    return SatyrnConfig(
+        drafter_path=settings.drafter,
+        draft_tokens=case.get("draft_tokens", 0),
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
+
+
+def corpus_sampling(case: CorpusCase) -> SamplingPolicy:
+    defaults = load_corpus()["target"]["sampling_defaults"]
+    if not is_string_key_mapping(defaults):
+        raise ValueError("invalid native sampling defaults in live corpus")
+    top_k = defaults["top_k"]
+    top_p = defaults["top_p"]
+    min_p = defaults["min_p"]
+    if type(top_k) is not int or not isinstance(top_p, int | float) or not isinstance(min_p, int | float):
+        raise ValueError("invalid native sampling defaults in live corpus")
+    greedy = case["temperature"] == 0
+    return SamplingPolicy(
+        temperature=case["temperature"],
+        top_k=0 if greedy else top_k,
+        top_p=1.0 if greedy else float(top_p),
+        min_p=float(min_p),
+        seed=case["seed"],
+    )
+
+
+def metric_branches(metrics: DFlashMetrics) -> set[str]:
+    reached = set()
+    if metrics.committed_blocks > 0:
+        reached.update({"anchor", "native-commit-publication"})
+    if metrics.drafts_accepted > 0:
+        reached.add("matching-draft")
+    if metrics.drafts_offered > 0 and metrics.drafts_accepted == metrics.drafts_offered:
+        reached.add("full-acceptance")
+    if 0 < metrics.drafts_accepted < metrics.drafts_offered:
+        reached.add("partial-acceptance")
+    if metrics.replacement_anchors > 0:
+        reached.add("mismatch-replacement")
+    return reached
 
 
 def require_branches(case: CorpusCase, reached: set[str]) -> None:

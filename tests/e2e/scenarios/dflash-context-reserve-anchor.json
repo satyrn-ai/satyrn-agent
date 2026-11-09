@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "id": "dflash-context-zero-drafts",
+  "id": "dflash-context-reserve-anchor",
   "backend": "metal",
   "ctx": 505,
   "native": {
@@ -56,14 +56,9 @@
   ],
   "expected_branches": [
     "anchor",
-    "commit",
     "context_exhausted",
     "context_reserve",
     "dflash-step",
-    "draft",
-    "row",
-    "select",
-    "verify",
-    "zero-drafts"
+    "eval"
   ]
 }
