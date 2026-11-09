@@ -1,11 +1,10 @@
 import json
 import platform
-from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
-from tests.conftest import LiveSettings, assert_alignment, assert_output, configured_session, serial_then_speculative
+from tests.conftest import LiveSettings, assert_alignment, assert_metrics, configured_session, serial_then_speculative
 from tests.e2e.corpus import corpus_cases, corpus_config, corpus_sampling, metric_branches, require_branches
 
 pytestmark = pytest.mark.live
@@ -31,7 +30,7 @@ def test_metrics_reconcile_with_committed_stream(live_settings: LiveSettings, ca
     assert len(result.token_ids) == metrics.committed_blocks + metrics.drafts_accepted
     assert metrics.discarded_tails == metrics.drafts_offered - metrics.drafts_accepted
     assert metrics.acceptance_rate == pytest.approx(metrics.drafts_accepted / metrics.drafts_offered)
-    assert_output(asdict(metrics), EXPECTED / f"{case_name}.json")
+    assert_metrics(metrics, EXPECTED / f"{case_name}.json")
     require_branches(case, metric_branches(metrics))
 
 

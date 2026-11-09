@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, overload
 
 if TYPE_CHECKING:
     import threading
@@ -26,9 +27,9 @@ from inline_snapshot import external_file
 
 import satyrn_agent
 from satyrn_agent.config import SatyrnConfig
-from satyrn_agent.dflash import DFlashStep
+from satyrn_agent.dflash import DFlashMetrics, DFlashStep
 from satyrn_agent.engine import SatyrnEngine
-from tests.e2e.corpus import load_corpus
+from tests.e2e.corpus import is_expected_metrics, load_corpus
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +179,14 @@ def normalized_events(events: Iterable[Event]) -> list[tuple[str, dict[str, obje
     return normalized
 
 
+@overload
+def assert_output(output: str, expected_path: Path) -> None: ...
+
+
+@overload
+def assert_output(output: Mapping[str, object], expected_path: Path) -> None: ...
+
+
 def assert_output(output: object, expected_path: Path) -> None:
     """Compare text or a JSON value with an external inline-snapshot file."""
     if expected_path.suffix == ".json" and not isinstance(output, str):
@@ -186,6 +195,13 @@ def assert_output(output: object, expected_path: Path) -> None:
     if not isinstance(output, str):
         pytest.fail(f"expected text output for {expected_path}, got {type(output).__name__}")
     assert output.replace("\r\n", "\n") == external_file(expected_path)
+
+
+def assert_metrics(metrics: DFlashMetrics, expected_path: Path) -> None:
+    expected: object = json.loads(expected_path.read_text())
+    if not is_expected_metrics(expected):
+        pytest.fail(f"invalid metric snapshot: {expected_path}")
+    assert_output(asdict(metrics), expected_path)
 
 
 def observe_round(

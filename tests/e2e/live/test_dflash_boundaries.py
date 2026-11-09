@@ -16,7 +16,7 @@ from tests.conftest import (
     observe_round,
     prepare_chat,
 )
-from tests.e2e.corpus import corpus_cases, corpus_config, require_branches
+from tests.e2e.corpus import Branch, corpus_cases, corpus_config, require_branches
 
 pytestmark = pytest.mark.live
 
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.live
 def test_max_tokens_and_natural_stop_alignment(live_settings: LiveSettings) -> None:
     case = corpus_cases()["limit-and-stop"]
     config = corpus_config(live_settings, case)
-    reached: set[str] = set()
+    reached: set[Branch] = set()
 
     with configured_session(live_settings, config, seed=case["seed"]) as (_, session):
         prepare_chat(session, case["prompt"])
@@ -68,7 +68,7 @@ def test_tool_close_never_publishes_a_discarded_tail(live_settings: LiveSettings
         assert_alignment(session, observation)
         metrics = wrapper.dflash_metrics
 
-    reached = set()
+    reached: set[Branch] = set()
     if observation.reason == "tool_call_complete":
         assert any(isinstance(event, ToolCalls) for event in observation.events)
         reached.add("tool-close-terminal-verdict")
@@ -198,7 +198,7 @@ def test_cancellation_is_required_and_preserves_alignment(live_settings: LiveSet
         observation = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
         assert_alignment(session, observation)
 
-    reached = set()
+    reached: set[Branch] = set()
     if observation.reason == "interrupted" and fired_during_verify:
         reached.add("cancellation-with-verify-open")
     if observation.token_ids:

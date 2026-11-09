@@ -1,6 +1,7 @@
 import pytest
 from ds4py._json import is_string_key_mapping
 
+from tests.e2e import corpus as corpus_module
 from tests.e2e.corpus import CorpusCase, is_corpus, is_corpus_case
 
 
@@ -67,6 +68,68 @@ def test_sampling_defaults_are_validated(field: str, value: object) -> None:
     document["target"] = target
 
     assert not is_corpus(document)
+
+
+def test_unknown_branch_is_rejected() -> None:
+    case = dict(_case())
+    case["branches"] = ["not-a-branch"]
+
+    assert not is_corpus_case(case)
+
+
+def test_unknown_expected_reason_is_rejected() -> None:
+    case = dict(_case())
+    case["expected_reason"] = "not-a-reason"
+
+    assert not is_corpus_case(case)
+
+
+@pytest.mark.parametrize("sha256", ["a" * 63, "A" * 64, "g" * 64])
+def test_sha256_must_be_lowercase_hex(sha256: str) -> None:
+    document = _document()
+    raw_target = document["target"]
+    assert is_string_key_mapping(raw_target)
+    target = dict(raw_target)
+    target["sha256"] = sha256
+    document["target"] = target
+
+    assert not is_corpus(document)
+
+
+def _metrics() -> dict[str, object]:
+    return {
+        "committed_blocks": 1,
+        "drafts_offered": 2,
+        "drafts_accepted": 1,
+        "replacement_anchors": 0,
+        "discarded_tails": 1,
+    }
+
+
+def test_expected_metrics_is_valid() -> None:
+    assert corpus_module.is_expected_metrics(_metrics())
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("committed_blocks", -1),
+        ("drafts_offered", True),
+        ("drafts_accepted", 1.5),
+    ],
+)
+def test_expected_metrics_rejects_invalid_values(field: str, value: object) -> None:
+    metrics = _metrics()
+    metrics[field] = value
+
+    assert not corpus_module.is_expected_metrics(metrics)
+
+
+def test_expected_metrics_rejects_missing_counter() -> None:
+    metrics = _metrics()
+    del metrics["committed_blocks"]
+
+    assert not corpus_module.is_expected_metrics(metrics)
 
 
 def test_think_must_be_nonnegative() -> None:
