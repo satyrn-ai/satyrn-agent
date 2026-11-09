@@ -5,7 +5,8 @@ Date: 2026-11-09
 ## Revisions
 
 - Agent implementation at validation: `test/live-metal-e2e` from `origin/main` at
-  `c50f2c4fbe7eb87874df64832bdfdde638029beb`
+  `c50f2c4fbe7eb87874df64832bdfdde638029beb`; validated implementation head
+  `d7e6572889a093b1b53c1d892affd52777459b45`
 - Quality-foundation base: `60baa62151fdfdd6f1b62ef955bfd6e7b4456ee0`
 - ds4-py companion: `5c98c6ac86cafef56780c3bcbb87c3ecaef52aef`
 - ds4 upstream pin: `antirez/ds4` at `5379c1c9ac315f1540371b06a3db88491d4059ff`
