@@ -35,6 +35,9 @@ token/transcript/native-position alignment assertion in `tests/conftest.py`.
 
 ## Required identity and library inputs
 
+See [Models](../../README.md#models) for the pinned model sources, download
+commands, and SHA-256 checks.
+
 ```bash
 export SATYRN_TEST_MODEL=/path/to/dense-qwen35.gguf
 export SATYRN_TEST_DRAFTER=/path/to/matching-dflash.gguf
