@@ -27,7 +27,10 @@ class CorpusCase(TypedDict, closed=True):
     temperature: float
     max_tokens: int
     branches: list[str]
+    ctx: NotRequired[int]
+    draft_tokens: NotRequired[int]
     expected_reason: NotRequired[str]
+    think: NotRequired[int]
     think_budget: NotRequired[ThinkBudgetCase]
     stop_sequence: NotRequired[str]
 
@@ -69,7 +72,13 @@ def is_corpus_case(value: object) -> TypeIs[CorpusCase]:  # noqa: PLR0911 - Each
         return False
     if not _string_list(value.get("branches")):
         return False
+    if (ctx := value.get("ctx")) is not None and (type(ctx) is not int or ctx <= 0):
+        return False
+    if (draft_tokens := value.get("draft_tokens")) is not None and (type(draft_tokens) is not int or draft_tokens <= 0):
+        return False
     if (reason := value.get("expected_reason")) is not None and not isinstance(reason, str):
+        return False
+    if (think := value.get("think")) is not None and type(think) is not int:
         return False
     if (budget := value.get("think_budget")) is not None and not _think_budget(budget):
         return False

@@ -130,6 +130,8 @@ class Round(TypedDict, closed=True):
     stop_sequences: NotRequired[list[str]]
     cancel_after_samples: NotRequired[int]
     """Sample index to cancel at; -1 selects before a row sample, -2 cancels during native commit, and -3 cancels before the round."""
+    resume_zero_reserve: NotRequired[bool]
+    """Resume the first reserve pause with zero reserve; fail any later pause."""
     hook_error_at: NotRequired[int]
     finish_at: NotRequired[int]
     finish_reason: NotRequired[str]
@@ -145,6 +147,8 @@ class Scenario(TypedDict, closed=True):
     id: str
     description: NotRequired[str]
     snapshot_parity: NotRequired[bool]
+    ctx: NotRequired[int]
+    """Native context size used by public open."""
     think: NotRequired[int]
     """ds4 ThinkMode used by public open; zero disables thinking."""
     raw_config: NotRequired[dict[str, object]]

@@ -171,7 +171,7 @@ unzip -l dist/*.whl | grep 'satyrn_agent/'
 ```
 
 The package pins ds4-py companion commit
-`02562e51589d1db75ba96c23cd05603bf2a248dd`, including tentative decode
+`5c98c6ac86cafef56780c3bcbb87c3ecaef52aef`, including tentative decode
 transactions and fatal-state poisoning. Rebuild the ds4 ABI manifest after
 installing or updating `satyrn_agent`; optional symbols still need a fresh probe
 record.

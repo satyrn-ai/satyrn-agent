@@ -10,7 +10,7 @@ from typing import Any, cast
 from ds4py import EngineError, Session, ThinkMode, WorkerPoisonedError
 from ds4py._native.protocol import SessionHandle
 from ds4py.engine.decode import DecodeContext, DecodeStep, PlainStep, Verdict
-from ds4py.engine.events import Event, Interrupted, Stopped, Token
+from ds4py.engine.events import Event, Interrupted, ReserveReached, Stopped, Token
 from ds4py.engine.logits import LogitsView
 from ds4py.engine.sampling import SamplingPolicy
 from ds4py.engine.tool_prompt import ToolDefinition
@@ -35,6 +35,8 @@ SUPPORTED_BRANCHES = {
     "budget",
     "commit",
     "config-error",
+    "context_exhausted",
+    "context_reserve",
     "dflash-step",
     "discarded-tail",
     "done",
@@ -135,10 +137,17 @@ def _observe(
         if round.get("cancel_after_samples") == -3 and native.cancel_event is not None:
             native.cancel_event.set()
         _prepare(session, round)
+        resumed = False
         for event in session.run_round(
             max_tokens=round["max_tokens"],
             stop_sequences=[value.encode() for value in round.get("stop_sequences", [])],
         ):
+            if isinstance(event, ReserveReached):
+                if round.get("resume_zero_reserve", False) and not resumed:
+                    event.resume(0)
+                    resumed = True
+                else:
+                    event.fail()
             events.extend([event])
             if isinstance(event, Token):
                 token_positions.append(max((len(fake._tokens) for fake in native.sessions.values()), default=0))
@@ -339,6 +348,8 @@ def _infer_branches(
     labels.update(round.reason for round in results if round.reason is not None)
     if any(isinstance(event, Interrupted) for round in results for event in round.events):
         labels.add("interrupted")
+    if any(isinstance(event, ReserveReached) for round in results for event in round.events):
+        labels.add("context_reserve")
     if any(isinstance(round.error, WorkerPoisonedError) for round in results):
         labels.add("poison")
     if any(isinstance(round.error, DFlashError) for round in results):
@@ -366,6 +377,7 @@ def run_scenario(scenario: Scenario) -> ScenarioResult:
         config=config,
         native=native,
         seed=1,
+        ctx=scenario.get("ctx", 100_000),
         think=scenario.get("think", ThinkMode.HIGH),
         cancel=native.cancel_event,
     ) as wrapper:

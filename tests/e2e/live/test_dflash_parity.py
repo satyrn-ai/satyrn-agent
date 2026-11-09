@@ -10,46 +10,40 @@ from tests.conftest import (
     normalized_events,
     serial_then_speculative,
 )
+from tests.e2e.corpus import corpus_cases, require_branches
 
 pytestmark = pytest.mark.live
 
 
-@pytest.mark.parametrize(
-    ("prompt", "seed", "sampling"),
-    [
-        (
-            "Explain speculative decoding in two concise sentences.",
-            1,
-            SamplingPolicy(temperature=0.0, top_k=0, top_p=1.0, min_p=0.0, seed=1),
-        ),
-        (
-            "List three properties of a reliable token transaction.",
-            7,
-            SamplingPolicy(temperature=0.6, top_k=20, top_p=0.95, min_p=0.0, seed=7),
-        ),
-    ],
-)
+@pytest.mark.parametrize("case_name", ["greedy-parity", "seeded-parity"])
 def test_serial_and_speculative_parity_from_one_dflash_snapshot(
     live_settings: LiveSettings,
-    prompt: str,
-    seed: int,
-    sampling: SamplingPolicy,
+    case_name: str,
 ) -> None:
+    case = corpus_cases()[case_name]
+    sampling = SamplingPolicy(
+        temperature=case["temperature"],
+        top_k=0 if case["temperature"] == 0 else 20,
+        top_p=1.0 if case["temperature"] == 0 else 0.95,
+        min_p=0.0,
+        seed=case["seed"],
+    )
     config = SatyrnConfig(
         drafter_path=live_settings.drafter,
         think_budget=ThinkBudgetConfig(max_tokens=2, bias=2.0),
     )
     recorder = MetadataRecorder()
 
-    with configured_session(live_settings, config, seed=seed) as (wrapper, session):
+    with configured_session(live_settings, config, seed=case["seed"]) as (wrapper, session):
         serial, speculative, _ = serial_then_speculative(
             wrapper,
             session,
-            prompt,
-            max_tokens=40,
+            case["prompt"],
+            max_tokens=case["max_tokens"],
             sampling=sampling,
             recorder=recorder,
         )
+        metrics = wrapper.dflash_metrics
 
     assert speculative.token_ids == serial.token_ids
     assert speculative.reason == serial.reason
@@ -57,6 +51,19 @@ def test_serial_and_speculative_parity_from_one_dflash_snapshot(
     assert normalized_events(speculative.events) == normalized_events(serial.events)
     assert recorder.speculative == recorder.serial
     assert recorder.serial
+    assert metrics is not None
+    reached = {"anchor", "native-commit-publication"}
+    if metrics.drafts_accepted > 0:
+        reached.add("matching-draft")
+    if metrics.drafts_accepted < metrics.drafts_offered:
+        reached.add("partial-acceptance")
+    if metrics.replacement_anchors > 0:
+        reached.update({"mismatch-or-bonus", "mismatch-replacement"})
+    if speculative.rng == serial.rng:
+        reached.add("seeded-rng-continuation")
+    if recorder.speculative == recorder.serial:
+        reached.add("canonical-plus-staged-sampling")
+    require_branches(case, reached)
 
 
 def test_tool_opener_has_exact_tentative_metadata_and_event_parity(live_settings: LiveSettings) -> None:

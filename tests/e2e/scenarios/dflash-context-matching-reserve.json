@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "id": "dflash-context-matching-reserve",
+  "backend": "metal",
+  "ctx": 505,
+  "native": {
+    "script": [
+      10,
+      11
+    ],
+    "calls": [
+      {
+        "op": "draft",
+        "tokens": [
+          11
+        ]
+      }
+    ]
+  },
+  "config": {
+    "dflash": "auto",
+    "drafter_path": "drafter.gguf"
+  },
+  "rounds": [
+    {
+      "prompt": "scenario",
+      "mode": "chat",
+      "max_tokens": 2,
+      "resume_zero_reserve": true,
+      "expect": {
+        "reason": "context_exhausted",
+        "token_ids": [
+          10
+        ],
+        "native_position": 505,
+        "rng": 10451216379200822465,
+        "metrics": {
+          "committed_blocks": 1,
+          "drafts_offered": 0,
+          "drafts_accepted": 0,
+          "replacement_anchors": 0,
+          "discarded_tails": 0
+        },
+        "metadata": [],
+        "event_types": [
+          "Prefill",
+          "Synced",
+          "ReserveReached",
+          "Prefill",
+          "Synced",
+          "Token",
+          "TextDelta",
+          "ReserveReached",
+          "Stopped"
+        ]
+      }
+    }
+  ],
+  "expected_branches": [
+    "anchor",
+    "commit",
+    "context_exhausted",
+    "context_reserve",
+    "dflash-step",
+    "draft",
+    "row",
+    "select",
+    "verify"
+  ]
+}

@@ -2,10 +2,12 @@ import threading
 import time
 
 import pytest
+from ds4py import ThinkMode
 from ds4py.engine.events import ReserveReached, ToolCalls
+from ds4py.engine.logits import LogitsView
 from ds4py.engine.tool_prompt import ToolDefinition
 
-from satyrn_agent.config import SatyrnConfig
+from satyrn_agent.config import SamplingOverrides, SatyrnConfig
 from tests.conftest import (
     LiveSettings,
     MetadataRecorder,
@@ -21,7 +23,10 @@ pytestmark = pytest.mark.live
 
 def test_max_tokens_and_natural_stop_alignment(live_settings: LiveSettings) -> None:
     case = corpus_cases()["limit-and-stop"]
-    config = SatyrnConfig(drafter_path=live_settings.drafter)
+    config = SatyrnConfig(
+        drafter_path=live_settings.drafter,
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
     reached: set[str] = set()
 
     with configured_session(live_settings, config, seed=case["seed"]) as (_, session):
@@ -45,7 +50,10 @@ def test_max_tokens_and_natural_stop_alignment(live_settings: LiveSettings) -> N
 
 def test_tool_close_never_publishes_a_discarded_tail(live_settings: LiveSettings) -> None:
     case = corpus_cases()["tool-close"]
-    config = SatyrnConfig(drafter_path=live_settings.drafter)
+    config = SatyrnConfig(
+        drafter_path=live_settings.drafter,
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
     definition = ToolDefinition(
         "get_weather",
         "Return weather for one city.",
@@ -80,9 +88,17 @@ def test_tool_close_never_publishes_a_discarded_tail(live_settings: LiveSettings
 
 def test_stop_sequence_commits_only_the_prefix(live_settings: LiveSettings) -> None:
     case = corpus_cases()["stop-sequence"]
-    config = SatyrnConfig(drafter_path=live_settings.drafter)
+    config = SatyrnConfig(
+        drafter_path=live_settings.drafter,
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
 
-    with configured_session(live_settings, config, seed=case["seed"]) as (_, session):
+    with configured_session(
+        live_settings,
+        config,
+        seed=case["seed"],
+        think=case.get("think", ThinkMode.HIGH),
+    ) as (_, session):
         prepare_chat(session, case["prompt"])
         observation = observe_round(
             session,
@@ -98,28 +114,53 @@ def test_stop_sequence_commits_only_the_prefix(live_settings: LiveSettings) -> N
 
 def test_zero_drafts_reaches_bonus_anchor(live_settings: LiveSettings) -> None:
     case = corpus_cases()["zero-drafts"]
-    config = SatyrnConfig(drafter_path=live_settings.drafter)
+    config = SatyrnConfig(
+        drafter_path=live_settings.drafter,
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
 
-    with configured_session(live_settings, config, seed=case["seed"]) as (wrapper, session):
+    with configured_session(
+        live_settings,
+        config,
+        seed=case["seed"],
+        ctx=case.get("ctx", 100_000),
+    ) as (wrapper, session):
+        recorder = MetadataRecorder()
         prepare_chat(session, case["prompt"])
-        observation = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
+        session.add_logits_hook(recorder)
+        observation = observe_round(
+            session,
+            max_tokens=case["max_tokens"],
+            started=time.perf_counter(),
+            resume_once_with_zero_reserve=True,
+        )
         assert_alignment(session, observation)
         metrics = wrapper.dflash_metrics
 
     reached = set()
     if metrics is not None and metrics.drafts_offered == 0:
         reached.add("zero-drafts")
-    if metrics is not None and metrics.committed_blocks > 0:
+    if len(recorder.calls) > 1 and recorder.calls[1].position > recorder.calls[0].position:
         reached.add("bonus-anchor")
+    assert metrics is not None and metrics.committed_blocks > 0
+    assert observation.reason == case["expected_reason"]
     require_branches(case, reached)
 
 
 def test_parser_error_is_required(live_settings: LiveSettings) -> None:
     case = corpus_cases()["parser-error"]
-    config = SatyrnConfig(drafter_path=live_settings.drafter)
+    config = SatyrnConfig(
+        drafter_path=live_settings.drafter,
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
     definition = ToolDefinition("broken", "Exercise malformed tool syntax.", {"type": "object"})
 
-    with configured_session(live_settings, config, seed=case["seed"]) as (_, session):
+    with configured_session(
+        live_settings,
+        config,
+        seed=case["seed"],
+        think=case.get("think", ThinkMode.HIGH),
+    ) as (_, session):
         session.start_chat(tools=[definition])
         session.append_user(case["prompt"])
         observation = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
@@ -134,10 +175,13 @@ def test_parser_error_is_required(live_settings: LiveSettings) -> None:
 
 def test_context_reserve_is_required(live_settings: LiveSettings) -> None:
     case = corpus_cases()["context-reserve"]
-    config = SatyrnConfig(drafter_path=live_settings.drafter)
+    config = SatyrnConfig(
+        drafter_path=live_settings.drafter,
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
     prompt = f"{case['prompt']} " + "token transaction " * 1500
 
-    with configured_session(live_settings, config, seed=case["seed"], ctx=4096) as (_, session):
+    with configured_session(live_settings, config, seed=case["seed"], ctx=case.get("ctx", 4096)) as (_, session):
         prepare_chat(session, prompt)
         observation = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
         assert_alignment(session, observation)
@@ -151,20 +195,30 @@ def test_context_reserve_is_required(live_settings: LiveSettings) -> None:
 
 def test_cancellation_is_required_and_preserves_alignment(live_settings: LiveSettings) -> None:
     case = corpus_cases()["cancellation"]
-    config = SatyrnConfig(drafter_path=live_settings.drafter)
+    config = SatyrnConfig(
+        drafter_path=live_settings.drafter,
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
 
-    with configured_session(live_settings, config, seed=case["seed"]) as (_, session):
+    cancel = threading.Event()
+    sample_calls = 0
+    fired_during_verify = False
+
+    def cancel_during_verify(_: LogitsView) -> None:
+        nonlocal sample_calls, fired_during_verify
+        sample_calls += 1
+        if sample_calls == 2:
+            fired_during_verify = True
+            cancel.set()
+
+    with configured_session(live_settings, config, seed=case["seed"], cancel=cancel) as (_, session):
         prepare_chat(session, case["prompt"])
-        timer = threading.Timer(0.05, session.cancel)
-        timer.start()
-        try:
-            observation = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
-        finally:
-            timer.cancel()
+        session.add_logits_hook(cancel_during_verify)
+        observation = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
         assert_alignment(session, observation)
 
     reached = set()
-    if observation.reason == "interrupted":
+    if observation.reason == "interrupted" and fired_during_verify:
         reached.add("cancellation-with-verify-open")
     if observation.token_ids:
         reached.add("accepted-prefix-commit")

@@ -2,20 +2,22 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Generator, Iterable, Sequence
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    import threading
+
     from tests.e2e.model_free._native import ScenarioFakeNative
 
 import pytest
-from ds4py import Session
+from ds4py import Session, ThinkMode
 from ds4py._native.protocol import Snapshot
 from ds4py.engine.decode import PlainStep
-from ds4py.engine.events import Event, ReserveReached, Stopped, Token
+from ds4py.engine.events import Event, Prefill, ReserveReached, Stopped, Token
 from ds4py.engine.logits import LogitsView
 from ds4py.engine.sampling import SamplingPolicy
 from ds4py.engine.tool_prompt import ToolDefinition
@@ -95,6 +97,8 @@ def configured_session(
     *,
     seed: int = 1,
     ctx: int = 100_000,
+    think: int = ThinkMode.HIGH,
+    cancel: threading.Event | None = None,
 ) -> Generator[tuple[SatyrnEngine, Session]]:
     with satyrn_agent.open(
         settings.model,
@@ -102,6 +106,8 @@ def configured_session(
         ctx=ctx,
         lib=settings.lib,
         seed=seed,
+        think=think,
+        cancel=cancel,
     ) as wrapper:
         yield wrapper, wrapper.session()
 
@@ -145,13 +151,29 @@ def _assistant_tokens(transcript: TranscriptView) -> tuple[int, ...]:
     )
 
 
+def _event_value(value: object) -> object:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: _event_value(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, Mapping):
+        return {str(key): _event_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_event_value(item) for item in value)
+    if isinstance(value, list):
+        return [_event_value(item) for item in value]
+    return value
+
+
 def normalized_events(events: Iterable[Event]) -> list[tuple[str, dict[str, object]]]:
-    return [
-        ("ReserveReached", {"needed": event.needed})
-        if isinstance(event, ReserveReached)
-        else (type(event).__name__, dict[str, object](asdict(event)))
-        for event in events
-    ]
+    normalized = []
+    for event in events:
+        if isinstance(event, ReserveReached):
+            normalized.append(("ReserveReached", dict[str, object](needed=event.needed)))
+            continue
+        payload = {field.name: _event_value(getattr(event, field.name)) for field in fields(event)}
+        if isinstance(event, Prefill):
+            payload["tps"] = 0.0
+        normalized.append((type(event).__name__, payload))
+    return normalized
 
 
 def observe_round(
@@ -161,14 +183,20 @@ def observe_round(
     sampling: SamplingPolicy | None = None,
     stop_sequences: Sequence[bytes] = (),
     started: float,
+    resume_once_with_zero_reserve: bool = False,
 ) -> RoundObservation:
     import time
 
     assistant_start = len(_assistant_tokens(session.transcript))
     events = []
+    resumed = False
     for event in session.run_round(max_tokens=max_tokens, sampling=sampling, stop_sequences=stop_sequences):
         if isinstance(event, ReserveReached):
-            event.fail()
+            if resume_once_with_zero_reserve and not resumed:
+                event.resume(0)
+                resumed = True
+            else:
+                event.fail()
         events.append(event)
     return RoundObservation(
         events=events,
@@ -184,20 +212,17 @@ def observe_round(
 def assert_alignment(
     session: Session,
     observation: RoundObservation,
-    scripted_native: ScenarioFakeNative | None = None,
 ) -> None:
     generated = observation.token_ids
     assert observation.assistant_tokens[observation.assistant_start :] == generated
-    unevaluated_eos = (
-        sum(segment.end - segment.start for segment in session.transcript.segments if segment.kind == "eos")
-        if scripted_native is not None
-        else 0
-    )
+    segments = session.transcript.segments
+    unevaluated_eos = segments[-1].end - segments[-1].start if segments and segments[-1].kind == "eos" else 0
     assert observation.native_position == len(observation.transcript) - unevaluated_eos
 
 
 def prepare_chat(session: Session, prompt: str, *, tools: Iterable[ToolDefinition] = ()) -> int:
-    session.start_chat(tools=tools)
+    if not session.transcript.chat:
+        session.start_chat(tools=tools)
     session.append_user(prompt)
     return len(session.transcript.tokens)
 
@@ -235,8 +260,7 @@ def serial_then_speculative(
         pytest.fail("the parity fixture requires a configured DFlashStep")
     step = wrapper.decode_step
     prompt_tokens = prepare_chat(session, prompt, tools=tools)
-    if scripted_native is not None:
-        session._worker.call(lambda engine, native: native.sync(session.transcript.tokens)).result()
+    session._worker.call(lambda engine, native: native.sync(session.transcript.tokens)).result()
     if recorder is not None:
         session.add_logits_hook(recorder)
     snapshot = session._worker.call(lambda engine, native: native.save_snapshot()).result()
@@ -245,13 +269,13 @@ def serial_then_speculative(
     started = time.perf_counter()
     try:
         serial = observe_round(session, max_tokens=max_tokens, sampling=sampling, started=started)
-        assert_alignment(session, serial, scripted_native)
+        assert_alignment(session, serial)
         if recorder is not None:
             recorder.serial_count = len(recorder.calls)
         restore_snapshot(session, prompt_tokens, snapshot, rng, step, scripted_native)
         started = time.perf_counter()
         speculative = observe_round(session, max_tokens=max_tokens, sampling=sampling, started=started)
-        assert_alignment(session, speculative, scripted_native)
+        assert_alignment(session, speculative)
     finally:
         snapshot.close()
     return serial, speculative, prompt_tokens

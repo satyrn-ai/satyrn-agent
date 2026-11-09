@@ -48,10 +48,9 @@ export SATYRN_TEST_DS4_SRC=/path/to/patched/ds4
 ```
 
 `tests/e2e/corpus.json` pins prompts, seeds, expected native sampling defaults,
-and approved model/drafter SHA-256 and quantization values. The approved values
-are currently `null` because no model was available for this implementation run;
-fill them from the reviewed GGUFs before enabling live acceptance. An external
-hash environment variable cannot substitute for this repository identity check.
+and model/drafter SHA-256 and quantization values. The current values are proposed
+identities and require PR review approval. An external hash environment variable
+cannot substitute for this repository identity check.
 
 The corpus also maps each case to normal decode branches and expected terminal
 reasons. Tests load it through typed validators and fail with corpus-adjustment

@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from satyrn_agent.config import SatyrnConfig, ThinkBudgetConfig
+from satyrn_agent.config import SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
 from tests.conftest import (
     LiveSettings,
     MetadataRecorder,
@@ -32,9 +32,13 @@ def test_native_qwen_sampling_defaults(live_settings: LiveSettings) -> None:
 
 def test_soft_think_budget_changes_real_decode_without_injection(live_settings: LiveSettings) -> None:
     case = corpus_cases()["think-budget"]
-    baseline_config = SatyrnConfig(drafter_path=live_settings.drafter)
+    baseline_config = SatyrnConfig(
+        drafter_path=live_settings.drafter,
+        sampling=SamplingOverrides(temperature=case["temperature"]),
+    )
     budget_config = SatyrnConfig(
         drafter_path=live_settings.drafter,
+        sampling=SamplingOverrides(temperature=case["temperature"]),
         think_budget=ThinkBudgetConfig(**case["think_budget"]),
     )
     recorder = MetadataRecorder()
@@ -52,4 +56,9 @@ def test_soft_think_budget_changes_real_decode_without_injection(live_settings: 
 
     assert budgeted.token_ids != baseline.token_ids
     assert len(recorder.calls) >= len(budgeted.token_ids)
-    require_branches(case, {"think-budget-every-row", "soft-bias-without-injection"})
+    reached = set()
+    if len(recorder.calls) >= len(budgeted.token_ids):
+        reached.add("think-budget-every-row")
+    if budgeted.token_ids != baseline.token_ids:
+        reached.add("soft-bias-without-injection")
+    require_branches(case, reached)

@@ -100,7 +100,7 @@ class DFlashStep:
             block = _BlockState(pending.token)
             ctx.begin_staging()
             verdict = ctx.stage(block.anchor, ctx.accept(block.anchor))
-            if verdict is Verdict.STOP_AFTER:
+            if verdict is Verdict.STOP_AFTER and ctx.reason != "context_reserve":
                 self._publish_block(session, ctx, block, commit_rows=None)
                 return
             if ctx.cancelled():
@@ -109,7 +109,8 @@ class DFlashStep:
                 return
 
             try:
-                block.drafts = tuple(self._native.draft(session.raw, block.anchor, self._maximum))
+                drafts = tuple(self._native.draft(session.raw, block.anchor, self._maximum))
+                block.drafts = () if ctx.reason == "context_reserve" else drafts
                 self._native.verify(session.raw, block.anchor, block.drafts)
             except BaseException as error:  # noqa: BLE001 - Native graph failure can invalidate the checkpoint.
                 ctx.discard()

@@ -28,6 +28,11 @@
       "type": "boolean",
       "default": false
     },
+    "ctx": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Native context size used by public open."
+    },
     "think": {
       "type": "integer",
       "minimum": 0,
@@ -262,6 +267,11 @@
           "type": "integer",
           "minimum": -3,
           "description": "Sample index to cancel at; -1 selects before a row sample, -2 cancels during native commit, and -3 cancels before the round."
+        },
+        "resume_zero_reserve": {
+          "type": "boolean",
+          "default": false,
+          "description": "Resume the first reserve pause with zero reserve; fail any later pause."
         },
         "hook_error_at": {
           "type": "integer",
