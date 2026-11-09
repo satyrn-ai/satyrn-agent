@@ -132,6 +132,15 @@ def test_expected_metrics_rejects_missing_counter() -> None:
     assert not corpus_module.is_expected_metrics(metrics)
 
 
+def test_expected_reason_must_be_a_known_string() -> None:
+    case = dict(_case())
+    case["expected_reason"] = []
+
+    assert not is_corpus_case(case)
+    case["expected_reason"] = "context_reserve"
+    assert not is_corpus_case(case)
+
+
 def test_think_must_be_nonnegative() -> None:
     case = _case()
     case["think"] = -1

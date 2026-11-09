@@ -188,7 +188,10 @@ def assert_output(output: Mapping[str, object], expected_path: Path) -> None: ..
 
 
 def assert_output(output: object, expected_path: Path) -> None:
-    """Compare text or a JSON value with an external inline-snapshot file."""
+    """Compare text or a JSON mapping with an external inline-snapshot file.
+
+    Mapping output is valid only when ``expected_path`` has a ``.json`` suffix.
+    """
     if expected_path.suffix == ".json" and not isinstance(output, str):
         assert output == external_file(expected_path)
         return

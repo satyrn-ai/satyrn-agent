@@ -42,12 +42,12 @@ type Branch = Literal[
 ]
 type Sha256 = str
 
+# Closed set of terminal Stopped.reason values allowed in the live corpus.
 type TerminalReason = Literal[
     "stop_token",
     "stop_sequence",
     "tool_call_complete",
     "max_tokens",
-    "context_reserve",
     "interrupted",
     "parser_error",
     "context_exhausted",
@@ -207,7 +207,7 @@ def is_corpus_case(value: object) -> TypeIs[CorpusCase]:  # noqa: PLR0911 - Each
         return False
     if not _optional_int(value.get("ctx"), 1) or not _optional_int(value.get("draft_tokens"), 1):
         return False
-    if (reason := value.get("expected_reason")) is not None and reason not in _REASONS:
+    if (reason := value.get("expected_reason")) is not None and (not isinstance(reason, str) or reason not in _REASONS):
         return False
     if not _optional_int(value.get("think"), 0):
         return False
