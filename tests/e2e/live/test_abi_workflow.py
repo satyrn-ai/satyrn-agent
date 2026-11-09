@@ -1,17 +1,32 @@
 import subprocess
 import sys
-import time
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from ds4py.abi.manifest import Manifest, manifest_path
 
 from satyrn_agent.bindings import BINDINGS
+from tests.conftest import LiveSettings
+
+pytestmark = [pytest.mark.build, pytest.mark.live]
+
+_BUILT_LIBRARY_ROUNDTRIP = """
+import sys
+import time
+from pathlib import Path
+
 from satyrn_agent.config import SatyrnConfig
 from tests.conftest import LiveSettings, assert_alignment, configured_session, observe_round, prepare_chat
 
-pytestmark = [pytest.mark.build, pytest.mark.live]
+settings = LiveSettings(Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[1]), None)
+config = SatyrnConfig(drafter_path=settings.drafter)
+with configured_session(settings, config) as (wrapper, session):
+    assert wrapper.dflash_metrics is not None
+    for prompt in ("Say hello briefly.", "Say goodbye briefly."):
+        prepare_chat(session, prompt)
+        observation = observe_round(session, max_tokens=16, started=time.perf_counter())
+        assert_alignment(session, observation)
+"""
 
 
 def run(*args: str) -> None:
@@ -26,7 +41,7 @@ def test_build_check_manifest_and_load_workflow(live_settings: LiveSettings, tmp
     run(
         sys.executable,
         "-m",
-        "ds4py.cli",
+        "ds4py",
         "build",
         "--src",
         str(live_settings.source),
@@ -38,7 +53,7 @@ def test_build_check_manifest_and_load_workflow(live_settings: LiveSettings, tmp
     libraries = list(out.glob("libds4.*"))
     assert len(libraries) == 1
     library = libraries[0]
-    run(sys.executable, "-m", "ds4py.cli", "check", "--lib", str(library))
+    run(sys.executable, "-m", "ds4py", "check", "--lib", str(library))
 
     manifest = Manifest.read(manifest_path(library))
     for binding in BINDINGS:
@@ -47,11 +62,11 @@ def test_build_check_manifest_and_load_workflow(live_settings: LiveSettings, tmp
         assert record.ok, f"{binding.name}: {record.message}"
         assert not record.required
 
-    built = replace(live_settings, lib=library)
-    config = SatyrnConfig(drafter_path=built.drafter)
-    with configured_session(built, config) as (wrapper, session):
-        assert wrapper.dflash_metrics is not None
-        for prompt in ("Say hello briefly.", "Say goodbye briefly."):
-            prepare_chat(session, prompt)
-            observation = observe_round(session, max_tokens=16, started=time.perf_counter())
-            assert_alignment(session, observation)
+    run(
+        sys.executable,
+        "-c",
+        _BUILT_LIBRARY_ROUNDTRIP,
+        str(library),
+        str(live_settings.model),
+        str(live_settings.drafter),
+    )

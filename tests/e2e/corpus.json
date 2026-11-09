@@ -3,19 +3,19 @@
   "target": {
     "architecture": "qwen35",
     "path_env": "SATYRN_TEST_MODEL",
-    "sha256": null,
-    "quantization": null,
+    "sha256": "e00082f779fa385cee8c68a3ec8833a75778cc87272240b942f74e0b8243e520",
+    "quantization": "Q4_K_M",
     "sampling_defaults": {
-      "temperature": 0.6,
+      "temperature": 0.6000000238418579,
       "top_k": 20,
-      "top_p": 0.95,
+      "top_p": 0.949999988079071,
       "min_p": 0.0
     }
   },
   "drafter": {
     "path_env": "SATYRN_TEST_DRAFTER",
-    "sha256": null,
-    "quantization": null
+    "sha256": "0a994382adf17c720c9e5d4292f57344f3b445f058d3e9d5b0f601ae7d6ca3c4",
+    "quantization": "Q4_0"
   },
   "cases": [
     {
@@ -63,7 +63,7 @@
       "max_tokens": 64,
       "think_budget": {
         "max_tokens": 2,
-        "bias": 5.0
+        "bias": 32.0
       },
       "branches": [
         "think-budget-every-row",
@@ -89,6 +89,7 @@
       "seed": 5,
       "temperature": 0.0,
       "max_tokens": 48,
+      "think": 0,
       "stop_sequence": "beta",
       "expected_reason": "stop_sequence",
       "branches": [
@@ -101,7 +102,7 @@
       "prompt": "Answer with one short token.",
       "seed": 13,
       "temperature": 0.0,
-      "max_tokens": 2,
+      "max_tokens": 1,
       "branches": [
         "zero-drafts",
         "bonus-anchor"
@@ -109,10 +110,11 @@
     },
     {
       "name": "parser-error",
-      "prompt": "Produce malformed tool syntax that cannot form a valid tool call.",
+      "prompt": "Output only this malformed tool stanza, character for character, without explanation: <tool_call>{\"name\":\"broken\",\"arguments\":{invalid}}</tool_call>",
       "seed": 17,
       "temperature": 0.0,
       "max_tokens": 64,
+      "think": 0,
       "expected_reason": "parser_error",
       "branches": [
         "parser-error",
@@ -125,6 +127,7 @@
       "seed": 19,
       "temperature": 0.0,
       "max_tokens": 4096,
+      "ctx": 3400,
       "expected_reason": "context_exhausted",
       "branches": [
         "context-reserve",

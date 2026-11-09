@@ -6,7 +6,7 @@ import pytest
 from ds4py.engine.sampling import SamplingPolicy
 
 from satyrn_agent.config import SatyrnConfig
-from tests.conftest import LiveSettings, configured_session, serial_then_speculative
+from tests.conftest import LiveSettings, assert_alignment, configured_session, serial_then_speculative
 
 pytestmark = pytest.mark.live
 
@@ -23,13 +23,13 @@ def test_metrics_reconcile_with_committed_stream(live_settings: LiveSettings) ->
             sampling=SamplingPolicy(temperature=0.0, top_k=0, top_p=1.0, min_p=0.0, seed=1),
         )
         metrics = wrapper.dflash_metrics
+        assert_alignment(session, speculative)
 
     assert metrics is not None
     assert metrics.committed_blocks > 0
     assert 0 <= metrics.drafts_accepted <= metrics.drafts_offered
     assert metrics.discarded_tails == metrics.drafts_offered - metrics.drafts_accepted
     assert metrics.acceptance_rate == pytest.approx(metrics.drafts_accepted / metrics.drafts_offered)
-    assert speculative.native_position == len(speculative.transcript)
 
 
 def test_external_serial_speculative_timing_metadata(live_settings: LiveSettings, tmp_path: Path) -> None:

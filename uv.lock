@@ -175,7 +175,7 @@ wheels = [
 [[package]]
 name = "ds4py"
 version = "0.1.0"
-source = { git = "https://github.com/rochecompaan/ds4-py.git?rev=02562e51589d1db75ba96c23cd05603bf2a248dd#02562e51589d1db75ba96c23cd05603bf2a248dd" }
+source = { git = "https://github.com/rochecompaan/ds4-py.git?rev=5c98c6ac86cafef56780c3bcbb87c3ecaef52aef#5c98c6ac86cafef56780c3bcbb87c3ecaef52aef" }
 dependencies = [
     { name = "typing-extensions" },
 ]
@@ -718,7 +718,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ds4py", git = "https://github.com/rochecompaan/ds4-py.git?rev=02562e51589d1db75ba96c23cd05603bf2a248dd" },
+    { name = "ds4py", git = "https://github.com/rochecompaan/ds4-py.git?rev=5c98c6ac86cafef56780c3bcbb87c3ecaef52aef" },
     { name = "typing-extensions", specifier = ">=4.16.0,<5" },
 ]
 
