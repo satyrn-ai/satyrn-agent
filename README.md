@@ -68,8 +68,18 @@ scenario config references the same production schema.
 
 ## Models
 
-The live acceptance tests use a target model and a DFlash drafter model. The
-target generates tokens. The drafter proposes tokens for speculative decoding.
+Use the two models together when DFlash speculative decoding is enabled. The
+drafter proposes tokens, and the target verifies them before the engine
+publishes them. If you set `dflash=DFlashMode.OFF` or omit `drafter_path`,
+Satyrn uses the target without the drafter.
+
+This exact pair is the validated configuration for dense qwen35 on Metal. It
+combines a Q4_K_M target with a smaller Q4_0 drafter. In the recorded timing
+case on an Apple M4 Max, speculative decoding took 1.034129 seconds and serial
+decoding took 3.140691 seconds. The
+[validation report](docs/reports/agent-package-validation.md#serialspeculative-speed)
+records the 3.037x speedup and the test conditions.
+
 `tests/e2e/corpus.json` pins the SHA-256 hash of each GGUF file.
 
 | Role | Hugging Face repository | File | Revision | SHA-256 |
