@@ -49,11 +49,12 @@ type RunMode = Literal["cpu", "pilot", "deciding"]
 class ModelResponseFailure(RuntimeError):
     """A model response failed and may consume the configured repair retry."""
 
-    def __init__(self, reason: str) -> None:
-        if reason not in ("max_tokens", "parser_error"):
+    def __init__(self, reason: str, detail: str = "") -> None:
+        if reason not in ("max_tokens", "parser_error", "tool_loop"):
             raise ValueError(f"Not a retryable model response reason: {reason}")
         self.reason = reason
-        super().__init__(f"Model response ended with {reason}.")
+        message = f"Model response ended with {reason}."
+        super().__init__(f"{message} {detail}" if detail else message)
 
 
 class ContextPreparationFailure(ModelResponseFailure):

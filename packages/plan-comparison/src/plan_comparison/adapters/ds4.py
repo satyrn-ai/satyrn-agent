@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path, PurePosixPath
 from typing import Protocol, cast
 from uuid import uuid4
@@ -58,6 +58,12 @@ class _ToolContext:
     max_file_read_bytes: int
     gate_results: list[GateResult]
     on_write: Callable[[], None] | None = None
+    repeat_guard: bool = False
+    on_repeat: Callable[[str], None] | None = None
+    seen_reads: dict[str, bytes] = field(default_factory=dict)
+    on_loop: Callable[[str], None] | None = None
+    on_gate_failed: Callable[[str], None] | None = None
+    last_refusal: str | None = None
 
 
 class AgentRunResult(Protocol):
@@ -192,23 +198,7 @@ def build_restricted_agents(model: DS4Model, gate_policy: GatePolicy) -> Ds4Agen
 
         @agent.tool(sequential=True)
         async def run_visible_gate(ctx: RunContext[_ToolContext], gate_id: str) -> str:
-            spec = ctx.deps.gates.get(gate_id)
-            if spec is None:
-                return f"error: visible gate is not allowlisted: {gate_id}"
-            ctx.deps.budget.ensure_capacity()
-            result = run_gate(
-                ctx.deps.workspace,
-                spec.gate_id,
-                spec.gate,
-                spec.expectation,
-                ctx.deps.gate_policy,
-            )
-            ctx.deps.gate_results.append(result)
-            ctx.deps.budget.ensure_capacity()
-            return (
-                f"gate={result.gate_id} status={result.status} "
-                f"exit={result.exit_code}\n{result.output_excerpt}"
-            )
+            return _visible_gate_result(ctx.deps, gate_id)
 
     install_read_tool(agent)
     install_write_tools(agent)
@@ -219,8 +209,30 @@ def build_restricted_agents(model: DS4Model, gate_policy: GatePolicy) -> Ds4Agen
     )
 
 
+def _visible_gate_result(context: _ToolContext, gate_id: str) -> str:
+    """Run an allowlisted visible gate and return its outcome to the model."""
+    context.last_refusal = None
+    spec = context.gates.get(gate_id)
+    if spec is None:
+        return f"error: visible gate is not allowlisted: {gate_id}"
+    context.budget.ensure_capacity()
+    result = run_gate(
+        context.workspace,
+        spec.gate_id,
+        spec.gate,
+        spec.expectation,
+        context.gate_policy,
+    )
+    context.gate_results.append(result)
+    if result.status != "passed" and context.on_gate_failed is not None:
+        context.on_gate_failed(gate_id)
+    context.budget.ensure_capacity()
+    return _gate_text(result)
+
+
 def _read_file_result(context: _ToolContext, path: str) -> str:
     """Return the file, or a refusal the model can act on."""
+    previous_refusal, context.last_refusal = context.last_refusal, None
     try:
         target = _workspace_file(context.workspace, path)
         if path not in context.readable_paths:
@@ -230,6 +242,16 @@ def _read_file_result(context: _ToolContext, path: str) -> str:
         content = target.read_bytes()
         if len(content) > context.max_file_read_bytes:
             raise ValueError(f"Read exceeds configured limit: {path}")
+        if context.repeat_guard:
+            if context.seen_reads.get(path) == content:
+                return _refuse_repeat(
+                    context,
+                    previous_refusal,
+                    "read_file",
+                    path,
+                    "was already read and has not changed. Use the earlier content.",
+                )
+            context.seen_reads[path] = content
         return content.decode("utf-8")
     except (OSError, ValueError) as error:
         return f"error: {type(error).__name__}: {error}"
@@ -237,10 +259,23 @@ def _read_file_result(context: _ToolContext, path: str) -> str:
 
 def _write_file_result(context: _ToolContext, path: str, content: str) -> str:
     """Write the file, or return a refusal without touching the workspace."""
+    previous_refusal, context.last_refusal = context.last_refusal, None
     try:
         target = _workspace_file(context.workspace, path)
         if path not in context.writable_paths:
             raise ValueError(f"Write path is not allowlisted: {path}")
+        if (
+            context.repeat_guard
+            and target.is_file()
+            and target.read_bytes() == content.encode("utf-8")
+        ):
+            return _refuse_repeat(
+                context,
+                previous_refusal,
+                "write_file",
+                path,
+                "already has exactly this content, so nothing changed.",
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
     except (OSError, ValueError) as error:
@@ -248,6 +283,42 @@ def _write_file_result(context: _ToolContext, path: str, content: str) -> str:
     if context.on_write is not None:
         context.on_write()
     return f"Wrote {path}."
+
+
+def _refuse_repeat(
+    context: _ToolContext,
+    previous_refusal: str | None,
+    tool: str,
+    path: str,
+    reason: str,
+) -> str:
+    """Refuse a repeated call; repeating it straight after a refusal ends the run."""
+    key = f"{tool}:{path}"
+    if previous_refusal == key:
+        if context.on_loop is not None:
+            context.on_loop(key)
+        detail = (
+            f"{tool} {path} was repeated right after the guard refused it. "
+            "Change the approach instead of repeating a call."
+        )
+        if context.gate_results:
+            detail += "\nLast visible gate result before the loop:\n" + _gate_text(
+                context.gate_results[-1]
+            )
+        raise ModelResponseFailure("tool_loop", detail)
+    if context.on_repeat is not None:
+        context.on_repeat(key)
+    context.last_refusal = key
+    return (
+        f"error: {path} {reason} Do not repeat this call; continue with the next step."
+    )
+
+
+def _gate_text(result: GateResult) -> str:
+    return (
+        f"gate={result.gate_id} status={result.status} "
+        f"exit={result.exit_code}\n{result.output_excerpt}"
+    )
 
 
 def _workspace_file(workspace: Path, relative_path: str) -> Path:
@@ -284,6 +355,8 @@ class Ds4WorkerAdapter(WorkerPort):
         gate_policy: GatePolicy,
         thinking_budget: int = 4096,
         think_until_first_write: bool = False,
+        tool_repeat_guard: bool = False,
+        rethink_after_failure: bool = False,
         context_retry_limit: int = 2,
         max_file_read_bytes: int = 50_000,
         serial_tools: bool = True,
@@ -300,6 +373,17 @@ class Ds4WorkerAdapter(WorkerPort):
         if not isinstance(think_until_first_write, bool):
             raise ValueError("think_until_first_write must be a boolean")
         self.think_until_first_write = think_until_first_write
+        if not isinstance(tool_repeat_guard, bool):
+            raise ValueError("tool_repeat_guard must be a boolean")
+        self.tool_repeat_guard = tool_repeat_guard
+        if not isinstance(rethink_after_failure, bool):
+            raise ValueError("rethink_after_failure must be a boolean")
+        if rethink_after_failure and not think_until_first_write:
+            raise ValueError("rethink_after_failure requires think_until_first_write")
+        self.rethink_after_failure = rethink_after_failure
+        self.refused_tool_repeats: list[str] = []
+        self.tool_loops: list[str] = []
+        self.rethinks: list[str] = []
         if (
             not isinstance(context_retry_limit, int)
             or isinstance(context_retry_limit, bool)
@@ -760,11 +844,28 @@ class Ds4WorkerAdapter(WorkerPort):
             max_file_read_bytes=self.max_file_read_bytes,
             gate_results=[],
             on_write=self.workspace_written,
+            repeat_guard=self.tool_repeat_guard,
+            on_repeat=self._tool_refused,
+            on_loop=self.tool_loops.append,
+            on_gate_failed=self._gate_failed,
         )
 
     def workspace_written(self) -> None:
         if self.think_until_first_write:
             self._thinking_suppressed = True
+
+    def _tool_refused(self, key: str) -> None:
+        self.refused_tool_repeats.append(key)
+        self._rethink(f"repeat:{key}")
+
+    def _gate_failed(self, gate_id: str) -> None:
+        self._rethink(f"gate:{gate_id}")
+
+    def _rethink(self, trigger: str) -> None:
+        """Let the model think again until its next write after a failure."""
+        if self.rethink_after_failure:
+            self._thinking_suppressed = False
+            self.rethinks.append(trigger)
 
     def _ensure_open(self) -> None:
         if self._closed:

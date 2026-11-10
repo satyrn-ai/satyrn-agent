@@ -472,7 +472,7 @@ def test_harness_faults_keep_host_only_exception_details(
 
 
 @pytest.mark.parametrize("arm", ["P", "C"])
-@pytest.mark.parametrize("reason", ["max_tokens", "parser_error"])
+@pytest.mark.parametrize("reason", ["max_tokens", "parser_error", "tool_loop"])
 def test_model_response_failures_retry_with_rollback_and_metering(
     tmp_path: Path, arm: Arm, reason: str
 ) -> None:

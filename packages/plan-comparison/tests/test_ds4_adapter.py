@@ -13,6 +13,8 @@ def _fake_adapter(
     *,
     thinking_budget: int | None = None,
     think_until_first_write: bool = False,
+    tool_repeat_guard: bool = False,
+    rethink_after_failure: bool = False,
     response: bytes = b"done",
     family: str = "deepseek4",
     context_retry_limit: int = 2,
@@ -60,6 +62,8 @@ def _fake_adapter(
             tokenizer_revision="fake-tokenizer",
             gate_policy=gate_policy,
             think_until_first_write=think_until_first_write,
+            tool_repeat_guard=tool_repeat_guard,
+            rethink_after_failure=rethink_after_failure,
             context_retry_limit=context_retry_limit,
             **options,
         )
@@ -667,6 +671,347 @@ def test_rejected_writes_return_to_the_model_and_change_nothing(tmp_path) -> Non
     assert _write_file_result(context, "ok.py", "x = 1\n") == "Wrote ok.py."
     assert _write_file_result(context, "other.py", "x").startswith("error:")
     assert not (tmp_path / "other.py").exists()
+
+
+def test_repeat_guard_refuses_unchanged_reads_until_the_file_changes(tmp_path) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from dataclasses import replace as replace_context
+
+    from plan_comparison.adapters.ds4 import _read_file_result
+
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    (tmp_path / "other.py").write_text("y = 2\n")
+    context = replace_context(
+        _tool_context(tmp_path, {"ok.py", "other.py"}, set()), repeat_guard=True
+    )
+
+    assert _read_file_result(context, "ok.py") == "x = 1\n"
+    assert _read_file_result(context, "other.py") == "y = 2\n"
+    assert _read_file_result(context, "ok.py").startswith("error: ok.py")
+
+    (tmp_path / "ok.py").write_text("x = 2\n")
+
+    assert _read_file_result(context, "ok.py") == "x = 2\n"
+
+
+def test_repeat_guard_refuses_writes_that_change_nothing(tmp_path) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from dataclasses import replace as replace_context
+
+    from plan_comparison.adapters.ds4 import _write_file_result
+
+    writes: list[None] = []
+    context = replace_context(
+        _tool_context(tmp_path, set(), {"ok.py"}),
+        repeat_guard=True,
+        on_write=lambda: writes.append(None),
+    )
+
+    assert _write_file_result(context, "ok.py", "x = 1\n") == "Wrote ok.py."
+    assert _write_file_result(context, "ok.py", "x = 1\n").startswith("error: ok.py")
+    assert len(writes) == 1
+    assert _write_file_result(context, "ok.py", "x = 2\n") == "Wrote ok.py."
+    assert (tmp_path / "ok.py").read_text() == "x = 2\n"
+    assert len(writes) == 2
+
+
+def test_repeated_calls_are_served_without_the_guard(tmp_path) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from plan_comparison.adapters.ds4 import _read_file_result, _write_file_result
+
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    context = _tool_context(tmp_path, {"ok.py"}, {"ok.py"})
+
+    assert _read_file_result(context, "ok.py") == "x = 1\n"
+    assert _read_file_result(context, "ok.py") == "x = 1\n"
+    assert _write_file_result(context, "ok.py", "x = 1\n") == "Wrote ok.py."
+
+
+def test_adapter_guard_is_optional_and_counts_refused_repeats(tmp_path) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from plan_comparison.adapters.ds4 import _read_file_result
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=30, tokens=100_000, model_calls=10)
+    )
+    for enabled, expected in ((False, []), (True, ["read_file:ok.py"])):
+        engine, adapter = _fake_adapter(tool_repeat_guard=enabled)
+        try:
+            context = adapter._tool_context(tmp_path, ("ok.py",), (), (), budget)
+            _read_file_result(context, "ok.py")
+            _read_file_result(context, "ok.py")
+            assert adapter.refused_tool_repeats == expected
+            fresh = adapter._tool_context(tmp_path, ("ok.py",), (), (), budget)
+            assert _read_file_result(fresh, "ok.py") == "x = 1\n"
+        finally:
+            engine.close()
+
+
+def test_repeating_a_refused_call_ends_the_run_as_a_tool_loop(tmp_path) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from dataclasses import replace as replace_context
+
+    from plan_comparison.adapters.ds4 import _read_file_result, _write_file_result
+    from plan_comparison.contracts import ModelResponseFailure
+
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    context = replace_context(
+        _tool_context(tmp_path, {"ok.py"}, {"ok.py"}), repeat_guard=True
+    )
+
+    assert _write_file_result(context, "ok.py", "x = 1\n").startswith("error: ok.py")
+    with pytest.raises(ModelResponseFailure) as caught:
+        _write_file_result(context, "ok.py", "x = 1\n")
+    assert caught.value.reason == "tool_loop"
+    assert "write_file ok.py" in str(caught.value)
+
+    assert _read_file_result(context, "ok.py") == "x = 1\n"
+    assert _read_file_result(context, "ok.py").startswith("error: ok.py")
+    with pytest.raises(ModelResponseFailure):
+        _read_file_result(context, "ok.py")
+
+
+def test_refusals_of_different_calls_do_not_escalate(tmp_path) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from dataclasses import replace as replace_context
+
+    from plan_comparison.adapters.ds4 import _read_file_result, _write_file_result
+
+    for name in ("a.py", "b.py"):
+        (tmp_path / name).write_text("x = 1\n")
+    context = replace_context(
+        _tool_context(tmp_path, {"a.py", "b.py"}, {"a.py"}), repeat_guard=True
+    )
+    _read_file_result(context, "a.py")
+    _read_file_result(context, "b.py")
+
+    assert _read_file_result(context, "a.py").startswith("error: a.py")
+    assert _read_file_result(context, "b.py").startswith("error: b.py")
+    assert _read_file_result(context, "a.py").startswith("error: a.py")
+    assert _write_file_result(context, "a.py", "x = 2\n") == "Wrote a.py."
+    assert _write_file_result(context, "a.py", "x = 2\n").startswith("error: a.py")
+    assert _read_file_result(context, "b.py").startswith("error: b.py")
+    assert _write_file_result(context, "a.py", "x = 2\n").startswith("error: a.py")
+
+
+def test_tool_loop_feedback_carries_the_last_visible_gate(tmp_path) -> None:
+    pytest.importorskip("ds4py")
+    pytest.importorskip("pydantic_ai")
+    from dataclasses import replace as replace_context
+
+    from plan_comparison.adapters.ds4 import _write_file_result
+    from plan_comparison.contracts import GateResult, ModelResponseFailure
+
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    gate = GateResult(
+        gate_id="visible",
+        status="failed",
+        exit_code=1,
+        timed_out=False,
+        duration_seconds=0.1,
+        output_excerpt="assert 1 == 2",
+        output_truncated=False,
+        verified_red_evidence=(),
+    )
+    context = replace_context(
+        _tool_context(tmp_path, set(), {"ok.py"}),
+        repeat_guard=True,
+        gate_results=[gate],
+    )
+
+    _write_file_result(context, "ok.py", "x = 1\n")
+    with pytest.raises(ModelResponseFailure) as caught:
+        _write_file_result(context, "ok.py", "x = 1\n")
+    assert "gate=visible status=failed" in str(caught.value)
+    assert "assert 1 == 2" in str(caught.value)
+
+
+def test_adapter_reports_a_write_loop_as_a_model_response_failure(tmp_path) -> None:
+    from ds4py._native.fake import FAKE_EOS
+
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits, ModelResponseFailure
+
+    engine, adapter = _fake_adapter(family="qwen", tool_repeat_guard=True)
+    write = (
+        b"<tool_call><function=write_file><parameter=path>app.py</parameter>"
+        b"<parameter=content>x = 1</parameter></function></tool_call>"
+    )
+
+    def script(prompt, generated):
+        return write[len(generated)] + 1 if len(generated) < len(write) else FAKE_EOS
+
+    engine.native.script = script
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=30, tokens=100_000, model_calls=20)
+    )
+    try:
+        with pytest.raises(ModelResponseFailure) as caught:
+            asyncio.run(
+                adapter.execute_prose(
+                    task_id="fake",
+                    plan="Implement f.",
+                    workspace=tmp_path,
+                    allowed_read_paths=(),
+                    allowed_write_paths=("app.py",),
+                    visible_gates=(),
+                    visible_feedback=(),
+                    budget=budget,
+                )
+            )
+        assert caught.value.reason == "tool_loop"
+        assert adapter.refused_tool_repeats == ["write_file:app.py"]
+        assert adapter.tool_loops == ["write_file:app.py"]
+        assert budget.snapshot().model_calls == 3
+        assert not adapter._message_history
+    finally:
+        engine.close()
+
+
+def _exit_gate(gate_id: str, code: int):
+    import sys
+
+    from typed_packets.contract import Gate, GateExpectation
+
+    from plan_comparison.contracts import VisibleGateSpec
+
+    expectation = GateExpectation(exit_code=0, reason="passes")
+    return VisibleGateSpec(
+        gate_id=gate_id,
+        gate=Gate(
+            argv=(sys.executable, "-c", f"raise SystemExit({code})"),
+            cwd=".",
+            before=expectation,
+            after=expectation,
+        ),
+        expectation=expectation,
+    )
+
+
+def _gate_context(adapter, tmp_path, budget):
+    import sys
+    from dataclasses import replace as replace_context
+
+    from plan_comparison.gates import GatePolicy
+
+    gates = (_exit_gate("red", 1), _exit_gate("green", 0))
+    return replace_context(
+        adapter._tool_context(tmp_path, (), ("ok.py",), gates, budget),
+        gate_policy=GatePolicy(
+            allowed_commands=(sys.executable,),
+            environment=(),
+            timeout_seconds=30,
+            output_limit_bytes=128,
+        ),
+    )
+
+
+def test_failed_visible_gate_rearms_thinking_until_the_next_write(tmp_path) -> None:
+    from plan_comparison.adapters.ds4 import _visible_gate_result, _write_file_result
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=60, tokens=100_000, model_calls=10)
+    )
+    engine, adapter = _fake_adapter(
+        think_until_first_write=True, rethink_after_failure=True
+    )
+    try:
+        context = _gate_context(adapter, tmp_path, budget)
+        _write_file_result(context, "ok.py", "x = 1\n")
+        assert adapter._thinking_suppressed
+
+        assert "status=passed" in _visible_gate_result(context, "green")
+        assert adapter._thinking_suppressed
+        assert "status=failed" in _visible_gate_result(context, "red")
+        assert not adapter._thinking_suppressed
+        assert adapter.rethinks == ["gate:red"]
+
+        _write_file_result(context, "ok.py", "x = 2\n")
+        assert adapter._thinking_suppressed
+    finally:
+        engine.close()
+
+
+def test_guard_refusal_rearms_thinking(tmp_path) -> None:
+    from plan_comparison.adapters.ds4 import _write_file_result
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=60, tokens=100_000, model_calls=10)
+    )
+    engine, adapter = _fake_adapter(
+        think_until_first_write=True,
+        rethink_after_failure=True,
+        tool_repeat_guard=True,
+    )
+    try:
+        context = adapter._tool_context(tmp_path, (), ("ok.py",), (), budget)
+        _write_file_result(context, "ok.py", "x = 1\n")
+        assert _write_file_result(context, "ok.py", "x = 1\n").startswith("error:")
+        assert not adapter._thinking_suppressed
+        assert adapter.rethinks == ["repeat:write_file:ok.py"]
+        assert adapter.refused_tool_repeats == ["write_file:ok.py"]
+    finally:
+        engine.close()
+
+
+def test_failures_keep_thinking_suppressed_without_rethink(tmp_path) -> None:
+    from plan_comparison.adapters.ds4 import _visible_gate_result, _write_file_result
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=60, tokens=100_000, model_calls=10)
+    )
+    engine, adapter = _fake_adapter(
+        think_until_first_write=True, tool_repeat_guard=True
+    )
+    try:
+        context = _gate_context(adapter, tmp_path, budget)
+        _write_file_result(context, "ok.py", "x = 1\n")
+        _visible_gate_result(context, "red")
+        _write_file_result(context, "ok.py", "x = 1\n")
+        assert adapter._thinking_suppressed
+        assert adapter.rethinks == []
+    finally:
+        engine.close()
+
+
+def test_rethink_requires_thinking_until_first_write() -> None:
+    with pytest.raises(ValueError, match="rethink"):
+        _fake_adapter(rethink_after_failure=True)
+
+
+def test_a_gate_call_between_refusals_breaks_the_loop(tmp_path) -> None:
+    from plan_comparison.adapters.ds4 import _visible_gate_result, _write_file_result
+    from plan_comparison.budget import MonotonicBudget
+    from plan_comparison.contracts import BudgetLimits
+
+    budget = MonotonicBudget(
+        BudgetLimits(wall_seconds=60, tokens=100_000, model_calls=10)
+    )
+    engine, adapter = _fake_adapter(tool_repeat_guard=True)
+    try:
+        context = _gate_context(adapter, tmp_path, budget)
+        _write_file_result(context, "ok.py", "x = 1\n")
+        assert _write_file_result(context, "ok.py", "x = 1\n").startswith("error:")
+        _visible_gate_result(context, "green")
+        assert _write_file_result(context, "ok.py", "x = 1\n").startswith("error:")
+        assert adapter.tool_loops == []
+    finally:
+        engine.close()
 
 
 def test_prompts_name_the_files_the_worker_may_use() -> None:
