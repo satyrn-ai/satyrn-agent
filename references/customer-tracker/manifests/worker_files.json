@@ -7,7 +7,7 @@
       },
       "examples/E1/complete/app/config/settings.py": {
         "export_path": "complete/app/config/settings.py",
-        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+        "sha256": "e4d0c01b9bcd78760fa7798828f09eda9f7a6ecc46c46688d09831b701bfbb92"
       },
       "examples/E1/complete/app/config/urls.py": {
         "export_path": "complete/app/config/urls.py",
@@ -23,11 +23,11 @@
       },
       "examples/E1/complete/app/crm/apps.py": {
         "export_path": "complete/app/crm/apps.py",
-        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+        "sha256": "5e488a98767d69dd76cd7f9e27631cbad60455a3ce03899ac9976ba7ba34de3d"
       },
       "examples/E1/complete/app/crm/domain.py": {
         "export_path": "complete/app/crm/domain.py",
-        "sha256": "835c29d24a46f374ab22509dfed6f1d6c18791878d50ac362f63720c03a759ff"
+        "sha256": "3286609fee31b73dbee49ebca1a253b56f41bc83274d147d492881d9bfac33d5"
       },
       "examples/E1/complete/app/crm/migrations/0001_initial.py": {
         "export_path": "complete/app/crm/migrations/0001_initial.py",
@@ -43,7 +43,7 @@
       },
       "examples/E1/complete/app/crm/queries.py": {
         "export_path": "complete/app/crm/queries.py",
-        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+        "sha256": "b28e69d9f5d5353c0b4d2eeadbefaef17e58802f16f535ccdcd8ced1ac2e573f"
       },
       "examples/E1/complete/app/crm/templates/crm/customer_detail.html": {
         "export_path": "complete/app/crm/templates/crm/customer_detail.html",
@@ -55,11 +55,11 @@
       },
       "examples/E1/complete/app/crm/urls.py": {
         "export_path": "complete/app/crm/urls.py",
-        "sha256": "9863185f3d589ce26b6e90ca3c4a3129f44f897d718a542a393894ad3ec4d0fd"
+        "sha256": "c5d7fa6461ef280c973c828996a3f7516464392cf635fbfffa9ce4ce96160544"
       },
       "examples/E1/complete/app/crm/views.py": {
         "export_path": "complete/app/crm/views.py",
-        "sha256": "90e7ffed3b11e36a388fe032b6bdadc59f0f851c5e857084a9835a8e16d02596"
+        "sha256": "0d14f3f780e46149bed5e3688021e20830c5e6874b1ea829543af4e2ec575609"
       },
       "examples/E1/complete/app/manage.py": {
         "export_path": "complete/app/manage.py",
@@ -83,7 +83,7 @@
       },
       "examples/E1/provenance.json": {
         "export_path": "provenance.json",
-        "sha256": "29fa1dda870eb9399c7aa3285083df23b833e005d67b281c79951215ee056ce5"
+        "sha256": "7ac9b040fd5742d69af6d93c2204c1aa0683a9bb9cda576f61a8fb17cf051ce0"
       },
       "examples/E1/start/app/config/__init__.py": {
         "export_path": "start/app/config/__init__.py",
@@ -91,7 +91,7 @@
       },
       "examples/E1/start/app/config/settings.py": {
         "export_path": "start/app/config/settings.py",
-        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+        "sha256": "e4d0c01b9bcd78760fa7798828f09eda9f7a6ecc46c46688d09831b701bfbb92"
       },
       "examples/E1/start/app/config/urls.py": {
         "export_path": "start/app/config/urls.py",
@@ -107,11 +107,11 @@
       },
       "examples/E1/start/app/crm/apps.py": {
         "export_path": "start/app/crm/apps.py",
-        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+        "sha256": "5e488a98767d69dd76cd7f9e27631cbad60455a3ce03899ac9976ba7ba34de3d"
       },
       "examples/E1/start/app/crm/domain.py": {
         "export_path": "start/app/crm/domain.py",
-        "sha256": "1e624a899681279c5fa89ba1ded911773bd5cbc1a1f90c51e0fae49cccd555b3"
+        "sha256": "1ed9d132689a9efd89b3d59dcb59368f1b28c7365f7272517f3bb404138ded7a"
       },
       "examples/E1/start/app/crm/migrations/__init__.py": {
         "export_path": "start/app/crm/migrations/__init__.py",
@@ -135,11 +135,11 @@
       },
       "examples/E1/start/app/crm/urls.py": {
         "export_path": "start/app/crm/urls.py",
-        "sha256": "9863185f3d589ce26b6e90ca3c4a3129f44f897d718a542a393894ad3ec4d0fd"
+        "sha256": "c5d7fa6461ef280c973c828996a3f7516464392cf635fbfffa9ce4ce96160544"
       },
       "examples/E1/start/app/crm/views.py": {
         "export_path": "start/app/crm/views.py",
-        "sha256": "ff9f33e3d1ea2ada2f35934c4392ce4c6d20fba26b9c570206e32b7edbd975dc"
+        "sha256": "c58206b1a87e21afd7e3a731d0f12b994559e61f66b40866c0e47f65f453d680"
       },
       "examples/E1/start/app/manage.py": {
         "export_path": "start/app/manage.py",
@@ -163,7 +163,7 @@
       },
       "examples/E1/task.md": {
         "export_path": "task.md",
-        "sha256": "bb3264411a1e37498518dc81c341403a1e769e9f119418856dda8aa88777fdc6"
+        "sha256": "6c6a2b73ffc2ca235ef24e3a2c503089c8621985df39d90689681f51a469fb5c"
       }
     },
     "E2": {
@@ -173,7 +173,7 @@
       },
       "examples/E2/complete/app/config/settings.py": {
         "export_path": "complete/app/config/settings.py",
-        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+        "sha256": "e4d0c01b9bcd78760fa7798828f09eda9f7a6ecc46c46688d09831b701bfbb92"
       },
       "examples/E2/complete/app/config/urls.py": {
         "export_path": "complete/app/config/urls.py",
@@ -189,11 +189,11 @@
       },
       "examples/E2/complete/app/crm/apps.py": {
         "export_path": "complete/app/crm/apps.py",
-        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+        "sha256": "5e488a98767d69dd76cd7f9e27631cbad60455a3ce03899ac9976ba7ba34de3d"
       },
       "examples/E2/complete/app/crm/domain.py": {
         "export_path": "complete/app/crm/domain.py",
-        "sha256": "d928dd9e2f5a65dfe97e918ace054b46fd61ed6672f5135df8adca79bf2b1b1e"
+        "sha256": "e8144a5072badc067d7d9c721b980ca999692c77052ca54b7e170e699a89d1ae"
       },
       "examples/E2/complete/app/crm/forms.py": {
         "export_path": "complete/app/crm/forms.py",
@@ -213,11 +213,11 @@
       },
       "examples/E2/complete/app/crm/operations.py": {
         "export_path": "complete/app/crm/operations.py",
-        "sha256": "75bb9f24e0dc8a2c5d7eb7e585bd35295fcba3beb8d1101f69fbd440b2ce5f43"
+        "sha256": "b12124e1edf279df925e54529120222580747de58bc9ac142095ecd6bf6dc4e8"
       },
       "examples/E2/complete/app/crm/queries.py": {
         "export_path": "complete/app/crm/queries.py",
-        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+        "sha256": "b28e69d9f5d5353c0b4d2eeadbefaef17e58802f16f535ccdcd8ced1ac2e573f"
       },
       "examples/E2/complete/app/crm/templates/crm/customer_detail.html": {
         "export_path": "complete/app/crm/templates/crm/customer_detail.html",
@@ -233,11 +233,11 @@
       },
       "examples/E2/complete/app/crm/urls.py": {
         "export_path": "complete/app/crm/urls.py",
-        "sha256": "47399bf5dc73511236ea768473bd902cde9c8298de3bad4efc4ceb265f239517"
+        "sha256": "0b8e0e6fa97749b54a9ac93f1dcc96f961f7df00bd3b2e9c898544ee888c929b"
       },
       "examples/E2/complete/app/crm/views.py": {
         "export_path": "complete/app/crm/views.py",
-        "sha256": "496c7b10fc0a2b7da3be4f5fe7b67dd39f8d7afe9ac9c960e4932c52be040b24"
+        "sha256": "ba70c4c09cd592c31d02d1859018e3e8797740a2fa99d80b9e11b3e4f48e3543"
       },
       "examples/E2/complete/app/manage.py": {
         "export_path": "complete/app/manage.py",
@@ -261,7 +261,7 @@
       },
       "examples/E2/provenance.json": {
         "export_path": "provenance.json",
-        "sha256": "e26c530f70b47b3ecb87e65ef56f857818853b02fc6c566a762fa2e5ccc91233"
+        "sha256": "281e510fb7df7616a29ea9404b0152f3ea885e564ed7a0df4928d20954ae33a5"
       },
       "examples/E2/start/app/config/__init__.py": {
         "export_path": "start/app/config/__init__.py",
@@ -269,7 +269,7 @@
       },
       "examples/E2/start/app/config/settings.py": {
         "export_path": "start/app/config/settings.py",
-        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+        "sha256": "e4d0c01b9bcd78760fa7798828f09eda9f7a6ecc46c46688d09831b701bfbb92"
       },
       "examples/E2/start/app/config/urls.py": {
         "export_path": "start/app/config/urls.py",
@@ -285,11 +285,11 @@
       },
       "examples/E2/start/app/crm/apps.py": {
         "export_path": "start/app/crm/apps.py",
-        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+        "sha256": "5e488a98767d69dd76cd7f9e27631cbad60455a3ce03899ac9976ba7ba34de3d"
       },
       "examples/E2/start/app/crm/domain.py": {
         "export_path": "start/app/crm/domain.py",
-        "sha256": "835c29d24a46f374ab22509dfed6f1d6c18791878d50ac362f63720c03a759ff"
+        "sha256": "3286609fee31b73dbee49ebca1a253b56f41bc83274d147d492881d9bfac33d5"
       },
       "examples/E2/start/app/crm/migrations/0001_initial.py": {
         "export_path": "start/app/crm/migrations/0001_initial.py",
@@ -305,7 +305,7 @@
       },
       "examples/E2/start/app/crm/queries.py": {
         "export_path": "start/app/crm/queries.py",
-        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+        "sha256": "b28e69d9f5d5353c0b4d2eeadbefaef17e58802f16f535ccdcd8ced1ac2e573f"
       },
       "examples/E2/start/app/crm/templates/crm/customer_detail.html": {
         "export_path": "start/app/crm/templates/crm/customer_detail.html",
@@ -317,11 +317,11 @@
       },
       "examples/E2/start/app/crm/urls.py": {
         "export_path": "start/app/crm/urls.py",
-        "sha256": "9863185f3d589ce26b6e90ca3c4a3129f44f897d718a542a393894ad3ec4d0fd"
+        "sha256": "c5d7fa6461ef280c973c828996a3f7516464392cf635fbfffa9ce4ce96160544"
       },
       "examples/E2/start/app/crm/views.py": {
         "export_path": "start/app/crm/views.py",
-        "sha256": "90e7ffed3b11e36a388fe032b6bdadc59f0f851c5e857084a9835a8e16d02596"
+        "sha256": "0d14f3f780e46149bed5e3688021e20830c5e6874b1ea829543af4e2ec575609"
       },
       "examples/E2/start/app/manage.py": {
         "export_path": "start/app/manage.py",
@@ -355,7 +355,7 @@
       },
       "examples/E3/complete/app/config/settings.py": {
         "export_path": "complete/app/config/settings.py",
-        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+        "sha256": "e4d0c01b9bcd78760fa7798828f09eda9f7a6ecc46c46688d09831b701bfbb92"
       },
       "examples/E3/complete/app/config/urls.py": {
         "export_path": "complete/app/config/urls.py",
@@ -371,11 +371,11 @@
       },
       "examples/E3/complete/app/crm/apps.py": {
         "export_path": "complete/app/crm/apps.py",
-        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+        "sha256": "5e488a98767d69dd76cd7f9e27631cbad60455a3ce03899ac9976ba7ba34de3d"
       },
       "examples/E3/complete/app/crm/domain.py": {
         "export_path": "complete/app/crm/domain.py",
-        "sha256": "d928dd9e2f5a65dfe97e918ace054b46fd61ed6672f5135df8adca79bf2b1b1e"
+        "sha256": "e8144a5072badc067d7d9c721b980ca999692c77052ca54b7e170e699a89d1ae"
       },
       "examples/E3/complete/app/crm/forms.py": {
         "export_path": "complete/app/crm/forms.py",
@@ -395,11 +395,11 @@
       },
       "examples/E3/complete/app/crm/operations.py": {
         "export_path": "complete/app/crm/operations.py",
-        "sha256": "9d9e06385e4c6a3e7ab71778fdc935997f77d17c42db2a77db5a0ea488ad69b9"
+        "sha256": "a11e404c1110757700f85ef94f7bc86f834e7d5e6c723757cbefdebfaaeef8f2"
       },
       "examples/E3/complete/app/crm/queries.py": {
         "export_path": "complete/app/crm/queries.py",
-        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+        "sha256": "b28e69d9f5d5353c0b4d2eeadbefaef17e58802f16f535ccdcd8ced1ac2e573f"
       },
       "examples/E3/complete/app/crm/templates/crm/contact_form.html": {
         "export_path": "complete/app/crm/templates/crm/contact_form.html",
@@ -419,11 +419,11 @@
       },
       "examples/E3/complete/app/crm/urls.py": {
         "export_path": "complete/app/crm/urls.py",
-        "sha256": "73f4220123284809221d88d4eb5c60c2eb6a1b899cb908a0a455d0896e643430"
+        "sha256": "daa311adc5450affd3d2593aa5c4dd909a0d0f1b24e7574d067f24fc45afce23"
       },
       "examples/E3/complete/app/crm/views.py": {
         "export_path": "complete/app/crm/views.py",
-        "sha256": "45eea2e6ecf68fc6ce2353f894da53e96e6981810ec5f5bfc6cb7d9f3d5f694d"
+        "sha256": "99a655c7a77e765bbc4d382ebe6b2d6b743985089b9a90cfce048c7552aac754"
       },
       "examples/E3/complete/app/manage.py": {
         "export_path": "complete/app/manage.py",
@@ -447,7 +447,7 @@
       },
       "examples/E3/provenance.json": {
         "export_path": "provenance.json",
-        "sha256": "ed0cc22556a578a5fd54fcac9dc717d7e9d91b7aa0d12d05218780999fb18f5d"
+        "sha256": "b19aa304e7324e5421fb63af0ad106cfc596767691b631685ec7782396a27121"
       },
       "examples/E3/start/app/config/__init__.py": {
         "export_path": "start/app/config/__init__.py",
@@ -455,7 +455,7 @@
       },
       "examples/E3/start/app/config/settings.py": {
         "export_path": "start/app/config/settings.py",
-        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+        "sha256": "e4d0c01b9bcd78760fa7798828f09eda9f7a6ecc46c46688d09831b701bfbb92"
       },
       "examples/E3/start/app/config/urls.py": {
         "export_path": "start/app/config/urls.py",
@@ -471,11 +471,11 @@
       },
       "examples/E3/start/app/crm/apps.py": {
         "export_path": "start/app/crm/apps.py",
-        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+        "sha256": "5e488a98767d69dd76cd7f9e27631cbad60455a3ce03899ac9976ba7ba34de3d"
       },
       "examples/E3/start/app/crm/domain.py": {
         "export_path": "start/app/crm/domain.py",
-        "sha256": "d928dd9e2f5a65dfe97e918ace054b46fd61ed6672f5135df8adca79bf2b1b1e"
+        "sha256": "e8144a5072badc067d7d9c721b980ca999692c77052ca54b7e170e699a89d1ae"
       },
       "examples/E3/start/app/crm/forms.py": {
         "export_path": "start/app/crm/forms.py",
@@ -495,11 +495,11 @@
       },
       "examples/E3/start/app/crm/operations.py": {
         "export_path": "start/app/crm/operations.py",
-        "sha256": "75bb9f24e0dc8a2c5d7eb7e585bd35295fcba3beb8d1101f69fbd440b2ce5f43"
+        "sha256": "b12124e1edf279df925e54529120222580747de58bc9ac142095ecd6bf6dc4e8"
       },
       "examples/E3/start/app/crm/queries.py": {
         "export_path": "start/app/crm/queries.py",
-        "sha256": "4d1227fa71b7fc5f3f6cb6d4cb6dff89a576cdcf98e271b2de66f3900b0fcfd1"
+        "sha256": "b28e69d9f5d5353c0b4d2eeadbefaef17e58802f16f535ccdcd8ced1ac2e573f"
       },
       "examples/E3/start/app/crm/templates/crm/customer_detail.html": {
         "export_path": "start/app/crm/templates/crm/customer_detail.html",
@@ -515,11 +515,11 @@
       },
       "examples/E3/start/app/crm/urls.py": {
         "export_path": "start/app/crm/urls.py",
-        "sha256": "47399bf5dc73511236ea768473bd902cde9c8298de3bad4efc4ceb265f239517"
+        "sha256": "0b8e0e6fa97749b54a9ac93f1dcc96f961f7df00bd3b2e9c898544ee888c929b"
       },
       "examples/E3/start/app/crm/views.py": {
         "export_path": "start/app/crm/views.py",
-        "sha256": "496c7b10fc0a2b7da3be4f5fe7b67dd39f8d7afe9ac9c960e4932c52be040b24"
+        "sha256": "ba70c4c09cd592c31d02d1859018e3e8797740a2fa99d80b9e11b3e4f48e3543"
       },
       "examples/E3/start/app/manage.py": {
         "export_path": "start/app/manage.py",
@@ -549,7 +549,7 @@
     "H1": {
       "tasks/H1/provenance.json": {
         "export_path": "provenance.json",
-        "sha256": "5a65b2a65c3fe2e1d49c50999ba4a2474db135a78498702f3acb49deca042772"
+        "sha256": "628e09ca68a04c47747487ae2c0a9af13fa4966b6fb1a452e3017906e3d67fd6"
       },
       "tasks/H1/start/app/config/__init__.py": {
         "export_path": "app/config/__init__.py",
@@ -557,7 +557,7 @@
       },
       "tasks/H1/start/app/config/settings.py": {
         "export_path": "app/config/settings.py",
-        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+        "sha256": "e4d0c01b9bcd78760fa7798828f09eda9f7a6ecc46c46688d09831b701bfbb92"
       },
       "tasks/H1/start/app/config/urls.py": {
         "export_path": "app/config/urls.py",
@@ -573,11 +573,11 @@
       },
       "tasks/H1/start/app/crm/apps.py": {
         "export_path": "app/crm/apps.py",
-        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+        "sha256": "5e488a98767d69dd76cd7f9e27631cbad60455a3ce03899ac9976ba7ba34de3d"
       },
       "tasks/H1/start/app/crm/domain.py": {
         "export_path": "app/crm/domain.py",
-        "sha256": "3c27471f068241a4a2649d14b28cd0f4a5c9448b0239ed4c7325ae0e632d6bdd"
+        "sha256": "5f7a32a3fdaa0c571825812268c68f747119b94e958ab236b0d4a35eb76d3596"
       },
       "tasks/H1/start/app/crm/forms.py": {
         "export_path": "app/crm/forms.py",
@@ -597,11 +597,11 @@
       },
       "tasks/H1/start/app/crm/operations.py": {
         "export_path": "app/crm/operations.py",
-        "sha256": "9d9e06385e4c6a3e7ab71778fdc935997f77d17c42db2a77db5a0ea488ad69b9"
+        "sha256": "a11e404c1110757700f85ef94f7bc86f834e7d5e6c723757cbefdebfaaeef8f2"
       },
       "tasks/H1/start/app/crm/queries.py": {
         "export_path": "app/crm/queries.py",
-        "sha256": "8199573acfea82b74c2974261fe502f09ee2c768b3838d30a393230698e5bb22"
+        "sha256": "d7ab891129b75d766716c4b2751c08bb89d877329a6467855b60b60433b02f02"
       },
       "tasks/H1/start/app/crm/templates/crm/contact_form.html": {
         "export_path": "app/crm/templates/crm/contact_form.html",
@@ -621,11 +621,11 @@
       },
       "tasks/H1/start/app/crm/urls.py": {
         "export_path": "app/crm/urls.py",
-        "sha256": "73f4220123284809221d88d4eb5c60c2eb6a1b899cb908a0a455d0896e643430"
+        "sha256": "daa311adc5450affd3d2593aa5c4dd909a0d0f1b24e7574d067f24fc45afce23"
       },
       "tasks/H1/start/app/crm/views.py": {
         "export_path": "app/crm/views.py",
-        "sha256": "6f62cb5e2c8d6b6d97131af548d9eb3feea006c12cb01e9802f0215ba3ed78a0"
+        "sha256": "1c25473db8820b09d203f13f41bb549be9746d192a05e5002880a48629d78b59"
       },
       "tasks/H1/start/app/manage.py": {
         "export_path": "app/manage.py",
@@ -655,7 +655,7 @@
     "H2": {
       "tasks/H2/provenance.json": {
         "export_path": "provenance.json",
-        "sha256": "145d2a3f0d55bd8385ec5b9ac1b8b6a10faee997ba4a0b4d5839a5b8cf843426"
+        "sha256": "2508de896ec06ac06e67d46a5a23fe48d3d10e9549325290a33aa32b91e66d71"
       },
       "tasks/H2/start/app/config/__init__.py": {
         "export_path": "app/config/__init__.py",
@@ -663,7 +663,7 @@
       },
       "tasks/H2/start/app/config/settings.py": {
         "export_path": "app/config/settings.py",
-        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+        "sha256": "e4d0c01b9bcd78760fa7798828f09eda9f7a6ecc46c46688d09831b701bfbb92"
       },
       "tasks/H2/start/app/config/urls.py": {
         "export_path": "app/config/urls.py",
@@ -679,11 +679,11 @@
       },
       "tasks/H2/start/app/crm/apps.py": {
         "export_path": "app/crm/apps.py",
-        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+        "sha256": "5e488a98767d69dd76cd7f9e27631cbad60455a3ce03899ac9976ba7ba34de3d"
       },
       "tasks/H2/start/app/crm/domain.py": {
         "export_path": "app/crm/domain.py",
-        "sha256": "615e003ab18694b0dd1140cd0c2453ef79b1f349f5511478d1ccfed6e02873c3"
+        "sha256": "cd89e892e88d74aa8aaf86e8ae12edab7e3c14968d5333112685831f0e94fcc0"
       },
       "tasks/H2/start/app/crm/forms.py": {
         "export_path": "app/crm/forms.py",
@@ -707,11 +707,11 @@
       },
       "tasks/H2/start/app/crm/operations.py": {
         "export_path": "app/crm/operations.py",
-        "sha256": "0c96a4d7f946d19670f3734ba3abf773456cf1ca70c1159b72231216031543d6"
+        "sha256": "74a1692487fa6def3e09e2a11117439b6eb6cf8ccebbc4c0b9d189d80c0f7cff"
       },
       "tasks/H2/start/app/crm/queries.py": {
         "export_path": "app/crm/queries.py",
-        "sha256": "7897b00b7a0e14f0b1280e7df33cb6f15a044045dc13116097c93ca9b3da4ee9"
+        "sha256": "bab68e982cce9f1433552f3ecca1a267b3221c5d7305496141e5fe97ccdde2dc"
       },
       "tasks/H2/start/app/crm/templates/crm/contact_form.html": {
         "export_path": "app/crm/templates/crm/contact_form.html",
@@ -731,11 +731,11 @@
       },
       "tasks/H2/start/app/crm/urls.py": {
         "export_path": "app/crm/urls.py",
-        "sha256": "a0cb6e9124aec9f9f7b6da67b35fbf4142c4cdeac1b4f7e2bbf531dba40abf37"
+        "sha256": "2fa2aec0ab347dd0fff9ee41838c18082c7aecb658a011417597d616e76673c6"
       },
       "tasks/H2/start/app/crm/views.py": {
         "export_path": "app/crm/views.py",
-        "sha256": "1828f6c321f9676b5f38e912f1b9276f6fbb76dbda9d44b64e1477cd18493dd9"
+        "sha256": "ca3d17c4a75fd862f88c17cc6ae8fe95015c07529de5f9dbb1fbe5b0923067d7"
       },
       "tasks/H2/start/app/manage.py": {
         "export_path": "app/manage.py",
@@ -769,7 +769,7 @@
     "H3": {
       "tasks/H3/provenance.json": {
         "export_path": "provenance.json",
-        "sha256": "865e27653d1aaf0f91aab1f7d635595e9bdc9645e51ebe2b4354d63bb4ab044e"
+        "sha256": "1a26b2a5769f460fe25b40c5d58939537ff5d1d3e0a511c63f22bc9e0c000ffd"
       },
       "tasks/H3/start/app/config/__init__.py": {
         "export_path": "app/config/__init__.py",
@@ -777,7 +777,7 @@
       },
       "tasks/H3/start/app/config/settings.py": {
         "export_path": "app/config/settings.py",
-        "sha256": "13c8d97efdbcb906ee63f2f450e781bb6308f197908398ce5708aa9d62f1b8bb"
+        "sha256": "e4d0c01b9bcd78760fa7798828f09eda9f7a6ecc46c46688d09831b701bfbb92"
       },
       "tasks/H3/start/app/config/urls.py": {
         "export_path": "app/config/urls.py",
@@ -793,11 +793,11 @@
       },
       "tasks/H3/start/app/crm/apps.py": {
         "export_path": "app/crm/apps.py",
-        "sha256": "625e049b6f5ec55dcf63e524929a2258cfa3e570d6e4334ad911677f11d57cd8"
+        "sha256": "5e488a98767d69dd76cd7f9e27631cbad60455a3ce03899ac9976ba7ba34de3d"
       },
       "tasks/H3/start/app/crm/domain.py": {
         "export_path": "app/crm/domain.py",
-        "sha256": "0041a1672a529f9f799f521c829baad2d3b2055d2843ca8dddd6ec77bbd16a27"
+        "sha256": "9ea2ab2c1cd3848709f8345c0edeea53f2a775d21d08a694cc969af53565c772"
       },
       "tasks/H3/start/app/crm/fixtures/h3_history.json": {
         "export_path": "app/crm/fixtures/h3_history.json",
@@ -825,11 +825,11 @@
       },
       "tasks/H3/start/app/crm/operations.py": {
         "export_path": "app/crm/operations.py",
-        "sha256": "b7a5a9ba15d4a1fcbcd74865f0ddd27ab9dfc5df765c8b9dc53433fd13f7e787"
+        "sha256": "c82b39d8571b9cc809df6289e54f424a8204eb37448d5b059a5f03b91043c4b3"
       },
       "tasks/H3/start/app/crm/queries.py": {
         "export_path": "app/crm/queries.py",
-        "sha256": "35a768220db07a0285fd36f2afbb339a23a4b8f8658ecb4a697ad312e4e0cc84"
+        "sha256": "1220aa728ad1dbd9eddf99100d9369b861b5e66a12d5b0659986588f33fdd457"
       },
       "tasks/H3/start/app/crm/templates/crm/contact_form.html": {
         "export_path": "app/crm/templates/crm/contact_form.html",
@@ -853,11 +853,11 @@
       },
       "tasks/H3/start/app/crm/urls.py": {
         "export_path": "app/crm/urls.py",
-        "sha256": "a1c4ddc3c6c70f93538cbb4d0120562f1781b86e3821a1e277b6074af54aa104"
+        "sha256": "a03c0876519e12a43396213da301038d2e729309cb92c5af4790dd6b0116ae7e"
       },
       "tasks/H3/start/app/crm/views.py": {
         "export_path": "app/crm/views.py",
-        "sha256": "b671d866bc86e5a01ebc3eb63fe546db4c672aa332628a7af461c407922b72a6"
+        "sha256": "8848c6c29627735d9e7af5af6ce5fbff2aae8f4559997c4be0e14ded6a70645c"
       },
       "tasks/H3/start/app/manage.py": {
         "export_path": "app/manage.py",

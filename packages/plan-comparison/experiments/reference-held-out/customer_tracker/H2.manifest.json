@@ -5,7 +5,7 @@
   "packets": [
     {
       "packet_id": "customer-tracker-h2-follow-up-workflow",
-      "packet_sha256": "2c81a484a5841421bc75ee322d3df44baa6fc696503b57c89a3a1093b1d0f366",
+      "packet_sha256": "a3e3956622c2b263d9470cbd5841550e84e263a4dd2239f993610033add77234",
       "slots": [
         {
           "slot_id": "follow-up-status-body",
@@ -66,36 +66,36 @@
           "path": "app/crm/views.py",
           "kind": "callable_body",
           "operation": "replace_body",
-          "target": {"kind": "callable", "qualified_name": "customer_detail"},
+          "target": {"kind": "callable", "qualified_name": "CustomerDetailView.get_context_data"},
           "extent": {"kind": "callable_body"},
-          "preimage_sha256": "aab569ca52693b60e6d979083010c6f7eb62bb824765b3872f1bb709fc7029a7"
+          "preimage_sha256": "0740781d74a87ebf1c7bffcba67defbaec509a9f61d139f00a6cda6ced20aac7"
         },
         {
           "slot_id": "follow-up-create-view-body",
           "path": "app/crm/views.py",
           "kind": "callable_body",
           "operation": "replace_body",
-          "target": {"kind": "callable", "qualified_name": "follow_up_create"},
+          "target": {"kind": "callable", "qualified_name": "FollowUpCreateView.form_valid"},
           "extent": {"kind": "callable_body"},
-          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+          "preimage_sha256": "27b48797bc57bdda38d811968d114b8356d7b4be331a142ff8d835e037765ec0"
         },
         {
           "slot_id": "follow-up-complete-view-body",
           "path": "app/crm/views.py",
           "kind": "callable_body",
           "operation": "replace_body",
-          "target": {"kind": "callable", "qualified_name": "follow_up_complete"},
+          "target": {"kind": "callable", "qualified_name": "FollowUpCompleteView.post"},
           "extent": {"kind": "callable_body"},
-          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+          "preimage_sha256": "27b48797bc57bdda38d811968d114b8356d7b4be331a142ff8d835e037765ec0"
         },
         {
           "slot_id": "utc-timezone-import",
           "path": "app/crm/views.py",
           "kind": "ancillary",
           "operation": "insert_after",
-          "target": {"kind": "text_anchor", "anchor": "from django.shortcuts import redirect, render"},
+          "target": {"kind": "text_anchor", "anchor": "from django.urls import reverse"},
           "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
-          "preimage_sha256": "bdf93d13f85bbdadbe9009a6782097228a3ad54e6290a76623afee2f3c96a237"
+          "preimage_sha256": "c31854fe3f06a98ec3af9b48152f9f5501267abf788b2ba437fc5f396b0cb679"
         },
         {
           "slot_id": "follow-up-detail-template",

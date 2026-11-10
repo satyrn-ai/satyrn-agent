@@ -5,7 +5,7 @@
   "packets": [
     {
       "packet_id": "customer-tracker-h1-search-pagination",
-      "packet_sha256": "33527a337dc281f557f1589f703ddaf2310b171d6d21bb3cca0669a8e6603c6f",
+      "packet_sha256": "6b176579db836b516773c3b8fb30a39d9e507c5c3aa4fd70d8bedaa010ca6b74",
       "slots": [
         {
           "slot_id": "search-query-body",
@@ -21,9 +21,9 @@
           "path": "app/crm/views.py",
           "kind": "callable_body",
           "operation": "replace_body",
-          "target": {"kind": "callable", "qualified_name": "customer_list"},
+          "target": {"kind": "callable", "qualified_name": "CustomerListView.get_context_data"},
           "extent": {"kind": "callable_body"},
-          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+          "preimage_sha256": "27b48797bc57bdda38d811968d114b8356d7b4be331a142ff8d835e037765ec0"
         },
         {
           "slot_id": "directory-pagination-template",

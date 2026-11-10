@@ -3,11 +3,11 @@
   "task_file_sha256": "32f72f2143c38d3341961033950f4a30820626f947b66331fde71e63848c40c9",
   "baseline": {
     "path": "examples/E3/complete",
-    "sha256": "848597a0fce9c87d04536500887d830e8ce1eed1fea0eccfcc43a69212a119e6",
+    "sha256": "c5f7fc7cf178febd9f468a26732fd696b5d2525e8dec88efa4dd495ba0e24e34",
     "file_count": 24
   },
   "start": {
-    "sha256": "960b355d87a50807c51f05060218d2aa26d608a68a76ccac923565a459241768",
+    "sha256": "d8efbadb4ccd7d37feb43c49f415cb43c97eae65aa2681c4ceea5ac1f0483692",
     "file_count": 24
   },
   "scaffold_additions": [

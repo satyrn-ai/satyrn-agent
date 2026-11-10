@@ -1,43 +1,54 @@
-from django.http import Http404, HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
-from django.views.decorators.http import require_http_methods
+from typing import Any
 
-from crm.domain import RuleViolation
+from django.http import Http404, HttpResponse
+from django.urls import reverse
+from django.views.generic import FormView, TemplateView
+
+from crm.domain import Customer, CustomerId, RuleViolation
 from crm.forms import CustomerCreateForm
 from crm.models import Customer as CustomerRecord
 from crm.operations import create_customer
 from crm.queries import get_customer, list_customers
 
 
-def customer_list(request: HttpRequest) -> HttpResponse:
-    return render(
-        request,
-        "crm/customer_list.html",
-        {"customers": list_customers()},
-    )
-
-
-def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
+def _customer_or_404(customer_id: CustomerId) -> Customer:
     try:
-        customer = get_customer(customer_id)
+        return get_customer(customer_id)
     except CustomerRecord.DoesNotExist as error:
         raise Http404 from error
 
-    return render(request, "crm/customer_detail.html", {"customer": customer})
+
+class CustomerListView(TemplateView):
+    template_name = "crm/customer_list.html"
+
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context["customers"] = list_customers()
+        return context
 
 
-@require_http_methods(["GET", "POST"])
-def customer_create(request: HttpRequest) -> HttpResponse:
-    if request.method == "POST":
-        form = CustomerCreateForm(request.POST)
-        if form.is_valid():
-            try:
-                customer_id = create_customer(**form.cleaned_data)
-            except RuleViolation as error:
-                form.add_error(None, str(error))
-            else:
-                return redirect("crm:customer_detail", customer_id=customer_id)
-    else:
-        form = CustomerCreateForm()
+class CustomerDetailView(TemplateView):
+    template_name = "crm/customer_detail.html"
 
-    return render(request, "crm/customer_form.html", {"form": form})
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context["customer"] = _customer_or_404(CustomerId(self.kwargs["customer_id"]))
+        return context
+
+
+class CustomerCreateView(FormView):
+    form_class = CustomerCreateForm
+    template_name = "crm/customer_form.html"
+    http_method_names = ["get", "post"]
+    customer_id: CustomerId
+
+    def form_valid(self, form: CustomerCreateForm) -> HttpResponse:
+        try:
+            self.customer_id = create_customer(**form.cleaned_data)
+        except RuleViolation as error:
+            form.add_error(None, str(error))
+            return self.form_invalid(form)
+        return super().form_valid(form)
+
+    def get_success_url(self) -> str:
+        return reverse("crm:customer_detail", kwargs={"customer_id": self.customer_id})

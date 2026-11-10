@@ -3,11 +3,14 @@ name = "customer-tracker"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "django>=5.2,<5.3",
+    "django>=6.1,<6.2",
 ]
 
 [dependency-groups]
 dev = [
+    "django-stubs>=6.1.2",
+    "django-stubs-ext>=6.1.2",
+    "pyrefly>=1.4.1",
     "pytest>=9.2.0",
     "pytest-django>=4.14.0",
     "ruff>=0.17.4",
@@ -20,5 +23,48 @@ pythonpath = ["app", "."]
 testpaths = ["app/tests", "tests"]
 addopts = "-q"
 
+[tool.ruff.lint]
+extend-select = ["B", "SIM", "C4", "PT", "DTZ", "RUF", "ANN", "DJ", "TID251"]
+ignore = ["RUF012"]
+
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = true
+suppress-dummy-args = true
+allow-star-arg-any = true
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"django".msg = "Domain code must not import Django; map in the ORM layer."
+
 [tool.ruff.lint.per-file-ignores]
-"**/migrations/*.py" = ["RUF012"]
+"!**/domain.py" = ["TID251"]
+"evaluation/checker_fixtures/bad/**" = ["TID251"]
+"**/tests/**" = ["ANN"]
+"**/test_*.py" = ["ANN"]
+"evaluation/H*/test_*.py" = ["ANN", "DTZ001"]
+"app/tests/test_persistence.py" = ["PT011"]
+"examples/*/*/app/tests/test_persistence.py" = ["PT011"]
+"tasks/H*/start/app/tests/test_persistence.py" = ["PT011"]
+"tasks/H2/start/app/tests/test_follow_ups_public.py" = ["DTZ001", "PT011"]
+"examples/E1/start/app/crm/models.py" = ["DJ008"]
+"tasks/H2/start/app/crm/models.py" = ["DJ008"]
+"tasks/H3/start/app/crm/models.py" = ["DJ008"]
+"**/migrations/*.py" = ["ANN", "E501", "RUF"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.pyrefly]
+python-version = "3.14"
+project-includes = ["app/config", "app/crm", "app/manage.py", "host_tools"]
+project-excludes = ["**/migrations/**"]
+search-path = ["app", "."]
+
+[tool.pyrefly.errors]
+unused-ignore = "error"
+
+[[tool.pyrefly.sub-config]]
+matches = "**/domain.py"
+
+[tool.pyrefly.sub-config.errors]
+implicit-any = "error"
+explicit-any = "warn"

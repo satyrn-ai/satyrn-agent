@@ -2,7 +2,7 @@
   "task_id": "H1",
   "protected_solution": {
     "path": "solution",
-    "sha256": "1249f30f3d52c45b2fcbd9de7f2db3b8305d32cccd1dfb8dae3a22a957aee88a",
+    "sha256": "8ba9d7babf3ad39159c96702d0b8dd98ea1e1b3a43d797068e7a98624067f7a8",
     "file_count": 4
   },
   "protected_tests": {

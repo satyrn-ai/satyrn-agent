@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
+from typing import NewType
 
-type CustomerId = int
+CustomerId = NewType("CustomerId", int)
 type FirstName = str
 type LastName = str
 type EmailAddress = str

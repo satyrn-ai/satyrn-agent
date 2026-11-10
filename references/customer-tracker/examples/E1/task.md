@@ -13,7 +13,7 @@ Implement `list_customers()` and `get_customer(customer_id)` so they eagerly
 convert ORM rows to domain objects. Missing IDs should raise the model's
 `DoesNotExist` exception.
 
-Add function views and templates for `GET /customers/` and
+Add class-based views and templates for `GET /customers/` and
 `GET /customers/<int:customer_id>/`. The directory must show an empty state
 when it has no records. The detail view must return 404 for an unknown ID.
 Keep ORM instances out of template context; do not add create/edit workflows

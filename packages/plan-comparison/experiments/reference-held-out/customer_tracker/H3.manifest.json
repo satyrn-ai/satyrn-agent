@@ -5,7 +5,7 @@
   "packets": [
     {
       "packet_id": "customer-tracker-h3-archive-workflow",
-      "packet_sha256": "8fc79a1fa57400bca71d90e84e3b5de9ad3cb0b0f819c432f651d769024c76dc",
+      "packet_sha256": "83b571baee501f62246ae7e70daca87db5f692cf6b4854e37ec73f4b4136b4ca",
       "slots": [
         {
           "slot_id": "archive-customer-body",
@@ -30,45 +30,27 @@
           "path": "app/crm/views.py",
           "kind": "callable_body",
           "operation": "replace_body",
-          "target": {"kind": "callable", "qualified_name": "customer_archive"},
+          "target": {"kind": "callable", "qualified_name": "CustomerArchiveView.post"},
           "extent": {"kind": "callable_body"},
-          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+          "preimage_sha256": "27b48797bc57bdda38d811968d114b8356d7b4be331a142ff8d835e037765ec0"
         },
         {
           "slot_id": "follow-up-create-view-body",
           "path": "app/crm/views.py",
           "kind": "callable_body",
           "operation": "replace_body",
-          "target": {"kind": "callable", "qualified_name": "follow_up_create"},
+          "target": {"kind": "callable", "qualified_name": "FollowUpCreateView.form_valid"},
           "extent": {"kind": "callable_body"},
-          "preimage_sha256": "db48f4fa8cda9274489eb9b8f048ca0bd4fb3f2d824965aa529f2cf9dbd1f8e0"
+          "preimage_sha256": "27b48797bc57bdda38d811968d114b8356d7b4be331a142ff8d835e037765ec0"
         },
         {
           "slot_id": "archive-timezone-import",
           "path": "app/crm/views.py",
           "kind": "ancillary",
           "operation": "insert_after",
-          "target": {"kind": "text_anchor", "anchor": "from django.shortcuts import redirect, render"},
+          "target": {"kind": "text_anchor", "anchor": "from django.urls import reverse"},
           "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
-          "preimage_sha256": "bdf93d13f85bbdadbe9009a6782097228a3ad54e6290a76623afee2f3c96a237"
-        },
-        {
-          "slot_id": "archive-post-only-decorator",
-          "path": "app/crm/views.py",
-          "kind": "ancillary",
-          "operation": "insert_before",
-          "target": {"kind": "text_anchor", "anchor": "def customer_archive(request: HttpRequest, customer_id: int) -> HttpResponse:"},
-          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
-          "preimage_sha256": "9d2b64f66861502b747820cd80825263107c8a1594b2e091a11dd022fe703ba6"
-        },
-        {
-          "slot_id": "follow-up-create-method-decorator",
-          "path": "app/crm/views.py",
-          "kind": "ancillary",
-          "operation": "insert_before",
-          "target": {"kind": "text_anchor", "anchor": "def follow_up_create(request: HttpRequest, customer_id: int) -> HttpResponse:"},
-          "extent": {"kind": "bytes", "start_byte": 0, "end_byte": 0},
-          "preimage_sha256": "86f56a66b3c4e9c036f699f8ea13239b0c0952ae61b5f18f13151d4ba01d69fd"
+          "preimage_sha256": "c31854fe3f06a98ec3af9b48152f9f5501267abf788b2ba437fc5f396b0cb679"
         },
         {
           "slot_id": "directory-archive-marker",

@@ -40,9 +40,9 @@
     {"path": "app/crm/queries.py", "qualified_name": "list_follow_ups", "operation": "modify", "kind": "function", "declaration": "def list_follow_ups(customer_id: CustomerId) -> list[FollowUp]:"},
     {"path": "app/crm/queries.py", "qualified_name": "get_follow_up", "operation": "modify", "kind": "function", "declaration": "def get_follow_up(follow_up_id: FollowUpId) -> FollowUp:"},
     {"path": "app/crm/forms.py", "qualified_name": "FollowUpCreateForm", "operation": "modify", "kind": "class", "declaration": "class FollowUpCreateForm(forms.Form):"},
-    {"path": "app/crm/views.py", "qualified_name": "customer_detail", "operation": "modify", "kind": "function", "declaration": "def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:"},
-    {"path": "app/crm/views.py", "qualified_name": "follow_up_create", "operation": "modify", "kind": "function", "declaration": "def follow_up_create(request: HttpRequest, customer_id: int) -> HttpResponse:"},
-    {"path": "app/crm/views.py", "qualified_name": "follow_up_complete", "operation": "modify", "kind": "function", "declaration": "def follow_up_complete(request: HttpRequest, follow_up_id: int) -> HttpResponse:"}
+    {"path": "app/crm/views.py", "qualified_name": "CustomerDetailView.get_context_data", "operation": "modify", "kind": "function", "declaration": "def get_context_data(self, **kwargs: Any) -> dict[str, Any]:"},
+    {"path": "app/crm/views.py", "qualified_name": "FollowUpCreateView.form_valid", "operation": "modify", "kind": "function", "declaration": "def form_valid(self, form: FollowUpCreateForm) -> HttpResponse:"},
+    {"path": "app/crm/views.py", "qualified_name": "FollowUpCompleteView.post", "operation": "modify", "kind": "function", "declaration": "def post(self, request: HttpRequest, follow_up_id: int) -> HttpResponse:"}
   ],
   "imports": [
     {"path": "app/crm/operations.py", "module": "crm.models", "name": "FollowUp", "alias": "FollowUpRecord", "target": "existing"},

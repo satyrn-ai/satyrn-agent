@@ -2,7 +2,7 @@
   "task_id": "H3",
   "protected_solution": {
     "path": "solution",
-    "sha256": "6f03600223e8380e300bcd0aef1f808e0151ae5e8b485b52e3e379f25b9362c3",
+    "sha256": "79133df24d79d4ba8f506d4d1b1b9503134a257f76e4420f6f68568a442a9866",
     "file_count": 9
   },
   "protected_tests": {

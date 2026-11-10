@@ -30,6 +30,9 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "django-stubs" },
+    { name = "django-stubs-ext" },
+    { name = "pyrefly" },
     { name = "pytest" },
     { name = "pytest-django" },
     { name = "ruff" },
@@ -37,10 +40,13 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "django", specifier = ">=5.2,<5.3" }]
+requires-dist = [{ name = "django", specifier = ">=6.1,<6.2" }]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "django-stubs", specifier = ">=6.1.2" },
+    { name = "django-stubs-ext", specifier = ">=6.1.2" },
+    { name = "pyrefly", specifier = ">=1.4.1" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-django", specifier = ">=4.14.0" },
     { name = "ruff", specifier = ">=0.17.4" },
@@ -49,16 +55,44 @@ dev = [
 
 [[package]]
 name = "django"
-version = "5.2.19"
+version = "6.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
     { name = "sqlparse" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/02/29/a487a108caa76430c8b616aa90a6d09cf431306112c14093e6f0a7454e17/django-5.2.19.tar.gz", hash = "sha256:ad03d8abc51dbff95ebf34b27123cf0c26a3b62db7ba0cd520783686362533d1", size = 10969285, upload-time = "2026-11-03T15:22:09.468Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/55/79/49a609ea76ec51404b482932e33f1e6858946b920232c11b11a25bea3032/django-6.1.3.tar.gz", hash = "sha256:b5d2d9e35295065d13b1927b3f19a59bd119f737aa6299def14ccca1ae3c8c0d", size = 11306257, upload-time = "2026-11-03T15:21:26.142Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/fb/65b4e897d1268288a46457493d9aec6541be8be08e0093a93cc101c03ab2/django-5.2.19-py3-none-any.whl", hash = "sha256:5965d974a5218a2b68a11dd1276434707f23886525c23f0598eccedaf4f4ca00", size = 8319631, upload-time = "2026-11-03T15:22:03.67Z" },
+    { url = "https://files.pythonhosted.org/packages/77/f2/adbe0352c6673f7b608724be5f69962c80ba1d06f8ed60fa4bfbec258b08/django-6.1.3-py3-none-any.whl", hash = "sha256:a0530e3fdac55d34ccc5893c36f6c57d7a7083064f3d414537e51473648b3290", size = 8424610, upload-time = "2026-11-03T15:21:19.64Z" },
+]
+
+[[package]]
+name = "django-stubs"
+version = "6.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+    { name = "django-stubs-ext" },
+    { name = "types-pyyaml" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/56/d0/00a9af43bf65ee54706e29b1c41b3a00d7a97157fbf97ed3038dcc73d584/django_stubs-6.1.2.tar.gz", hash = "sha256:d62b15fa5cbae79b1922d015e1454d299959d230221dadb23f65c749480b97ec", size = 295860, upload-time = "2026-10-05T06:47:17.595Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/36/206be00ba6aaf21c72cf61fd38cee492c7dcf51eac72fd61a9f7ddd0f916/django_stubs-6.1.2-py3-none-any.whl", hash = "sha256:ffb6e74f54b8c1f9b2f3bc4852c5abbaa2324b2a7cb1c51854c5f95abe67165c", size = 559846, upload-time = "2026-10-05T06:47:15.889Z" },
+]
+
+[[package]]
+name = "django-stubs-ext"
+version = "6.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d9/62/de532d58736d671b9ac0c0467909a9429758ae579d636e868ce74519566b/django_stubs_ext-6.1.2.tar.gz", hash = "sha256:2142da7fffbbe897ccecf9b4c97e09ea1a2e9291760b0a824b4c402b375ce6f9", size = 7221, upload-time = "2026-10-05T06:46:43.717Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/21/bb/393c3c1e24aaf37d62918ea50f3ea22e30d5f3162fc62f4c3bf3275e5ed3/django_stubs_ext-6.1.2-py3-none-any.whl", hash = "sha256:7334e687ab6dc78a6c3da90ab1ccb0e412efd827ea11de8d3f85adbad948abb1", size = 10850, upload-time = "2026-10-05T06:46:42.647Z" },
 ]
 
 [[package]]
@@ -95,6 +129,25 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c", size = 5005329, upload-time = "2026-08-17T08:02:48.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
+]
+
+[[package]]
+name = "pyrefly"
+version = "1.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/30/e9fb605e82022f941c556076088467ddad59800a7ae7b510d4317088ddab/pyrefly-1.4.1.tar.gz", hash = "sha256:1ef91afbaca15336482dd21292974f64a735268ce4990d59e87162d5a097106d", size = 6970842, upload-time = "2026-11-05T02:44:12.316Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/a1/736ef07aa3c87e7db31d246024a98cb6fbf6d48e52784025758f19cca02d/pyrefly-1.4.1-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:9c5a4a3f0ec00ae66a13f5741c355980685111b7008289c0b850e9be931aa3fa", size = 15720162, upload-time = "2026-11-05T02:43:40.304Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/9a/0cc181ebbde26f63e96a61fcb4d6262342017cb83fa34f494a13134de6c5/pyrefly-1.4.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:eaba21336993765373e7e888de90f4d58214ce38994804eef902a6c8148df21f", size = 14994348, upload-time = "2026-11-05T02:43:42.998Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/7c/bba5e480eb1620b864e45f7551f7e5014351eb42be4e6b5f0dd036b15071/pyrefly-1.4.1-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:8363f888f19b53d4b40e54d89e65b127ea68cd1cf8604de2824dffdc9d7900e9", size = 15454572, upload-time = "2026-11-05T02:43:45.291Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/1b/05f9e265e5b331a23b5a50604e4d4bb25ecb31cf47f37048a765b6c1edf1/pyrefly-1.4.1-py3-none-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:4a1d892483bda655a206b4a7578ab36aebaaf89799a7a9d29d22c0bbdc1b6ba0", size = 16874119, upload-time = "2026-11-05T02:43:48.039Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/1e/b85dbfe3cc01585ed153af013aa8685b2970addba454fb257561c411fb87/pyrefly-1.4.1-py3-none-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl", hash = "sha256:5353f958134522a5c45d846825b49e0049dafd73022f68d0db9e54242b3f7eeb", size = 16764013, upload-time = "2026-11-05T02:43:50.495Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/c5/0f1a9d1ad13a74e4efcbb8a94a89381e56dfff0d4dceeba8a9f633901c75/pyrefly-1.4.1-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:19c35e7e63a02076fc555bdb0800302b89bb419e3de2814ab8274c0c6ac00158", size = 16079223, upload-time = "2026-11-05T02:43:52.714Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/c8/8fd47bfa2e8ab300dcfd4f1d15ef6bd4ed6290ba082a98597d8e8bcd2153/pyrefly-1.4.1-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:6035b0ff640a8e7d751f31e520b3b0dc6bb42c76a57cd43819ca0e9354cd37fe", size = 15473203, upload-time = "2026-11-05T02:43:55.149Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/02/3cf7cf460924951891fcbc491f0667c7940e14918ef87a51d9a852bd481a/pyrefly-1.4.1-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:c49122412a990469ee0a9e5a50dd38f6990e42f903b3cc0f7dcf0c7a84997c65", size = 16135278, upload-time = "2026-11-05T02:43:57.334Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/ec/0047ba1b722015f95568f28be61928c997fdd4d2e7b78b63e2bb5b8446a2/pyrefly-1.4.1-py3-none-win32.whl", hash = "sha256:dbd065dbdc920b5e1d03bd8f035f59dae4379332ca854df8fe7ddccc43059533", size = 14873931, upload-time = "2026-11-05T02:44:04.64Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/d2/5b855b69afc9401f2434abe3e2ded05f3c78905d478beecad05117b2329a/pyrefly-1.4.1-py3-none-win_amd64.whl", hash = "sha256:49d2ac460fffbe5b8e0c20e991bf87978805d7aba3bb7f04d9b53a1a0e1d6430", size = 15741940, upload-time = "2026-11-05T02:44:07.193Z" },
+    { url = "https://files.pythonhosted.org/packages/13/84/33b63735654fc3258ee74bbe4a4a6d587c4a0334ba9e8eb17a8d8107bddc/pyrefly-1.4.1-py3-none-win_arm64.whl", hash = "sha256:3b5abcceca279973fa7312c958c06ee760a1b4a3feb9f3b89fd4520e53658aef", size = 14956758, upload-time = "2026-11-05T02:44:09.845Z" },
 ]
 
 [[package]]
@@ -182,6 +235,24 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/73/a0/6d0f33100c775fa276432f04d8ddb01291b6935f8f978839dd95ea37c20b/ty-0.0.99-py3-none-win32.whl", hash = "sha256:0bb773d9dd9093232b0f414da657542a1f36d1753c2bc85acd246e378310cde2", size = 13727206, upload-time = "2026-11-06T10:12:03.225Z" },
     { url = "https://files.pythonhosted.org/packages/c7/58/0a0c01cfde5c1c4ed28f430fc7b689fa280d899b6affd8e6be93fff55bc7/ty-0.0.99-py3-none-win_amd64.whl", hash = "sha256:af3964132653c4612b077da5937e4c49b6977e7619a9d0e5c4df635abd9cd0d4", size = 14384759, upload-time = "2026-11-06T10:12:06.188Z" },
     { url = "https://files.pythonhosted.org/packages/dc/55/a1b0ed127b4ce3ced884f50670bd8a2296e60b378f807e68a507a191789a/ty-0.0.99-py3-none-win_arm64.whl", hash = "sha256:67f9aa5dbdde40b20c3401e93b155f9d5938b7b827c8838862411dff08b39aec", size = 13859730, upload-time = "2026-11-06T10:12:09.273Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20261103"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/82/2ed4d215a2840b467a9a864f03b0d21904250e28f5e1f006ad36fba0311a/types_pyyaml-6.0.12.20261103.tar.gz", hash = "sha256:7a1b5f837881dd35d5448b5f18275164f89f206185e31e8eae6e0b42607bc001", size = 18911, upload-time = "2026-11-03T08:45:23.714Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/10/4353eb86278f6a59aeb9fe2be4d979c20b110b4009fa455a3ea6467cf5cb/types_pyyaml-6.0.12.20261103-py3-none-any.whl", hash = "sha256:444654c61f635dab82c092a511aa96a0ce31164810784b9a37314e3e56532ac8", size = 21299, upload-time = "2026-11-03T08:45:22.749Z" },
+]
+
+[[package]]
+name = "typing-extensions"
+version = "4.16.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/cc/6253133b5bb138fc3306cebfbda2c520f545d36b5be2c7255cc528bb45d6/typing_extensions-4.16.0.tar.gz", hash = "sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5", size = 113555, upload-time = "2026-07-02T08:40:05.92Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl", hash = "sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8", size = 45571, upload-time = "2026-07-02T08:40:04.659Z" },
 ]
 
 [[package]]

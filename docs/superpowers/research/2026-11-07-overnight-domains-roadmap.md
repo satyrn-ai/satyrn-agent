@@ -13,10 +13,11 @@ that an arm will help. Those are leads until a run backs them.
 ## Intent (Paul's)
 
 Help a small local model write code **the way Paul would have written it**:
-function views, domain objects kept apart from ORM models (design pressure),
-testable helpers, semantic aliases such as `type FirstName = str`, and
-deterministic tools owning the first and last steps. The output is read by
-humans and by small models alike.
+class-based views (changed 2026-11-10: Paul prefers class-based views for
+testability and logic isolation), domain objects kept apart from ORM models
+(design pressure), testable helpers, semantic aliases such as
+`type FirstName = str`, and deterministic tools owning the first and last
+steps. The output is read by humans and by small models alike.
 
 The intended shape, which is 1 + 1 = 3:
 

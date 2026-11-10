@@ -42,10 +42,10 @@
     },
     {
       "path": "app/crm/views.py",
-      "qualified_name": "customer_list",
+      "qualified_name": "CustomerListView.get_context_data",
       "operation": "modify",
       "kind": "function",
-      "declaration": "def customer_list(request: HttpRequest) -> HttpResponse:"
+      "declaration": "def get_context_data(self, **kwargs: Any) -> dict[str, Any]:"
     }
   ],
   "imports": [

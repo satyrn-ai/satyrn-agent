@@ -33,4 +33,4 @@ def create_customer(
         email=email,
         phone=phone,
     )
-    return record.pk
+    return CustomerId(record.pk)

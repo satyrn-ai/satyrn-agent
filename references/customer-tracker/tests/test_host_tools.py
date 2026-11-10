@@ -254,7 +254,7 @@ def test_style_diagnostics_flag_aliased_bad_fixture() -> None:
 
     assert {finding.rule for finding in findings} == {
         "DOMAIN_DJANGO_IMPORT",
-        "CLASS_BASED_VIEW",
+        "FUNCTION_VIEW",
     }
 
 
@@ -266,7 +266,7 @@ def test_style_diagnostics_report_dynamic_route_as_inconclusive() -> None:
     assert [finding.rule for finding in findings] == ["ROUTE_INCONCLUSIVE"]
 
 
-def test_style_diagnostics_resolve_imported_as_view_assignment(tmp_path) -> None:
+def test_style_diagnostics_accept_imported_as_view_assignment(tmp_path) -> None:
     crm = tmp_path / "app" / "crm"
     crm.mkdir(parents=True)
     (crm / "views.py").write_text(
@@ -279,10 +279,26 @@ def test_style_diagnostics_resolve_imported_as_view_assignment(tmp_path) -> None
         'urlpatterns = [route("", list_customers)]\n'
     )
 
+    assert diagnose(tmp_path) == []
+
+
+def test_style_diagnostics_flag_imported_function_view_alias(tmp_path) -> None:
+    crm = tmp_path / "app" / "crm"
+    crm.mkdir(parents=True)
+    (crm / "views.py").write_text(
+        "def customer_list(request):\n    return None\n\n\nlisting = customer_list\n"
+    )
+    (crm / "urls.py").write_text(
+        "from django.urls import path as route\n"
+        "from crm.views import listing as list_customers\n\n"
+        'urlpatterns = [route("", list_customers)]\n'
+    )
+
     findings = diagnose(tmp_path)
 
-    assert [finding.rule for finding in findings] == ["CLASS_BASED_VIEW"]
+    assert [finding.rule for finding in findings] == ["FUNCTION_VIEW"]
     assert findings[0].path == "app/crm/views.py"
+    assert findings[0].line == 1
 
 
 def test_style_diagnostics_report_cyclic_view_alias_as_inconclusive(tmp_path) -> None:

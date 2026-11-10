@@ -34,8 +34,8 @@
   "produces": [
     {"path": "app/crm/operations.py", "qualified_name": "archive_customer", "operation": "modify", "kind": "function", "declaration": "def archive_customer(customer_id: CustomerId, *, now: datetime) -> None:"},
     {"path": "app/crm/operations.py", "qualified_name": "create_follow_up", "operation": "modify", "kind": "function", "declaration": "def create_follow_up(customer_id: CustomerId, *, summary: str, due_at: datetime, now: datetime) -> FollowUpId:"},
-    {"path": "app/crm/views.py", "qualified_name": "customer_archive", "operation": "modify", "kind": "function", "declaration": "def customer_archive(request: HttpRequest, customer_id: int) -> HttpResponse:"},
-    {"path": "app/crm/views.py", "qualified_name": "follow_up_create", "operation": "modify", "kind": "function", "declaration": "def follow_up_create(request: HttpRequest, customer_id: int) -> HttpResponse:"}
+    {"path": "app/crm/views.py", "qualified_name": "CustomerArchiveView.post", "operation": "modify", "kind": "function", "declaration": "def post(self, request: HttpRequest, customer_id: int) -> HttpResponse:"},
+    {"path": "app/crm/views.py", "qualified_name": "FollowUpCreateView.form_valid", "operation": "modify", "kind": "function", "declaration": "def form_valid(self, form: FollowUpCreateForm) -> HttpResponse:"}
   ],
   "imports": [
     {"path": "app/crm/operations.py", "module": "crm.models", "name": "FollowUp", "alias": "FollowUpRecord", "target": "existing"},
@@ -66,7 +66,7 @@
   ],
   "known_facts": [
     "The visible H3 start already includes archived_at and the minimal follow-up schema.",
-    "The supplied archive and follow-up view functions are unfinished placeholders.",
+    "The supplied archive and follow-up views are unfinished placeholders.",
     "SQLite tests do not establish production row-lock concurrency guarantees."
   ],
   "acceptance_criteria": [

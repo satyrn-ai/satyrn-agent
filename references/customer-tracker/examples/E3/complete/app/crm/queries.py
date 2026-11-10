@@ -4,7 +4,7 @@ from crm.models import Customer as CustomerRecord
 
 def _to_domain(record: CustomerRecord) -> Customer:
     return Customer(
-        id=record.pk,
+        id=CustomerId(record.pk),
         first_name=record.first_name,
         last_name=record.last_name,
         email=record.email,

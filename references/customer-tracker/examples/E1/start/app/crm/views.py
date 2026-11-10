@@ -1,9 +1,17 @@
-from django.http import HttpRequest, HttpResponse
+from typing import Any
+
+from django.views.generic import TemplateView
 
 
-def customer_list(request: HttpRequest) -> HttpResponse:
-    raise NotImplementedError
+class CustomerListView(TemplateView):
+    template_name = "crm/customer_list.html"
+
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        raise NotImplementedError
 
 
-def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
-    raise NotImplementedError
+class CustomerDetailView(TemplateView):
+    template_name = "crm/customer_detail.html"
+
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        raise NotImplementedError

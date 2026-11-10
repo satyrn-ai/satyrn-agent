@@ -30,12 +30,14 @@ def create_customer(
     phone = phone.strip()
     validate_customer_name(first_name, last_name)
     validate_contact(email, phone)
-    return CustomerRecord.objects.create(
-        first_name=first_name,
-        last_name=last_name,
-        email=email,
-        phone=phone,
-    ).pk
+    return CustomerId(
+        CustomerRecord.objects.create(
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            phone=phone,
+        ).pk
+    )
 
 
 @transaction.atomic
@@ -90,8 +92,10 @@ def create_follow_up(
     customer = CustomerRecord.objects.select_for_update().get(pk=customer_id)
     if customer.archived_at is not None:
         raise RuleViolation("Cannot create a follow-up for an archived customer.")
-    return FollowUpRecord.objects.create(
-        customer=customer,
-        summary=summary,
-        due_at=due_at,
-    ).pk
+    return FollowUpId(
+        FollowUpRecord.objects.create(
+            customer=customer,
+            summary=summary,
+            due_at=due_at,
+        ).pk
+    )

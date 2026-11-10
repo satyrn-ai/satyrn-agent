@@ -36,7 +36,7 @@ def create_customer(
         email=email,
         phone=phone,
     )
-    return record.pk
+    return CustomerId(record.pk)
 
 
 @transaction.atomic
@@ -84,7 +84,7 @@ def schedule_follow_up(
         summary=summary,
         due_at=due_at,
     )
-    return record.pk
+    return FollowUpId(record.pk)
 
 
 @transaction.atomic

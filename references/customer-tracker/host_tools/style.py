@@ -189,13 +189,13 @@ def diagnose(workspace: Path) -> list[Finding]:
                 view_modules=view_modules,
                 view_imports=view_imports,
             )
-            if kind == "class":
+            if kind == "function":
                 findings.append(
                     Finding(
-                        "CLASS_BASED_VIEW",
+                        "FUNCTION_VIEW",
                         source_path,
                         line or node.lineno,
-                        "Route registers a class-based view.",
+                        "Route registers a function view.",
                     )
                 )
             elif kind == "unresolved":

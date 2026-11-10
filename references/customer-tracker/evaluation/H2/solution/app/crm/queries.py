@@ -5,7 +5,7 @@ from crm.models import FollowUp as FollowUpRecord
 
 def _to_customer(record: CustomerRecord) -> Customer:
     return Customer(
-        id=record.pk,
+        id=CustomerId(record.pk),
         first_name=record.first_name,
         last_name=record.last_name,
         email=record.email,
@@ -17,8 +17,8 @@ def _to_customer(record: CustomerRecord) -> Customer:
 
 def _to_follow_up(record: FollowUpRecord) -> FollowUp:
     return FollowUp(
-        id=record.pk,
-        customer_id=record.customer_id,
+        id=FollowUpId(record.pk),
+        customer_id=CustomerId(record.customer_id),
         summary=record.summary,
         due_at=record.due_at,
         completed_at=record.completed_at,
