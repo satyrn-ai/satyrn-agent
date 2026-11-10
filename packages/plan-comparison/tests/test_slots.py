@@ -8,7 +8,7 @@ from typed_packets import SourceRoot, ValidationContext
 from plan_comparison.contracts import PacketExecution
 from plan_comparison.manifest import decode_execution_manifest, sha256_bytes
 from plan_comparison.prepare import prepare_packet
-from plan_comparison.slots import SlotEditError, apply_slot_edit
+from plan_comparison.slots import SlotEditError, apply_slot_edit, apply_slot_reply
 from plan_comparison.workspace import snapshot_workspace
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -172,6 +172,72 @@ def test_slot_edits_preserve_signatures_and_immutable_tests(tmp_path: Path) -> N
     assert "raise RuleViolation('required')" in domain
     assert installed_test.read_bytes() == test_bytes
     assert prepared.completed_slots == ("rule-violation-class", "customer-name-rule")
+
+
+def _reply_with_prose(*blocks: str) -> str:
+    fenced = "\n\n".join(f"```python\n{block}```" for block in blocks)
+    return f"Understood — here is the body.\n\n{fenced}\n\nIt validates input.\n"
+
+
+NAME_RULE_BODY = "if not first_name or not last_name:\n    raise RuleViolation('required')\n"
+
+
+def test_slot_reply_uses_the_only_fenced_block_in_prose(tmp_path: Path) -> None:
+    prepared = _e2_prepared(tmp_path)
+
+    prepared = apply_slot_reply(
+        prepared, "customer-name-rule", _reply_with_prose(NAME_RULE_BODY)
+    )
+
+    domain = (prepared.workspace / "app" / "crm" / "domain.py").read_text()
+    assert "raise RuleViolation('required')" in domain
+    assert "Understood" not in domain
+    assert prepared.completed_slots == ("customer-name-rule",)
+
+
+def test_slot_reply_applies_a_valid_body_containing_fences_unchanged(
+    tmp_path: Path,
+) -> None:
+    prepared = _e2_prepared(tmp_path)
+    body = 'example = """\n```\nsample\n```\n"""\nraise RuleViolation(example)\n'
+
+    prepared = apply_slot_reply(prepared, "customer-name-rule", body)
+
+    domain = (prepared.workspace / "app" / "crm" / "domain.py").read_text()
+    assert 'example = """' in domain
+    assert "raise RuleViolation(example)" in domain
+
+
+def test_slot_reply_rejects_more_than_one_fenced_block(tmp_path: Path) -> None:
+    prepared = _e2_prepared(tmp_path)
+    before = prepared.prepared_snapshot
+
+    with pytest.raises(SlotEditError) as error:
+        apply_slot_reply(
+            prepared,
+            "customer-name-rule",
+            _reply_with_prose(NAME_RULE_BODY, "return None\n"),
+        )
+
+    assert error.value.code == "slot_body_syntax"
+    assert snapshot_workspace(prepared.workspace) == before
+
+
+def test_slot_reply_still_checks_the_unwrapped_body(tmp_path: Path) -> None:
+    prepared = _e2_prepared(tmp_path)
+    before = prepared.prepared_snapshot
+
+    with pytest.raises(SlotEditError) as error:
+        apply_slot_reply(
+            prepared,
+            "customer-name-rule",
+            _reply_with_prose(
+                "def validate_customer_name(first_name, last_name):\n    return None\n"
+            ),
+        )
+
+    assert error.value.code == "callable_signature_returned"
+    assert snapshot_workspace(prepared.workspace) == before
 
 
 def test_slot_rejects_full_signature_and_restores_transaction(tmp_path: Path) -> None:

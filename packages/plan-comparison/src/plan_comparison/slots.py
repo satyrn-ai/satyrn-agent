@@ -41,6 +41,32 @@ class SlotEditError(RuntimeError):
         super().__init__(message)
 
 
+def apply_slot_reply(
+    prepared: PreparedPacket,
+    slot_id: str,
+    reply: str,
+) -> PreparedPacket:
+    """Apply a worker reply, falling back to its only fenced block if it won't parse.
+
+    A reply that is valid as written is never altered.
+    """
+    try:
+        return apply_slot_edit(prepared, slot_id, reply)
+    except SlotEditError as error:
+        block = _only_fenced_block(reply)
+        if error.code not in ("slot_body_syntax", "slot_syntax") or block is None:
+            raise
+    return apply_slot_edit(prepared, slot_id, block)
+
+
+def _only_fenced_block(reply: str) -> str | None:
+    lines = reply.splitlines(keepends=True)
+    fences = [index for index, line in enumerate(lines) if line.startswith("```")]
+    if len(fences) != 2 or lines[fences[1]].strip() != "```":
+        return None
+    return "".join(lines[fences[0] + 1 : fences[1]])
+
+
 def apply_slot_edit(
     prepared: PreparedPacket,
     slot_id: str,

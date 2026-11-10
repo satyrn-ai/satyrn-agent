@@ -664,6 +664,38 @@ def test_response_retry_restore_failure_keeps_host_cause(
     assert not attempt.visible_feedback
 
 
+def test_compiled_arm_accepts_a_fenced_body_wrapped_in_prose(tmp_path: Path) -> None:
+    inputs, runner, worker, task_port = _runner(tmp_path)
+    worker.compiled_responses = [
+        "Here it is.\n\n```python\nreturn value + 1\n```\n\nThis adds one.\n"
+    ]
+
+    result = asyncio.run(
+        runner.run_pair(inputs, worker, task_port, seed=6, arm_order=("P", "C"))
+    )
+
+    compiled = result.arms[1]
+    assert compiled.status == "passed"
+    assert compiled.attempts[-1].rejection_reason is None
+    assert "Here it is" not in (task_port.created[1] / "ops.py").read_text()
+
+
+def test_final_slot_rejection_is_recorded_on_its_attempt(tmp_path: Path) -> None:
+    inputs, runner, worker, task_port = _runner(tmp_path)
+    worker.compiled_responses = ["Here is the body:", "Here it is again:"]
+
+    result = asyncio.run(
+        runner.run_pair(inputs, worker, task_port, seed=6, arm_order=("P", "C"))
+    )
+
+    compiled = result.arms[1]
+    assert compiled.status == "failed"
+    first, last = compiled.attempts
+    assert first.rejection_reason.startswith("Slot rejected: ")
+    assert last.rejection_reason.startswith("Slot rejected: ")
+    assert last.visible_feedback == (first.rejection_reason,)
+
+
 def test_exhausted_compiled_arm_is_graded_on_its_last_attempt(tmp_path: Path) -> None:
     inputs, runner, worker, task_port = _runner(tmp_path)
     worker.compiled_responses = ["return value", "return value + 2"]

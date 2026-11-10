@@ -73,7 +73,7 @@ from plan_comparison.prepare import (
 )
 from plan_comparison.records import RecordStoreError, RunStore
 from plan_comparison.reports import ExperimentReport, StyleEvidence, build_report
-from plan_comparison.slots import SlotEditError, apply_slot_edit
+from plan_comparison.slots import SlotEditError, apply_slot_reply
 from plan_comparison.workspace import (
     WorkspaceError,
     WorkspaceSnapshot,
@@ -1583,6 +1583,7 @@ class ExperimentRunner:
                     "interrupted",
                 ]
                 error_feedback: tuple[str, ...] = ()
+                rejection_reason: str | None = None
                 boundary_evidence = packet_boundary.evidence
                 generation_seconds = 0.0
                 try:
@@ -1626,7 +1627,7 @@ class ExperimentRunner:
                         generation_seconds += time.monotonic() - generation_started
                         _verify_metered_reply(budget, reply, before_reply)
                         boundary_evidence = reply.boundary_evidence or boundary_evidence
-                        current = apply_slot_edit(current, slot.slot_id, reply.content)
+                        current = apply_slot_reply(current, slot.slot_id, reply.content)
                         worker.workspace_written()
                     attempt_gates = self._run_packet_gates(
                         inputs.task_id,
@@ -1646,7 +1647,8 @@ class ExperimentRunner:
                     status = "interrupted"
                 except SlotEditError as error:
                     status = "failed"
-                    error_feedback = (f"Slot rejected: {error}",)
+                    rejection_reason = f"Slot rejected: {error}"
+                    error_feedback = (rejection_reason,)
                 except ModelResponseFailure as error:
                     status = "failed"
                     error_feedback = (
@@ -1684,6 +1686,7 @@ class ExperimentRunner:
                     boundary_evidence,
                     feedback,
                     harness_fault=fault or _gate_fault(attempt_gates),
+                    rejection_reason=rejection_reason,
                     timing=AttemptTiming(
                         preparation_seconds=(
                             preparation_seconds if attempt_number == 1 else 0.0
@@ -1880,6 +1883,7 @@ class ExperimentRunner:
         feedback: tuple[str, ...],
         timing: AttemptTiming | None = None,
         harness_fault: HarnessFault | None = None,
+        rejection_reason: str | None = None,
     ) -> AttemptRecord:
         return AttemptRecord(
             attempt_id=uuid.uuid4().hex,
@@ -1899,6 +1903,7 @@ class ExperimentRunner:
             artifact_refs=(),
             timing=timing or AttemptTiming(0.0, 0.0, 0.0, 0.0, 0.0),
             harness_fault=harness_fault,
+            rejection_reason=rejection_reason,
         )
 
     def _persist_attempt(self, attempt: AttemptRecord) -> None:

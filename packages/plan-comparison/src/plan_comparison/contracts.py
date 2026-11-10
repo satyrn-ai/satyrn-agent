@@ -396,6 +396,7 @@ class AttemptRecord:
     artifact_refs: tuple[str, ...]
     timing: AttemptTiming = AttemptTiming(0.0, 0.0, 0.0, 0.0, 0.0)
     harness_fault: HarnessFault | None = None
+    rejection_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
