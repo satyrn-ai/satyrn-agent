@@ -54,6 +54,24 @@ grouped by topic:
 Each patch's message carries `Upstream:`, `Retire-when:` and
 `Carried-commits:`, so the series is its own ledger.
 
+### 2.1 Dense qwen35 on CUDA
+
+`patches/qwen35/0009`-`0013` extend that directory's series. The table above
+numbers the initial series globally in apply order, so these rows instead carry
+the number each patch has on disk:
+
+| File | Patch | Carried commits | Upstream |
+| --- | --- | --- | --- |
+| `qwen35/0009` | dense Q6_K weight products on CUDA | none, authored here | not offered, fork only |
+| `qwen35/0010` | dense recurrent SiLU output on CUDA | none, authored here | not offered, fork only |
+| `qwen35/0011` | dense attention prep and causal attention on CUDA | none, authored here | not offered, fork only |
+| `qwen35/0012` | reach the dense graph on CUDA | none, authored here | not offered, fork only |
+| `qwen35/0013` | dense graph versus a double-precision reference | none, authored here | not offered, fork only |
+
+`ds4-check --model qwen35` applies all thirteen onto a pristine clone of the pin,
+and the reconstructed tree matches `.ds4/tree` byte for byte in every file the
+series touches.
+
 ## 3. Goals, non-goals, anti-goals
 
 ### Goals
