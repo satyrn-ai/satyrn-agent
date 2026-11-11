@@ -250,6 +250,15 @@ git -C .ds4/tree commit -m "qwen35: dense preparation and causal attention on CU
 - Consumes: Tasks 2–4.
 - Produces: make targets `test-qwen35-host` and `test-qwen35-graph`; a CUDA build in which `qwen4_graph_forward_tokens` reaches the qwen35 graph.
 
+**Execution notes** (from the completed Tasks 2–4 baseline at the 11-commit pin):
+
+- `ds4.c` has no `int main`, and eight existing tests already `#include "../ds4.c"`, so the host test can reach the statics that way.
+- `g_ds4_shape` is the runtime shape; `DS4_SHAPE_QWEN35` is its qwen35 initializer. `ds4_qwen4_layer_is_linear(il)` reads `n_full_attn_interval` and `n_nextn_predict`, so the test must set both before checking per-layer verdicts.
+- `qwen35_graph_dense_ok` (ds4.c:59437) accepts `qwen4_graph_dense_ok` types plus Q4_K and Q6_K, and requires `dim[0] % 256 == 0` for those two. `qwen4_graph_dense_ok` accepts Q8_0, F16, F32, BF16 and Q4_0.
+- The single `#if defined(__APPLE__)` block that blocks CUDA runs from just above `qwen35_graph_attention` to just above `qwen4_graph_forward_tokens`. Member order inside it: `qwen35_graph_attention`, `qwen35_graph_verify_mode`, `qwen35_graph_verify_alloc`, `qwen35_graph_stage_inputs`, `qwen35_dflash_capture`, `qwen35_dflash_capture_begin`, `qwen35_dflash_capture_end`, `qwen35_graph_forward_tokens`, `qwen35_graph_verify`, `qwen35_graph_commit`, `qwen35_dflash_rows`, `qwen35_dflash_draft`.
+- Two smaller Apple guards also matter: the qwen35 branch in `qwen4_graph_linear`, and the qwen35 dispatch inside `qwen4_graph_forward_tokens`.
+- `DS4_HAS_QWEN4_GPU` (ds4.c:59242 onward) already encloses the whole graph, so the neutral functions are compiled on every GPU build and only need symbols from the selected backend.
+
 - [ ] **Step 1: Create the host test**
 
 `tests/test_qwen35_host.c` is a new file. It includes `../ds4.c` so the statics are reachable, opens no device and no model, and asserts:
