@@ -1,3 +1,12 @@
 inputs:
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/rolling
+
+nixpkgs:
+  permitted_unfree_packages:
+    - cuda_nvcc
+    - cuda_cudart
+    - cuda_cccl
+    - cuda_compat
+    - cuda_nvrtc
+    - libcublas
