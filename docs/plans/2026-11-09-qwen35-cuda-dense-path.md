@@ -429,7 +429,7 @@ gained the batch-versus-serial case, so `0013` carries it; the exported tip is
 
 - [x] **Step 1:** Select `--backend cuda` on Linux when `nvcc` is on PATH (the devenv shell always provides it), falling back to `cpu` elsewhere; do not add a local build file.
 - [x] **Step 2:** Build with `CUDA_ARCH=sm_86` and run `test-qwen35-cuda-quant`, `-recurrent`, `-attention`, and `test-qwen35-host`.
-- [ ] **Step 3 (optional):** Run the three CUDA tests under `compute-sanitizer --tool memcheck`; zero errors required.
+- [x] **Step 3 (optional):** Run the three CUDA tests under `compute-sanitizer --tool memcheck`; zero errors required.
 - [ ] **Step 4:** Load the pinned `Qwen3.8-27B-Q4_K_M.gguf` at `ctx=8192` and decode two prompts twice. The 27B carries no Q5_K, so an unsupported-dense-type error here means a real gap in Task 2, not a reason to revisit **D1**.
 - [x] **Step 5:** Add the batch-versus-serial check: a prompt of 9 tokens must give the same logits at its last row as a single-token decode at that position. This is the cheapest detector for a missing dispatch layer.
 - [ ] **Step 6:** Record evidence per **D2**: the Task 5 oracle result, batch-versus-serial agreement, finite logits, identical token sequence across repeats, correct terminal reason, metrics identities. Do not record repeatability alone as a pass.
@@ -443,6 +443,13 @@ series from a pristine pin and linked `libds4.so` with `nvcc -arch=sm_86`, exit
 0. Invoking it needs the venv on PATH (`uv run --frozen bash
 tools/ds4-check.sh --build`) or an external ds4-py checkout, as the README's
 build section describes; the devenv shell alone does not put `ds4py` there.
+
+**As executed for Step 3.** `compute-sanitizer` is in the store but not on the
+devenv PATH, so it was invoked from `cuda-merged-12.9` directly. `--tool memcheck`
+reported `0 errors` for `test_qwen35_cuda_quant`, `-recurrent` and `-attention`,
+each exit 0. `test_qwen35_host` passes under it too, then exits 255 because it
+makes no CUDA call to instrument; it is not one of the three suites this step
+covers.
 
 **As executed for Step 5.** The oracle gained a fourth case: nine tokens in one
 forward against the same nine decoded one at a time, for which the synthetic
