@@ -430,9 +430,9 @@ gained the batch-versus-serial case, so `0013` carries it; the exported tip is
 - [x] **Step 1:** Select `--backend cuda` on Linux when `nvcc` is on PATH (the devenv shell always provides it), falling back to `cpu` elsewhere; do not add a local build file.
 - [x] **Step 2:** Build with `CUDA_ARCH=sm_86` and run `test-qwen35-cuda-quant`, `-recurrent`, `-attention`, and `test-qwen35-host`.
 - [x] **Step 3 (optional):** Run the three CUDA tests under `compute-sanitizer --tool memcheck`; zero errors required.
-- [ ] **Step 4:** Load the pinned `Qwen3.8-27B-Q4_K_M.gguf` at `ctx=8192` and decode two prompts twice. The 27B carries no Q5_K, so an unsupported-dense-type error here means a real gap in Task 2, not a reason to revisit **D1**.
+- [x] **Step 4:** Load the pinned `Qwen3.8-27B-Q4_K_M.gguf` at `ctx=8192` and decode two prompts twice. The 27B carries no Q5_K, so an unsupported-dense-type error here means a real gap in Task 2, not a reason to revisit **D1**.
 - [x] **Step 5:** Add the batch-versus-serial check: a prompt of 9 tokens must give the same logits at its last row as a single-token decode at that position. This is the cheapest detector for a missing dispatch layer.
-- [ ] **Step 6:** Record evidence per **D2**: the Task 5 oracle result, batch-versus-serial agreement, finite logits, identical token sequence across repeats, correct terminal reason, metrics identities. Do not record repeatability alone as a pass.
+- [~] **Step 6:** Record evidence per **D2**: the Task 5 oracle result, batch-versus-serial agreement, finite logits, identical token sequence across repeats, correct terminal reason, metrics identities. Do not record repeatability alone as a pass.
 
 ---
 
@@ -461,8 +461,31 @@ at `2.6e-05`: the gated output norm renormalises each head, so this synthetic
 model is weakly sensitive to decay, and Step 4's model-level agreement remains
 the check for that.
 
-Steps 3, 4 and 6 stay open. Step 4 needs a qwen35 GGUF and none exists on this
-host, so batch-versus-serial agreement is still unproven at model level.
+**As executed for Step 4.** `Qwen3.8-27B-Q4_K_M.gguf` (15.66 GiB) through the
+tree's own `ds4` binary:
+
+```
+ds4 -m Qwen3.8-27B-Q4_K_M.gguf --cuda -c 8192 -p "The capital of France is" \
+    -n 24 --temp 0 --seed 1
+```
+
+`CUDA backend initialized on NVIDIA GeForce RTX 3090 (sm_86)`, planned memory
+`17.24 GiB` = resident model `15.65` + buffers `1.09` + KV `0.50`. The run
+answered `Paris` after a 63-token prompt, prefill `31.25 t/s`, generation
+`0.48 t/s`. Two prompts each decoded twice at `temp 0, seed 1, -n 16` produced
+byte-identical streams (`sha256` `74fc3c65c80b` and `2984507e565a`). Generation
+at `0.48 t/s` is slow enough to deserve its own look: the serial decode path for
+this model's Q4_K/Q6_K mix is the suspect, and nothing here claims it is
+optimised.
+
+**Step 6 evidence, per D2.** Measured: the Task 5 oracle (four cases, `3.2e-06` to
+`3.6e-05`), batch-versus-serial on the synthetic graph (`1.5e-05`), finite logits,
+identical token sequences across repeats, and the model's planned-memory and
+throughput figures. Not measured, and not claimed: the engine's terminal reason
+and its metrics identities (the `ds4` CLI prints neither), and model-level
+batch-versus-serial, because no CLI path exposes the last row's logits. The
+synthetic graph covers the wiring; the 27B run covers load, decode and
+reproducibility.
 
 ## Verification Matrix
 
