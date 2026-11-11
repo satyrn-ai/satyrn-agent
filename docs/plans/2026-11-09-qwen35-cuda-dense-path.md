@@ -20,7 +20,7 @@
 - CUDA lives inside `patches/qwen35`, never a sibling model directory; series order is `common` then models in `LC_ALL=C` order (L178).
 - Patch ledger trailers are mandatory: `Upstream:`, `Retire-when:`, `Carried-commits:` (L54).
 - CUDA architecture is `sm_86` for the RTX 3060 and RTX 3090.
-- The CUDA toolchain comes from `devenv.nix`: `cudaPackages` 12.9 (`cuda_nvcc`, `cuda_cudart`, `cuda_cccl`, `libcublas`), Linux only. Run every build and test inside `devenv shell`. Do not add a second toolchain, a `nix shell` wrapper or a `cuda.mk`.
+- The CUDA toolchain comes from `devenv.nix`: `cudaPackages` 12.9 (`cuda_nvcc`, `cuda_cudart`, `cuda_cccl`, `libcublas`), Linux only, added to the shell only when `DS4_CUDA=1`. Run every CUDA build and test through `tools/ds4-cuda.sh`, which sets that flag; a plain `devenv shell` stays CUDA-free because the closure is about 1.5 GiB and every CI job enters it. Do not add a second toolchain, a hand-rolled `nix shell` line or a `cuda.mk`.
 - The pin already carries `.shared` on all three `ldmatrix` forms. Do not re-add it.
 
 ## Decisions required before execution

@@ -2,10 +2,12 @@
 
 let
   # CUDA 12.9 is what the pinned nixpkgs provides and the toolchain the dense
-  # qwen35 CUDA path is written against. Darwin has no CUDA, so the Metal build
-  # must not see these packages.
+  # qwen35 CUDA path is written against. It joins the shell only when
+  # DS4_CUDA=1, because its closure is about 1.5 GiB (nvcc plus cuBLAS) and
+  # every Linux CI job enters this shell without compiling or running CUDA.
+  # tools/ds4-cuda.sh sets the flag; Darwin has no CUDA to gate.
   cuda = pkgs.cudaPackages;
-  hasCuda = pkgs.stdenv.hostPlatform.isLinux;
+  hasCuda = pkgs.stdenv.hostPlatform.isLinux && builtins.getEnv "DS4_CUDA" == "1";
   # The merged cudatoolkit drags in the whole redistrib (cuobjdump, gdb,
   # profiler APIs). nvcc needs the compiler, the runtime headers and CCCL.
   cudaDev = pkgs.symlinkJoin {
@@ -44,7 +46,8 @@ in
   ];
 
   # String interpolation is evaluated eagerly, so the CUDA environment must be
-  # appended only where the packages exist; Darwin has no CUDA attribute set.
+  # appended only where the packages exist; Darwin has no CUDA attribute set,
+  # and a plain Linux shell leaves hasCuda false.
   enterShell = ''
     if [[ "$(uname -s)" == "Darwin" ]]; then
       export MACOSX_DEPLOYMENT_TARGET=15.0
