@@ -425,8 +425,8 @@ neutral graph region and none of the old Metal-only verdict.
 **Files:**
 - Modify: `tools/ds4-check.sh` (backend selection), or the ds4-py invocation it uses
 
-- [ ] **Step 1:** Select `--backend cuda` on Linux when `nvcc` is on PATH (the devenv shell always provides it), falling back to `cpu` elsewhere; do not add a local build file.
-- [ ] **Step 2:** Build with `CUDA_ARCH=sm_86` and run `test-qwen35-cuda-quant`, `-recurrent`, `-attention`, and `test-qwen35-host`.
+- [x] **Step 1:** Select `--backend cuda` on Linux when `nvcc` is on PATH (the devenv shell always provides it), falling back to `cpu` elsewhere; do not add a local build file.
+- [x] **Step 2:** Build with `CUDA_ARCH=sm_86` and run `test-qwen35-cuda-quant`, `-recurrent`, `-attention`, and `test-qwen35-host`.
 - [ ] **Step 3 (optional):** Run the three CUDA tests under `compute-sanitizer --tool memcheck`; zero errors required.
 - [ ] **Step 4:** Load the pinned `Qwen3.8-27B-Q4_K_M.gguf` at `ctx=8192` and decode two prompts twice. The 27B carries no Q5_K, so an unsupported-dense-type error here means a real gap in Task 2, not a reason to revisit **D1**.
 - [ ] **Step 5:** Add the batch-versus-serial check: a prompt of 9 tokens must give the same logits at its last row as a single-token decode at that position. This is the cheapest detector for a missing dispatch layer.
@@ -434,20 +434,32 @@ neutral graph region and none of the old Metal-only verdict.
 
 ---
 
+**As executed for Steps 1 and 2.** `tools/ds4-check.sh` now asks for `cuda` when
+`nvcc` is on PATH and ds4py's own default would be `cpu`. `ds4-check --model
+qwen35 --build` inside the CUDA devenv (~`CUDA_ARCH=sm_86`) reconstructed the
+series from a pristine pin and linked `libds4.so` with `nvcc -arch=sm_86`, exit
+0. Invoking it needs the venv on PATH (`uv run --frozen bash
+tools/ds4-check.sh --build`) or an external ds4-py checkout, as the README's
+build section describes; the devenv shell alone does not put `ds4py` there.
+
+Steps 3-6 stay open. Step 4 needs a qwen35 GGUF and none exists on this host, so
+batch-versus-serial agreement is unproven at model level; the addressable part
+without weights is Step 5 against the synthetic graph.
+
 ## Verification Matrix
 
 | Claim | Command | Expected |
 | --- | --- | --- |
-| Baseline series applies | `git -C .ds4/tree rev-list --count 5379c1c..HEAD` | `11` before, `15` after |
+| Baseline series applies | `git -C .ds4/tree rev-list --count 0674e31d..HEAD` | `5`, and `ds4-state` records `EXPORTED_HEAD` at that tip |
 | Quant types decode correctly | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-quant` | pass |
 | Recurrent op matches reference | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-recurrent` | pass |
 | Attention matches reference | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-attention` | pass |
 | Graph accepts the model | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host` | pass |
 | Graph is wired correctly | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-oracle` | logits within `1e-3` of the reference |
 | Metal verify still gated | `grep -c "DS4_HAS_QWEN4_METAL" .ds4/tree/ds4.c` | unchanged from baseline |
-| Existing patches unchanged | `git diff --stat -- 'patches/qwen35/000[1-8]-*.patch'` | empty |
+| Existing patches unchanged | `git diff -U0 -- 'patches/qwen35/000[1-8]-*.patch'` | only `From <sha>` and the `[PATCH n/13]` counter differ |
 | Series reconstructs | `ds4-check --model qwen35` | exit 0 |
-| Repo healthy | `nix flake check --accept-flake-config` | exit 0 |
+| Repo healthy | `uv run --frozen prek run --all-files` and `bash tests/ds4_tools_test.sh` | exit 0, 49 passed |
 
 ## Risks and rollback
 

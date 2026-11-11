@@ -137,7 +137,16 @@ main() {
     local backend
     case "$(uname -s)" in
         Darwin) backend="metal" ;;
-        *) backend="cpu" ;;
+        *)
+            # ds4py's own default is cpu off macOS, so a Linux build only reaches
+            # the CUDA path when this asks for it. The devenv shell always
+            # provides nvcc; a host without it still builds and runs on cpu.
+            if command -v nvcc >/dev/null 2>&1; then
+                backend="cuda"
+            else
+                backend="cpu"
+            fi
+            ;;
     esac
 
     local stop clone m
