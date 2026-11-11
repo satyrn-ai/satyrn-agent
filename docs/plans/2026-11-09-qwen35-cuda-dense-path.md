@@ -240,6 +240,13 @@ git -C .ds4/tree commit -m "qwen35: dense preparation and causal attention on CU
 
 ### Task 5: Enable the ordinary dense graph on CUDA
 
+**Execution notes** (from the completed Tasks 2–4 baseline at the 11-commit pin):
+
+- `ds4_cuda.o` must list `ds4_qwen35_cuda.cuh` among its prerequisites. Without that line a header edit leaves a stale object file and a fault injection silently passes.
+- Half caches cannot be compared bitwise to a double reference: one ULP of half, plus the float-versus-double difference in the norm and rope intermediates, moves the last bit. Compare them at `2e-3`.
+- Feed the attention check with the q, gate and cache halves the device wrote, after checking them separately against the reference. Otherwise a prep rounding difference leaks into the attention assertion.
+- Refusal tests must seed the output tensor with a sentinel; a freshly allocated CUDA tensor is uninitialized, so "unchanged" cannot mean "zero".
+
 **Files:**
 - Modify: `.ds4/tree/ds4.c` — `qwen35_graph_weights_supported`, `qwen4_graph_linear`, `qwen35_graph_attention`, the `qwen35_graph_verify_*` boundary, `qwen35_graph_stage_inputs`, `qwen35_graph_forward_tokens`, `qwen4_graph_forward_tokens`
 - Create: `.ds4/tree/tests/test_qwen35_host.c`
