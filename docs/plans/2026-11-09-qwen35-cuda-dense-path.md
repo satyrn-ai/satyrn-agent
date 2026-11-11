@@ -411,7 +411,9 @@ because the commits were authored without them; the five commits were reworded
 with `git rebase -i` and re-exported. `ds4-check --model qwen35` exits 0, and
 `diff` over the thirteen touched files between `.ds4/check/qwen35` and
 `.ds4/tree` reports no differences, with the reconstructed `ds4.c` holding the
-neutral graph region and none of the old Metal-only verdict.
+neutral graph region and none of the old Metal-only verdict. The series was exported a second time after the oracle
+gained the batch-versus-serial case, so `0013` carries it; the exported tip is
+`10c8e748` and `ds4-state` records it.
 
 ### Task 7 (blocked on D3): Adopt or park
 
@@ -429,7 +431,7 @@ neutral graph region and none of the old Metal-only verdict.
 - [x] **Step 2:** Build with `CUDA_ARCH=sm_86` and run `test-qwen35-cuda-quant`, `-recurrent`, `-attention`, and `test-qwen35-host`.
 - [ ] **Step 3 (optional):** Run the three CUDA tests under `compute-sanitizer --tool memcheck`; zero errors required.
 - [ ] **Step 4:** Load the pinned `Qwen3.8-27B-Q4_K_M.gguf` at `ctx=8192` and decode two prompts twice. The 27B carries no Q5_K, so an unsupported-dense-type error here means a real gap in Task 2, not a reason to revisit **D1**.
-- [ ] **Step 5:** Add the batch-versus-serial check: a prompt of 9 tokens must give the same logits at its last row as a single-token decode at that position. This is the cheapest detector for a missing dispatch layer.
+- [x] **Step 5:** Add the batch-versus-serial check: a prompt of 9 tokens must give the same logits at its last row as a single-token decode at that position. This is the cheapest detector for a missing dispatch layer.
 - [ ] **Step 6:** Record evidence per **D2**: the Task 5 oracle result, batch-versus-serial agreement, finite logits, identical token sequence across repeats, correct terminal reason, metrics identities. Do not record repeatability alone as a pass.
 
 ---
@@ -442,9 +444,18 @@ series from a pristine pin and linked `libds4.so` with `nvcc -arch=sm_86`, exit
 tools/ds4-check.sh --build`) or an external ds4-py checkout, as the README's
 build section describes; the devenv shell alone does not put `ds4py` there.
 
-Steps 3-6 stay open. Step 4 needs a qwen35 GGUF and none exists on this host, so
-batch-versus-serial agreement is unproven at model level; the addressable part
-without weights is Step 5 against the synthetic graph.
+**As executed for Step 5.** The oracle gained a fourth case: nine tokens in one
+forward against the same nine decoded one at a time, for which the synthetic
+model needs no weights. Measured `max |batch - serial| = 1.538e-05`. It is a real
+detector, not a tautology: making the batch tail read the row before the last
+trips it at `1.6` while the three reference cases stay green, because they all
+run one token. A second injection that dropped `dt_bias` from the decay passed
+at `2.6e-05`: the gated output norm renormalises each head, so this synthetic
+model is weakly sensitive to decay, and Step 4's model-level agreement remains
+the check for that.
+
+Steps 3, 4 and 6 stay open. Step 4 needs a qwen35 GGUF and none exists on this
+host, so batch-versus-serial agreement is still unproven at model level.
 
 ## Verification Matrix
 
@@ -456,6 +467,7 @@ without weights is Step 5 against the synthetic graph.
 | Attention matches reference | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-attention` | pass |
 | Graph accepts the model | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host` | pass |
 | Graph is wired correctly | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-oracle` | logits within `1e-3` of the reference |
+| Batch and serial agree | same target | a 9-token forward matches nine single-token forwards at the last row |
 | Metal verify still gated | `grep -c "DS4_HAS_QWEN4_METAL" .ds4/tree/ds4.c` | unchanged from baseline |
 | Existing patches unchanged | `git diff -U0 -- 'patches/qwen35/000[1-8]-*.patch'` | only `From <sha>` and the `[PATCH n/13]` counter differ |
 | Series reconstructs | `ds4-check --model qwen35` | exit 0 |

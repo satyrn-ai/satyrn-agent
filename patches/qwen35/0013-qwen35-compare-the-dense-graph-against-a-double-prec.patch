@@ -1,4 +1,4 @@
-From 6e5277731320e3ba80835691a769e7027c4bcc45 Mon Sep 17 00:00:00 2001
+From 10c8e7487d37e9b21900315d07c52b4935384a81 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 12:22:58 +0200
 Subject: [PATCH 13/13] qwen35: compare the dense graph against a
@@ -29,6 +29,10 @@ reverted. An earlier version of this test passed the first injection because
 every tensor was scaled at 1/sqrt(width), which put the logits near 1e-2; gamma
 vectors now centre on 1.
 
+A fourth case compares nine tokens in one forward against the same nine decoded
+one at a time, which is where a batch-only dispatch or state fault shows up
+without any weights: measured max |batch - serial| = 1.5e-05, and reading the
+row before the last trips it at 1.6 while the reference cases stay green.
 Named test-qwen35-oracle, not test-qwen35-graph: that target already exists and
 drives tests/test_qwen4_kernels with DS4_TEST_QWEN35_GRAPH_ONLY=1 on Metal.
 
@@ -37,9 +41,9 @@ Retire-when: dense qwen35 runs on CUDA upstream
 Carried-commits: none (authored here)
 ---
  .gitignore                 |   1 +
- Makefile                   |  14 ++
- tests/test_qwen35_oracle.c | 434 +++++++++++++++++++++++++++++++++++++
- 3 files changed, 449 insertions(+)
+ Makefile                   |  14 +
+ tests/test_qwen35_oracle.c | 507 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 522 insertions(+)
  create mode 100644 tests/test_qwen35_oracle.c
 
 diff --git a/.gitignore b/.gitignore
@@ -78,10 +82,10 @@ index 7ad37963..a351563d 100644
  
 diff --git a/tests/test_qwen35_oracle.c b/tests/test_qwen35_oracle.c
 new file mode 100644
-index 00000000..91ab7916
+index 00000000..9caa6bdf
 --- /dev/null
 +++ b/tests/test_qwen35_oracle.c
-@@ -0,0 +1,434 @@
+@@ -0,0 +1,507 @@
 +/* Numerical oracle for the dense qwen35 graph: a two-layer model built in
 + * memory, one forward on the GPU, logits compared against a double-precision
 + * reference of the documented layer order. Finite or repeatable logits alone
@@ -499,6 +503,77 @@ index 00000000..91ab7916
 +    return 0;
 +}
 +
++/* Nine tokens in one forward against the same nine decoded one at a time. A
++ * batch that large crosses into the row-major dispatch layer and the plain GDN
++ * front where a single token takes the fused one, so a type or layer missing
++ * from a second path shows up here without any weights. The logits compared are
++ * the last row's in both cases. */
++static int check_batch_serial(void) {
++    enum { BATCH = 9 };
++    shape_dense_qwen35(2u);
++    synth s;
++    ref_view rv;
++    memset(&rv, 0, sizeof(rv));
++    g_seed = 0x5eed1234u;
++    synth_build(&s, &rv);
++    if (!ds4_gpu_set_model_map_range(s.model.map, s.model.size, 0, s.model.size, (uint64_t)64 << 20)) {
++        fprintf(stderr, "qwen35 graph test: the weight map was refused\n");
++        return 1;
++    }
++    unsetenv("DS4_QWEN4_NO_FUSE");
++    int ids[BATCH];
++    for (uint32_t i = 0; i < BATCH; i++) ids[i] = (int)((g_seed = g_seed * 1664525u + 1013904223u) >> 16) %
++                                                 (int)DS4_N_VOCAB;
++    float batch[BATCH <= 64 ? 64 : 64];
++    float serial[64];
++    for (uint32_t i = 0; i < 64u; i++) batch[i] = serial[i] = NAN;
++
++    ds4_qwen4_gpu_graph g;
++    if (!qwen4_graph_alloc(&g, &s.weights, 16u, 16u, false, NULL, NULL, NULL, 0)) {
++        fprintf(stderr, "qwen35 graph test: the graph refused a dense qwen35 layout\n");
++        return 1;
++    }
++    bool ok = qwen4_graph_forward_tokens(&g, &s.model, &s.weights, ids, BATCH, batch, false) &&
++              ds4_gpu_tensor_read(g.logits, 0, batch, (uint64_t)DS4_N_VOCAB * sizeof(float)) != 0;
++    qwen4_graph_free(&g);
++    if (!ok) {
++        fprintf(stderr, "qwen35 graph test: the batch forward failed\n");
++        return 1;
++    }
++
++    if (!qwen4_graph_alloc(&g, &s.weights, 16u, 16u, false, NULL, NULL, NULL, 0)) return 1;
++    ok = qwen4_graph_forward_tokens(&g, &s.model, &s.weights, ids, BATCH - 1u, serial, false) &&
++         qwen4_graph_forward_tokens(&g, &s.model, &s.weights, ids + (BATCH - 1u), 1u, serial, false) &&
++         ds4_gpu_tensor_read(g.logits, 0, serial, (uint64_t)DS4_N_VOCAB * sizeof(float)) != 0 &&
++         ds4_gpu_synchronize() != 0;
++    qwen4_graph_free(&g);
++    if (!ok) {
++        fprintf(stderr, "qwen35 graph test: the serial forward failed\n");
++        return 1;
++    }
++    if (!all_finite(batch, DS4_N_VOCAB) || !all_finite(serial, DS4_N_VOCAB)) {
++        fprintf(stderr, "qwen35 graph test: batch or serial logits are not finite\n");
++        return 1;
++    }
++    double max_abs = 0;
++    uint64_t worst = 0;
++    for (uint32_t i = 0; i < DS4_N_VOCAB && i < 64u; i++) {
++        const double d = fabs((double)batch[i] - (double)serial[i]);
++        if (d > max_abs) {
++            max_abs = d;
++            worst = i;
++        }
++    }
++    printf("qwen35 graph (batch vs serial, 9 tokens): max |batch - serial| = %.3e at logit %llu\n",
++           max_abs, (unsigned long long)worst);
++    if (!(max_abs < 1e-3)) {
++        fprintf(stderr, "qwen35 graph test: batch logit %llu is %.9f, serial says %.9f\n",
++                (unsigned long long)worst, (double)batch[worst], (double)serial[worst]);
++        return 1;
++    }
++    return 0;
++}
++
 +int main(void) {
 +    if (ds4_gpu_init() == 0) {
 +        printf("qwen35 graph test: no CUDA device, skipping\n");
@@ -512,6 +587,8 @@ index 00000000..91ab7916
 +     * once through the fused decode front and once through the plain ops. */
 +    if (check_case(2u, false, "dense layout, fused front") != 0) return 1;
 +    if (check_case(2u, true, "dense layout, unfused front") != 0) return 1;
++    /* Nine tokens in one forward against nine decoded one at a time. */
++    if (check_batch_serial() != 0) return 1;
 +    printf("all qwen35 graph oracle tests passed\n");
 +    ds4_gpu_cleanup();
 +    return 0;
