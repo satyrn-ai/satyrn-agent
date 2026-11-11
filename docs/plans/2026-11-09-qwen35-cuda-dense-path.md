@@ -62,11 +62,11 @@
 - Modify (scratch only): `.ds4/tree` (gitignored)
 
 **Interfaces:**
-- Produces: `.ds4/tree` at 11 commits past the pin (`3 common + 8 qwen35`), with a clean status and the scratch range recorded.
+- Produces: `.ds4/tree` at 11 commits past the pin (`3 common + 8 qwen35`) on branch `ds4/model/qwen35`, clean status, and the scratch range recorded in `.ds4/tree/.git/ds4-state`.
 
 - [ ] **Step 1: Sync the qwen35 target**
 
-Run: `tools/ds4-sync --model qwen35`
+Run: `ds4-sync --model qwen35` (inside `devenv shell`; the sources are `tools/ds4-*.sh`)
 Expected: exit 0; `.ds4/tree/.git` exists; state records target `qwen35`.
 
 - [ ] **Step 2: Record the baseline**
@@ -313,7 +313,7 @@ git -C .ds4/tree commit -m "qwen35: the ordinary dense graph on CUDA"
 
 - [ ] **Step 1: Export**
 
-Run: `tools/ds4-export`
+Run: `ds4-export`
 Expected: exit 0. A dirty-tree refusal means a task left work uncommitted; fix that, do not pass `--force`.
 
 - [ ] **Step 2: Prove the existing series is untouched**
@@ -331,7 +331,7 @@ Expected: `From <sha>`, `Subject: [PATCH n/N] qwen35: …`, body, then the three
 
 - [ ] **Step 4: Reconstruct from a pristine pin**
 
-Run: `tools/ds4-check --model qwen35`
+Run: `ds4-check --model qwen35`
 Expected: exit 0.
 
 - [ ] **Step 5: Update the ledger table**
@@ -381,7 +381,7 @@ git commit -m "qwen35: add the dense serial CUDA path to the patch series"
 | Graph is wired correctly | `make -C .ds4/tree test-qwen35-graph` | logits within `1e-3` of the reference |
 | Metal verify still gated | `grep -c "DS4_HAS_QWEN4_METAL" .ds4/tree/ds4.c` | unchanged from baseline |
 | Existing patches unchanged | `git diff --stat -- 'patches/qwen35/000[1-8]-*.patch'` | empty |
-| Series reconstructs | `tools/ds4-check --model qwen35` | exit 0 |
+| Series reconstructs | `ds4-check --model qwen35` | exit 0 |
 | Repo healthy | `nix flake check --accept-flake-config` | exit 0 |
 
 ## Risks and rollback
