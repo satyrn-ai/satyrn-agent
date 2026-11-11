@@ -115,18 +115,18 @@ Expected: `3` declarations in the header, `0` definitions in the CUDA sources. T
 
 - Q6_K block: 128 low nibbles at byte 0, high 2-bit parts at byte 128, int8 scales at byte 192, fp16 `d` at byte 208, `q = (lo | hi << 4) - 32`.
 - Product cases for `K ∈ {256, 512}`, `M ∈ {1, 4}` and `T ∈ {1, 8, 9, 17, 32, 33}`, comparing GPU output against the reference within `5e-5`. `T ∈ {1, 8}` exercises `matvec_dispatch`, `T ∈ {9, 17}` exercises `matrix_dispatch`, `T ∈ {32, 33}` exercises `dense_blas` and its `unpack` path.
-- One run with the cuBLAS and tensor-core layers forced off, so `QWEN_MM` and unquantized fallbacks are covered too; the switch is the existing quality-mode / no-TF32 environment knob.
+- One run with `DS4_CUDA_NO_TF32=1`, which forces the plain matrix kernel (`QWEN_MM`) instead of the tensor-core one. cuBLAS has no disable knob, so `T ≥ 32` always exercises `dense_blas` and its `unpack` path.
 - Invalid-`K` refusal: `K = 384` must return 0 because `row_bytes` yields 0, and the output must stay unchanged.
 - Short-buffer refusal: a view one byte short must return 0 and leave the output unchanged.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 2: Add the test harness and the target**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-quant`
-Expected: no rule to make target, because the target does not exist yet.
+`tests/qwen35_cuda_test.h` exposes `q35_init`, `q35_cleanup`, `q35_require`, `q35_alloc`, `q35_random`, the `q35_arena` bump allocator and `q35_check_tensor`. `tests/qwen35_cuda_test.c` implements them. `Makefile` gains object rules and `test-qwen35-cuda-quant` (mirroring the existing `test-qwen4-cuda` block). `.gitignore` gains `/tests/test_qwen35_cuda_quant`.
 
-- [ ] **Step 3: Add the test harness and target**
+- [ ] **Step 3: Run it to see the real red state**
 
-`tests/qwen35_cuda_test.h` exposes `q35_init`, `q35_cleanup`, `q35_upload`, `q35_check_tensor`, `q35_require` and the shared arena type. `Makefile` gains object rules and `test-qwen35-cuda-quant` (mirroring the existing `test-qwen4-cuda` block). `.gitignore` gains `/tests/test_qwen35_cuda_quant`.
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-quant`
+Expected: the test fails at `qwen35 test: Q6_K dense mm`, because `row_bytes(14)` is still 0. A missing make rule would mean the target was not added.
 
 - [ ] **Step 4: Implement the decoding**
 
@@ -134,12 +134,12 @@ Expected: no rule to make target, because the target does not exist yet.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-quant`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-quant`
 Expected: `all qwen35 CUDA quant tests passed`.
 
 - [ ] **Step 6: Inject the stride fault and restore**
 
-Change the type-14 stride to `176`; the test must fail on the first Q6_K case. Restore and rerun: passes.
+Change the type-14 stride to `176`; the test must fail on the first multi-row case (`K = 256`, `M = 4`, `T = 1`), where a truncated row makes the next row's bytes bleed in. Restore and rerun: passes.
 
 - [ ] **Step 7: Commit**
 
@@ -172,7 +172,7 @@ git -C .ds4/tree commit -m "qwen35: dense Q6_K weight products on CUDA"
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-recurrent`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-recurrent`
 Expected: link failure, `undefined reference to ds4_gpu_qwen35_gdn_out_tensor`.
 
 - [ ] **Step 3: Implement the op in `ds4_qwen35_cuda.cuh`**
@@ -181,7 +181,7 @@ One kernel launch: 32 threads per head slice, `T × H` blocks. Validate `T ≤ 6
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-recurrent`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-recurrent`
 Expected: `all qwen35 CUDA recurrent tests passed`.
 
 - [ ] **Step 5: Commit**
@@ -217,7 +217,7 @@ git -C .ds4/tree commit -m "qwen35: dense recurrent SiLU output on CUDA"
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-attention`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-attention`
 Expected: link failure for both new symbols.
 
 - [ ] **Step 3: Implement both ops**
@@ -226,7 +226,7 @@ Expected: link failure for both new symbols.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-attention`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-attention`
 Expected: `all qwen35 CUDA attention tests passed`.
 
 - [ ] **Step 5: Commit**
@@ -261,7 +261,7 @@ git -C .ds4/tree commit -m "qwen35: dense preparation and causal attention on CU
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `make -C .ds4/tree test-qwen35-host`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host`
 Expected: no rule to make target, because neither the target nor the file exists yet.
 
 - [ ] **Step 3: Add both test targets**
@@ -270,7 +270,7 @@ Expected: no rule to make target, because neither the target nor the file exists
 
 - [ ] **Step 4: Run the host test to see the real red state**
 
-Run: `make -C .ds4/tree test-qwen35-host`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host`
 Expected: failure reporting `dense qwen35 runs on the Metal graph only`.
 
 - [ ] **Step 5: Restructure the guards**
@@ -294,7 +294,7 @@ Leave `ds4_engine_verify_rows()` untouched: it must still return `8` only under 
 
 - [ ] **Step 7: Run both tests to verify they pass**
 
-Run: `make -C .ds4/tree test-qwen35-host test-qwen35-graph`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host test-qwen35-graph`
 Expected: both pass. The graph test must report that the qwen35 path ran, not the qwen4 path.
 
 - [ ] **Step 8: Commit**
@@ -375,11 +375,11 @@ git commit -m "qwen35: add the dense serial CUDA path to the patch series"
 | Claim | Command | Expected |
 | --- | --- | --- |
 | Baseline series applies | `git -C .ds4/tree rev-list --count 5379c1c..HEAD` | `11` before, `15` after |
-| Quant types decode correctly | `make -C .ds4/tree test-qwen35-cuda-quant` | pass |
-| Recurrent op matches reference | `make -C .ds4/tree test-qwen35-cuda-recurrent` | pass |
-| Attention matches reference | `make -C .ds4/tree test-qwen35-cuda-attention` | pass |
-| Graph accepts the model | `make -C .ds4/tree test-qwen35-host` | pass |
-| Graph is wired correctly | `make -C .ds4/tree test-qwen35-graph` | logits within `1e-3` of the reference |
+| Quant types decode correctly | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-quant` | pass |
+| Recurrent op matches reference | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-recurrent` | pass |
+| Attention matches reference | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-attention` | pass |
+| Graph accepts the model | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host` | pass |
+| Graph is wired correctly | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-graph` | logits within `1e-3` of the reference |
 | Metal verify still gated | `grep -c "DS4_HAS_QWEN4_METAL" .ds4/tree/ds4.c` | unchanged from baseline |
 | Existing patches unchanged | `git diff --stat -- 'patches/qwen35/000[1-8]-*.patch'` | empty |
 | Series reconstructs | `ds4-check --model qwen35` | exit 0 |
