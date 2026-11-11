@@ -352,12 +352,17 @@ git -C .ds4/tree commit -m "qwen35: the ordinary dense graph on CUDA"
 - Create: `patches/qwen35/0009-*.patch` … `0012-*.patch`
 - Modify: `docs/specs/2026-10-24-ds4-patch-series-design.md:44-51`
 
-- [ ] **Step 1: Export**
+- [x] **Step 1: Export**
 
 Run: `ds4-export`
 Expected: exit 0. A dirty-tree refusal means a task left work uncommitted; fix that, do not pass `--force`.
 
-- [ ] **Step 2: Prove the existing series is untouched**
+Here the first refusal was the export's own output: a successful `ds4-export`
+leaves `patches/qwen35` modified, so a second run sees a dirty directory. The fix
+is to discard that output with `git checkout -- patches/qwen35 && git clean -fdq
+patches/qwen35` and export again, never `--force`.
+
+- [x] **Step 2: Prove the existing series is untouched**
 
 ```bash
 git status --porcelain patches/qwen35
@@ -365,21 +370,31 @@ git diff --stat -- 'patches/qwen35/000[1-8]-*.patch'
 ```
 Expected: only `??` entries for the new files; the diff is empty.
 
-- [ ] **Step 3: Inspect a new patch**
+It cannot be empty when the series grows: `git format-patch` rewrites `From
+<sha>` in every patch and `[PATCH n/8]` becomes `[PATCH 0n/13]`. The check that
+means something is that no other line changes:
+
+```bash
+git diff -U0 -- 'patches/qwen35/000[1-8]-*.patch' | grep -E '^[-+][^-+]' \
+  | grep -vE '^[-+](From [0-9a-f]{40} Mon Sep 17|Subject: \[PATCH )'
+```
+Expected: `Subject: [PATCH 1/8]` … lines only for the pre-extension numbering.
+
+- [x] **Step 3: Inspect a new patch**
 
 Run: `sed -n '1,20p' patches/qwen35/0009-*.patch`
 Expected: `From <sha>`, `Subject: [PATCH n/N] qwen35: …`, body, then the three trailers and a diffstat.
 
-- [ ] **Step 4: Reconstruct from a pristine pin**
+- [x] **Step 4: Reconstruct from a pristine pin**
 
 Run: `ds4-check --model qwen35`
 Expected: exit 0.
 
-- [ ] **Step 5: Update the ledger table**
+- [x] **Step 5: Update the ledger table**
 
 Add four rows to the spec's patch table with the new subjects and `not offered, fork only`.
 
-- [ ] **Step 6: Run the full check and commit**
+- [x] **Step 6: Run the full check and commit**
 
 ```bash
 nix flake check --accept-flake-config --print-build-logs
@@ -388,6 +403,15 @@ git commit -m "qwen35: add the dense serial CUDA path to the patch series"
 ```
 
 ---
+
+**As executed.** Five patches, not the four this plan predicted: Task 5 became
+two commits, so `0009`-`0013` extend the series. The first export shipped them
+without the mandatory `Upstream:` / `Retire-when:` / `Carried-commits:` trailers
+because the commits were authored without them; the five commits were reworded
+with `git rebase -i` and re-exported. `ds4-check --model qwen35` exits 0, and
+`diff` over the thirteen touched files between `.ds4/check/qwen35` and
+`.ds4/tree` reports no differences, with the reconstructed `ds4.c` holding the
+neutral graph region and none of the old Metal-only verdict.
 
 ### Task 7 (blocked on D3): Adopt or park
 

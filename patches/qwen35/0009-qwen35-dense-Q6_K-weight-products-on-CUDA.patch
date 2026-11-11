@@ -1,0 +1,444 @@
+From 3398a6b30be44ccb5612ee6d8ea6f7fa7da09976 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Wed, 11 Nov 2026 10:20:02 +0200
+Subject: [PATCH 09/13] qwen35: dense Q6_K weight products on CUDA
+
+Dense qwen35 keeps output.weight and two tensors per layer in Q6_K, so the
+CUDA path cannot load the model without it. Decode the 6-bit quant with the
+existing value<TYPE> mechanism and register the type in all four dispatch
+layers: matvec_dispatch, matrix_dispatch (tensor-core and plain) and the
+dense_blas unpack path.
+
+The row stride keeps the n % 256 guard, so K=384 is refused instead of
+truncated. The test encodes and decodes Q6_K with its own arithmetic, sweeps
+K in {256,512}, M in {1,4} and T in {1,8,9,17,32,33}, repeats 9 and 17 with
+the tensor-core layer forced off, and checks the two refusals. A stride of
+176 instead of 210 fails the first multi-row case.
+
+Upstream: not offered, fork only
+Retire-when: dense qwen35 runs on CUDA upstream
+Carried-commits: none (authored here)
+---
+ .gitignore                     |   1 +
+ Makefile                       |  13 +++
+ ds4_qwen4_cuda.cuh             |  18 +++-
+ tests/qwen35_cuda_test.c       |  90 +++++++++++++++++
+ tests/qwen35_cuda_test.h       |  34 +++++++
+ tests/test_qwen35_cuda_quant.c | 173 +++++++++++++++++++++++++++++++++
+ 6 files changed, 325 insertions(+), 4 deletions(-)
+ create mode 100644 tests/qwen35_cuda_test.c
+ create mode 100644 tests/qwen35_cuda_test.h
+ create mode 100644 tests/test_qwen35_cuda_quant.c
+
+diff --git a/.gitignore b/.gitignore
+index 5bc74787..59525049 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -117,3 +117,4 @@ __pycache__/
+ 
+ /tests/test_qwen4_conv_parallel
+ /tests/test_q8_prefill_variants
++/tests/test_qwen35_cuda_quant
+diff --git a/Makefile b/Makefile
+index e55714f3..e6f80ce2 100644
+--- a/Makefile
++++ b/Makefile
+@@ -747,6 +747,19 @@ tests/test_qwen4_cuda: tests/test_qwen4_cuda.o ds4_cuda.o ds4_image.o $(MMQ_OBJS
+ .PHONY: test-qwen4-cuda
+ test-qwen4-cuda: tests/test_qwen4_cuda
+ 	./tests/test_qwen4_cuda
++
++tests/qwen35_cuda_test.o: tests/qwen35_cuda_test.c tests/qwen35_cuda_test.h ds4_gpu.h
++	$(CC) $(QUALITY_CFLAGS) -D_GNU_SOURCE -I. -c -o $@ $<
++
++tests/test_qwen35_cuda_quant.o: tests/test_qwen35_cuda_quant.c tests/qwen35_cuda_test.h ds4_gpu.h
++	$(CC) $(QUALITY_CFLAGS) -D_GNU_SOURCE -I. -c -o $@ $<
++
++tests/test_qwen35_cuda_quant: tests/test_qwen35_cuda_quant.o tests/qwen35_cuda_test.o ds4_cuda.o ds4_image.o $(MMQ_OBJS)
++	$(DS4_LINK) -o $@ $^ $(DS4_LINK_LIBS)
++
++.PHONY: test-qwen35-cuda-quant
++test-qwen35-cuda-quant: tests/test_qwen35_cuda_quant
++	./tests/test_qwen35_cuda_quant
+ endif
+ 
+ ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+diff --git a/ds4_qwen4_cuda.cuh b/ds4_qwen4_cuda.cuh
+index be52f498..918a82fc 100644
+--- a/ds4_qwen4_cuda.cuh
++++ b/ds4_qwen4_cuda.cuh
+@@ -362,6 +362,7 @@ static uint64_t row_bytes(uint32_t type, uint64_t n) {
+     case 39: return n % 32 ? 0 : n / 32 * 17;
+     case 10: return n % 256 ? 0 : n / 256 * 84;
+     case 12: return n % 256 ? 0 : n / 256 * 144;
++    case 14: return n % 256 ? 0 : n / 256 * 210;
+     case 16: return n % 256 ? 0 : n / 256 * 66;
+     default: return 0;
+     }
+@@ -441,6 +442,15 @@ __device__ __forceinline__ float value(const char *row, unsigned i,
+         const unsigned q = (b->qs[j / 64 * 32 + j % 32] >> (4 * (group & 1))) & 15;
+         return dev_f16_to_f32(b->d) * sc * q - dev_f16_to_f32(b->dmin) * mn;
+     }
++    if (TYPE == 14) {
++        const uint8_t *b = (const uint8_t *)row + (i / 256) * 210;
++        const unsigned j = i % 256, half = j / 128, part = (j % 128) / 32, lane = j % 32;
++        const unsigned lo = (b[half * 64 + (part & 1) * 32 + lane] >> (4 * (part / 2))) & 15;
++        const unsigned hi = (b[128 + half * 32 + lane] >> (2 * part)) & 3;
++        const uint16_t d = (uint16_t)b[208] | (uint16_t)((unsigned)b[209] << 8);
++        return dev_f16_to_f32(d) * (float)((const int8_t *)b)[192 + j / 16] *
++            (float)((int)(lo | (hi << 4)) - 32);
++    }
+     if (TYPE == 16) {
+         const cuda_block_iq2_xxs *b = (const cuda_block_iq2_xxs *)row + i / 256;
+         const unsigned j = i % 256, group = j / 32, sub = j % 32 / 8;
+@@ -1067,7 +1077,7 @@ static int matrix_dispatch(float *out, const float *x, const char *w0, const cha
+         else matrix_reg<TYPE,false,2><<<tcgrid,128,0,cuda_decode_stream()>>>(out,x,w0,w1,lists,counts,tiles,NE,NS,NO,K,M,cap,rb); break
+         switch (type) {
+         QWEN_TC(0); QWEN_TC(1); QWEN_TC(2); QWEN_TC(8); QWEN_TC(10);
+-        QWEN_TC(12); QWEN_TC(16); QWEN_TC(30); QWEN_TC(39);
++        QWEN_TC(12); QWEN_TC(14); QWEN_TC(16); QWEN_TC(30); QWEN_TC(39);
+         default: return 0;
+         }
+ #undef QWEN_TC
+@@ -1079,7 +1089,7 @@ static int matrix_dispatch(float *out, const float *x, const char *w0, const cha
+     else matrix<TYPE,false,true><<<grid,256,0,cuda_decode_stream()>>>(out,x,w0,w1,lists,counts,T,NS,NO,K,M,cap,rb); break
+     switch (type) {
+     QWEN_MM(0); QWEN_MM(1); QWEN_MM(2); QWEN_MM(8); QWEN_MM(10);
+-    QWEN_MM(12); QWEN_MM(16); QWEN_MM(30); QWEN_MM(39);
++    QWEN_MM(12); QWEN_MM(14); QWEN_MM(16); QWEN_MM(30); QWEN_MM(39);
+     default: return 0;
+     }
+ #undef QWEN_MM
+@@ -1190,7 +1200,7 @@ static int matvec_dispatch(float *out, const char *w, const float *x,
+     else matvec<TYPE><<<grid,128,0,cuda_decode_stream()>>>(out,w,x,K,M,stride); break
+     switch (type) {
+     QWEN_MV(0); QWEN_MV(1); QWEN_MV(2); QWEN_MV(8); QWEN_MV(10);
+-    QWEN_MV(12); QWEN_MV(16); QWEN_MV(30); QWEN_MV(39);
++    QWEN_MV(12); QWEN_MV(14); QWEN_MV(16); QWEN_MV(30); QWEN_MV(39);
+     default: return 0;
+     }
+ #undef QWEN_MV
+@@ -1369,7 +1379,7 @@ static int dense_blas(float *out, const float *x, const char *w,
+ #define QWEN_UNPACK(TYPE) case TYPE: unpack<TYPE><<<((uint64_t)n*K+255)/256,256,0,cuda_decode_stream()>>>(scratch,w+(uint64_t)r*rb,K,n,rb); break
+             switch (type) {
+             QWEN_UNPACK(1); QWEN_UNPACK(2); QWEN_UNPACK(8); QWEN_UNPACK(10);
+-            QWEN_UNPACK(12); QWEN_UNPACK(16); QWEN_UNPACK(30); QWEN_UNPACK(39);
++            QWEN_UNPACK(12); QWEN_UNPACK(14); QWEN_UNPACK(16); QWEN_UNPACK(30); QWEN_UNPACK(39);
+             default: return 0;
+             }
+ #undef QWEN_UNPACK
+diff --git a/tests/qwen35_cuda_test.c b/tests/qwen35_cuda_test.c
+new file mode 100644
+index 00000000..20f39ea9
+--- /dev/null
++++ b/tests/qwen35_cuda_test.c
+@@ -0,0 +1,90 @@
++#define _POSIX_C_SOURCE 200809L
++#include "qwen35_cuda_test.h"
++
++#include <math.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++static uint32_t q35_state = 0x9e3779b9u;
++
++void q35_init(void) {
++    q35_require(ds4_gpu_init(), "ds4_gpu_init");
++}
++
++void q35_cleanup(void) {
++    ds4_gpu_cleanup();
++}
++
++void q35_require(int condition, const char *what) {
++    if (!condition) {
++        fprintf(stderr, "qwen35 test: %s\n", what);
++        exit(1);
++    }
++}
++
++void *q35_alloc(uint64_t bytes) {
++    void *p = calloc(1, (size_t)bytes);
++    q35_require(p != NULL, "host allocation");
++    return p;
++}
++
++uint32_t q35_random(void) {
++    q35_state = q35_state * 1664525u + 1013904223u;
++    return q35_state;
++}
++
++float q35_random_uniform(void) {
++    return (float)((int32_t)(q35_random() >> 16) - 32768) / 16384.0f;
++}
++
++void q35_arena_init(q35_arena *arena, uint64_t size) {
++    arena->base = q35_alloc(size ? size : 1);
++    arena->size = size;
++    arena->used = 0;
++}
++
++uint64_t q35_arena_add(q35_arena *arena, const void *data, uint64_t bytes) {
++    const uint64_t off = arena->used;
++    q35_require(off + bytes <= arena->size, "arena capacity");
++    if (bytes) memcpy(arena->base + off, data, (size_t)bytes);
++    arena->used = off + bytes;
++    return off;
++}
++
++void q35_arena_bind(const q35_arena *arena) {
++    q35_require(ds4_gpu_set_model_map(arena->base, arena->size), "ds4_gpu_set_model_map");
++}
++
++void q35_arena_free(q35_arena *arena) {
++    free(arena->base);
++    arena->base = NULL;
++    arena->size = 0;
++    arena->used = 0;
++}
++
++ds4_gpu_tensor *q35_upload(const float *data, uint64_t count) {
++    const uint64_t bytes = count * sizeof(float);
++    ds4_gpu_tensor *t = ds4_gpu_tensor_alloc(bytes);
++    q35_require(t != NULL, "ds4_gpu_tensor_alloc");
++    q35_require(ds4_gpu_tensor_write(t, 0, data, bytes), "ds4_gpu_tensor_write");
++    return t;
++}
++
++void q35_check_tensor(const char *what, const ds4_gpu_tensor *tensor,
++                      const double *expect, uint64_t count, double tolerance) {
++    const uint64_t bytes = count * sizeof(float);
++    float *actual = q35_alloc(bytes);
++    q35_require(ds4_gpu_tensor_read(tensor, 0, actual, bytes), "ds4_gpu_tensor_read");
++    for (uint64_t i = 0; i < count; i++) {
++        const double want = expect[i];
++        const double got = (double)actual[i];
++        if (!(fabs(got - want) <= tolerance * (1.0 + fabs(want)))) {
++            fprintf(stderr, "qwen35 test: %s[%llu] got %.9g want %.9g\n", what,
++                    (unsigned long long)i, got, want);
++            free(actual);
++            exit(1);
++        }
++    }
++    free(actual);
++}
+diff --git a/tests/qwen35_cuda_test.h b/tests/qwen35_cuda_test.h
+new file mode 100644
+index 00000000..d51672cd
+--- /dev/null
++++ b/tests/qwen35_cuda_test.h
+@@ -0,0 +1,34 @@
++#ifndef QWEN35_CUDA_TEST_H
++#define QWEN35_CUDA_TEST_H
++
++/* Shared helpers for the dense qwen35 CUDA test programs. Each test allocates
++ * its weights in an arena, binds the arena as the model map, uploads
++ * activations and compares device output against its own reference. */
++
++#include "ds4_gpu.h"
++
++#include <stdint.h>
++
++typedef struct {
++    unsigned char *base;
++    uint64_t size;
++    uint64_t used;
++} q35_arena;
++
++void q35_init(void);
++void q35_cleanup(void);
++void q35_require(int condition, const char *what);
++void *q35_alloc(uint64_t bytes);
++uint32_t q35_random(void);
++float q35_random_uniform(void);
++
++void q35_arena_init(q35_arena *arena, uint64_t size);
++uint64_t q35_arena_add(q35_arena *arena, const void *data, uint64_t bytes);
++void q35_arena_bind(const q35_arena *arena);
++void q35_arena_free(q35_arena *arena);
++
++ds4_gpu_tensor *q35_upload(const float *data, uint64_t count);
++void q35_check_tensor(const char *what, const ds4_gpu_tensor *tensor,
++                      const double *expect, uint64_t count, double tolerance);
++
++#endif
+diff --git a/tests/test_qwen35_cuda_quant.c b/tests/test_qwen35_cuda_quant.c
+new file mode 100644
+index 00000000..e05ec63d
+--- /dev/null
++++ b/tests/test_qwen35_cuda_quant.c
+@@ -0,0 +1,173 @@
++#define _POSIX_C_SOURCE 200809L
++#include "qwen35_cuda_test.h"
++
++#include <math.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++/* Dense qwen35 uses Q6_K for the output head and for two tensors in every
++ * layer, so the shared Qwen CUDA path must decode it in all four dispatch
++ * layers: matvec (T <= 8), tensor-core and plain matrix (9 <= T < 32) and the
++ * cuBLAS unpack path (T >= 32). This test encodes weights with its own
++ * arithmetic and decodes them again with its own reader; it never calls the
++ * kernel helper it is checking. */
++
++#define Q6K_BLOCK 210u
++#define Q6K_QUANT 256u
++
++/* Half-precision values the encoder uses, as raw bits: 2^-10, 2^-8, 2^-12. */
++static const uint16_t q6k_d[] = { 0x1400u, 0x1c00u, 0x0c00u };
++
++static float half_to_float(uint16_t h) {
++    const uint32_t sign = (uint32_t)(h & 0x8000u) << 16;
++    uint32_t exp = (h >> 10) & 0x1fu, man = h & 0x3ffu, bits;
++    if (exp == 0) {
++        if (man == 0) {
++            bits = sign;
++        } else {
++            exp = 127u - 15u + 1u;
++            while ((man & 0x400u) == 0) {
++                man <<= 1;
++                exp--;
++            }
++            man &= 0x3ffu;
++            bits = sign | (exp << 23) | (man << 13);
++        }
++    } else if (exp == 31) {
++        bits = sign | 0x7f800000u | (man << 13);
++    } else {
++        bits = sign | ((exp + 127u - 15u) << 23) | (man << 13);
++    }
++    float f;
++    memcpy(&f, &bits, sizeof(f));
++    return f;
++}
++
++/* Block layout: 128 low nibbles, 128 high 2-bit parts at byte 128, sixteen
++ * int8 scales at byte 192, fp16 d at byte 208. Value j is
++ * d * scale(j / 16) * ((low | high << 4) - 32). */
++static void q6k_encode(unsigned char *block, const uint8_t *q, int8_t scale, uint16_t d) {
++    memset(block, 0, Q6K_BLOCK);
++    for (unsigned j = 0; j < Q6K_QUANT; j++) {
++        const unsigned half = j / 128u, part = (j % 128u) / 32u, lane = j % 32u;
++        const unsigned lo = q[j] & 15u, hi = (q[j] >> 4) & 3u;
++        block[half * 64u + (part & 1u) * 32u + lane] |= (unsigned char)(lo << (4u * (part / 2u)));
++        block[128u + half * 32u + lane] |= (unsigned char)(hi << (2u * part));
++        ((int8_t *)block)[192u + j / 16u] = scale;
++    }
++    memcpy(block + 208, &d, sizeof(d));
++}
++
++static double q6k_value(const unsigned char *row, unsigned k) {
++    const unsigned char *block = row + (size_t)(k / Q6K_QUANT) * Q6K_BLOCK;
++    const unsigned j = k % Q6K_QUANT;
++    const unsigned half = j / 128u, part = (j % 128u) / 32u, lane = j % 32u;
++    const unsigned lo = (block[half * 64u + (part & 1u) * 32u + lane] >> (4u * (part / 2u))) & 15u;
++    const unsigned hi = (block[128u + half * 32u + lane] >> (2u * part)) & 3u;
++    const int q = (int)(lo | (hi << 4)) - 32;
++    const int scale = ((const int8_t *)block)[192u + j / 16u];
++    uint16_t d;
++    memcpy(&d, block + 208, sizeof(d));
++    return (double)half_to_float(d) * (double)scale * (double)q;
++}
++
++static void q6k_case(uint32_t K, uint32_t M, uint32_t T) {
++    q35_require(K % Q6K_QUANT == 0, "K must be a multiple of 256");
++    const uint64_t blocks = K / Q6K_QUANT;
++    const uint64_t row_bytes = blocks * Q6K_BLOCK;
++    const uint64_t weight_bytes = row_bytes * M;
++
++    unsigned char *weights = q35_alloc(weight_bytes);
++    for (uint32_t m = 0; m < M; m++) {
++        for (uint64_t b = 0; b < blocks; b++) {
++            uint8_t q[Q6K_QUANT];
++            for (unsigned j = 0; j < Q6K_QUANT; j++) q[j] = (uint8_t)(q35_random() & 63u);
++            const int8_t scale = (int8_t)(1u + q35_random() % 7u);
++            q6k_encode(weights + m * row_bytes + b * Q6K_BLOCK, q, scale,
++                       q6k_d[q35_random() % 3u]);
++        }
++    }
++
++    q35_arena arena;
++    q35_arena_init(&arena, weight_bytes);
++    const uint64_t off = q35_arena_add(&arena, weights, weight_bytes);
++    q35_arena_bind(&arena);
++    free(weights);
++
++    float *x = q35_alloc((uint64_t)T * K * sizeof(float));
++    for (uint64_t i = 0; i < (uint64_t)T * K; i++) x[i] = q35_random_uniform();
++
++    double *expect = q35_alloc((uint64_t)T * M * sizeof(double));
++    for (uint32_t t = 0; t < T; t++) {
++        for (uint32_t m = 0; m < M; m++) {
++            double acc = 0;
++            for (uint32_t k = 0; k < K; k++)
++                acc += (double)x[(uint64_t)t * K + k] *
++                       q6k_value(arena.base + off + m * row_bytes, k);
++            expect[(uint64_t)t * M + m] = acc;
++        }
++    }
++
++    ds4_gpu_tensor *xt = q35_upload(x, (uint64_t)T * K);
++    ds4_gpu_tensor *out = ds4_gpu_tensor_alloc((uint64_t)T * M * sizeof(float));
++    q35_require(out != NULL, "output tensor");
++    q35_require(ds4_gpu_qwen4_dense_mm_tensor(out, xt, arena.base, arena.size, off, 14, T, K, M),
++                "Q6_K dense mm");
++    char what[96];
++    snprintf(what, sizeof(what), "Q6_K K=%u M=%u T=%u", K, M, T);
++    q35_check_tensor(what, out, expect, (uint64_t)T * M, 5e-5);
++
++    ds4_gpu_tensor_free(out);
++    ds4_gpu_tensor_free(xt);
++    free(expect);
++    free(x);
++    q35_arena_free(&arena);
++}
++
++static void q6k_refusals(void) {
++    q35_arena arena;
++    q35_arena_init(&arena, 4096);
++    q35_arena_bind(&arena);
++
++    float x[4] = { 1, 2, 3, 4 };
++    ds4_gpu_tensor *xt = q35_upload(x, 4);
++    ds4_gpu_tensor *out = ds4_gpu_tensor_alloc(64);
++    q35_require(out != NULL, "refusal output tensor");
++
++    /* K is not a multiple of 256, so no valid row stride exists. */
++    q35_require(!ds4_gpu_qwen4_dense_mm_tensor(out, xt, arena.base, arena.size, 0, 14, 1, 384, 1),
++                "Q6_K must refuse K=384");
++    /* The output tensor is one byte short of T*M floats. */
++    q35_require(!ds4_gpu_qwen4_dense_mm_tensor(out, xt, arena.base, arena.size, 0, 14, 1, 256, 17),
++                "Q6_K must refuse a short output view");
++
++    ds4_gpu_tensor_free(out);
++    ds4_gpu_tensor_free(xt);
++    q35_arena_free(&arena);
++}
++
++int main(void) {
++    q35_init();
++    const uint32_t ks[] = { 256, 512 }, ms[] = { 1, 4 }, ts[] = { 1, 8, 9, 17, 32, 33 };
++    for (unsigned a = 0; a < sizeof(ks) / sizeof(ks[0]); a++)
++        for (unsigned b = 0; b < sizeof(ms) / sizeof(ms[0]); b++)
++            for (unsigned c = 0; c < sizeof(ts) / sizeof(ts[0]); c++)
++                q6k_case(ks[a], ms[b], ts[c]);
++
++    /* Force the tensor-core layer off so the plain matrix kernel runs; the
++     * cuBLAS path has no disable knob, so T >= 32 always exercises unpack. */
++    setenv("DS4_CUDA_NO_TF32", "1", 1);
++    for (unsigned a = 0; a < sizeof(ks) / sizeof(ks[0]); a++)
++        for (unsigned b = 0; b < sizeof(ms) / sizeof(ms[0]); b++) {
++            q6k_case(ks[a], ms[b], 9);
++            q6k_case(ks[a], ms[b], 17);
++        }
++    unsetenv("DS4_CUDA_NO_TF32");
++
++    q6k_refusals();
++    q35_cleanup();
++    printf("all qwen35 CUDA quant tests passed\n");
++    return 0;
++}

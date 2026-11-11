@@ -1,0 +1,458 @@
+From 3aa53c8f720993392d21dd9610b282882d1402f6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Wed, 11 Nov 2026 11:56:27 +0200
+Subject: [PATCH 12/13] qwen35: reach the dense graph on CUDA
+
+Restructure the single #if defined(__APPLE__) block that wrapped the whole
+qwen35 graph so the neutral parts compile on every GPU build:
+
+- qwen35_graph_weights_supported loses its non-Apple refusal and validates the
+  layout on both backends.
+- qwen4_graph_linear dispatches the gated output norm on the model, not on the
+  OS.
+- qwen35_graph_attention keeps preparation shared and guards only the verify
+  selection, which needs the split-key tables.
+- qwen35_graph_stage_inputs and qwen35_graph_forward_tokens are neutral; the
+  forward guards its verify probe, the two set_verify_rows calls and the DFlash
+  capture begin/capture/end calls, all of which resolve only in ds4_metal.m.
+- Block A wraps the verify helpers, Block B the capture helpers, Block C
+  verify, commit and the drafter. qwen35_dflash_alloc joins them: its single
+  caller is the Metal session setup.
+- qwen4_graph_forward_tokens dispatches to the qwen35 graph on both backends.
+
+tests/test_qwen35_host.c includes ../ds4.c and checks the gate with no device
+and no model: a dense layout is accepted and prints no verdict, Q6_K output and
+per-layer tensors are accepted at block-aligned widths, Q5_K, a Q6_K token
+embedding, a width below one block and mismatched alpha/beta are refused. The
+link is the second half of the check: any neutral function still calling a
+Metal-only symbol fails it.
+
+Not in this commit: the numerical oracle of Step 6, so nothing yet proves the
+graph computes the right thing, only that it is reachable and gated.
+
+Upstream: not offered, fork only
+Retire-when: dense qwen35 runs on CUDA upstream
+Carried-commits: none (authored here)
+---
+ .gitignore               |   1 +
+ Makefile                 |  14 +++
+ ds4.c                    |  51 ++++++++---
+ tests/test_qwen35_host.c | 185 +++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 238 insertions(+), 13 deletions(-)
+ create mode 100644 tests/test_qwen35_host.c
+
+diff --git a/.gitignore b/.gitignore
+index f47da096..e09d0a0d 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -120,3 +120,4 @@ __pycache__/
+ /tests/test_qwen35_cuda_quant
+ /tests/test_qwen35_cuda_recurrent
+ /tests/test_qwen35_cuda_attention
++/tests/test_qwen35_host
+diff --git a/Makefile b/Makefile
+index 306ec205..7ad37963 100644
+--- a/Makefile
++++ b/Makefile
+@@ -782,6 +782,20 @@ test-qwen35-cuda-attention: tests/test_qwen35_cuda_attention
+ 	./tests/test_qwen35_cuda_attention
+ endif
+ 
++tests/test_qwen35_host.o: tests/test_qwen35_host.c ds4.c ds4_gpu.h
++	$(CC) $(CFLAGS) -D_GNU_SOURCE -I. -c -o $@ $<
++
++tests/test_qwen35_host: tests/test_qwen35_host.o $(filter-out ds4.o,$(CORE_OBJS))
++ifeq ($(UNAME_S),Darwin)
++	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -o $@ $^ $(METAL_LDLIBS)
++else
++	$(DS4_LINK) -o $@ $^ $(DS4_LINK_LIBS)
++endif
++
++.PHONY: test-qwen35-host
++test-qwen35-host: tests/test_qwen35_host
++	./tests/test_qwen35_host
++
+ ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+ 	$(CC) $(CFLAGS) -c -o $@ ds4.c
+ 
+diff --git a/ds4.c b/ds4.c
+index 653867b5..8ec92ccf 100644
+--- a/ds4.c
++++ b/ds4.c
+@@ -59440,11 +59440,6 @@ static bool qwen35_graph_dense_ok(const ds4_tensor *t) {
+ }
+ 
+ static bool qwen35_graph_weights_supported(const ds4_weights *w) {
+-#if !defined(__APPLE__)
+-    (void)w;
+-    fprintf(stderr, "ds4: dense qwen35 runs on the Metal graph only\n");
+-    return false;
+-#else
+     if (!qwen35_graph_dense_ok(w->token_embd) || !qwen35_graph_dense_ok(w->output) || !w->output_norm) {
+         fprintf(stderr, "ds4: qwen35 GPU graph: unsupported embedding or output head type\n");
+         return false;
+@@ -59473,7 +59468,6 @@ static bool qwen35_graph_weights_supported(const ds4_weights *w) {
+         }
+     }
+     return true;
+-#endif
+ }
+ 
+ /* The Metal graph runs a subset of what the loader accepts. */
+@@ -59580,6 +59574,7 @@ static void qwen35_dflash_free(ds4_qwen35_dflash *d) {
+     free(d);
+ }
+ 
++#if defined(__APPLE__)
+ /* The drafter state of a session whose engine holds a drafter: the capture
+  * ring (200 MiB at the 27B's width and five taps), the K/V rings (40 MiB),
+  * the injection's sub-batch buffers and one draft block's activations. */
+@@ -59622,6 +59617,7 @@ static ds4_qwen35_dflash *qwen35_dflash_alloc(const ds4_dflash_weights *dw, cons
+     }
+     return d;
+ }
++#endif
+ 
+ static void qwen4_graph_free(ds4_qwen4_gpu_graph *g) {
+     if (!g) return;
+@@ -60418,13 +60414,10 @@ static bool qwen4_graph_linear(ds4_qwen4_gpu_graph *g, const ds4_model *m, const
+                                            g->snap_after_first ? g->snap_lin_state[il] : NULL, 0u,
+                                            g->snap_after_second ? g->snap2_lin_state[il] : NULL, 1u) != 0;
+     }
+-#if defined(__APPLE__)
+     if (ok && ds4_model_is_qwen35()) {
+         ok = ds4_gpu_qwen35_gdn_out_tensor(g->lin_o, g->z, m->map, m->size, l->lin_norm->abs_offset, T,
+                                            DS4_N_LIN_V_HEAD, DS4_N_LIN_HEAD_DIM, DS4_RMS_EPS) != 0;
+-    } else
+-#endif
+-    if (ok) {
++    } else if (ok) {
+         ok = ds4_gpu_qwen4_gdn_out_tensor(g->lin_o, g->z, m->map, m->size, l->lin_norm->abs_offset, T,
+                                           DS4_N_LIN_V_HEAD, DS4_N_LIN_HEAD_DIM, DS4_RMS_EPS) != 0;
+     }
+@@ -60753,7 +60746,6 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
+     return ds4_gpu_tensor_write(g->ple_emb, 0, row, (uint64_t)T * E * sizeof(float)) != 0;
+ }
+ 
+-#if defined(__APPLE__)
+ /* Dense qwen35 gated GQA attention over positions 0..pos: [q|gate] per head,
+  * RMS-normed q and k with partial NeoX rope, f16 K/V, softmax(qk/sqrt(D))v
+  * times sigmoid(gate), then the output projection.  attn_slot numbers the
+@@ -60781,6 +60773,7 @@ static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, c
+                                           pos0, g->ctx_cap, DS4_ROPE_FREQ_BASE, DS4_RMS_EPS))) {
+         return false;
+     }
++#if defined(__APPLE__)
+     const bool shared = g->qwen35_verify_now == DS4_QWEN35_VERIFY_MMA && DS4_N_HEAD_DIM == 256u &&
+                         DS4_N_HEAD == 6u * DS4_N_HEAD_KV && !getenv("DS4_QWEN35_VERIFY_ATTN_PER_ROW");
+     const bool attn = shared
+@@ -60798,9 +60791,21 @@ static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, c
+         : ds4_gpu_qwen4_attn_decode_tensor(g->attn_o, g->q, g->gate, g->layer_k_cache[il], g->layer_v_cache[il],
+                                            NULL, NULL, T <= 2u ? g->attn_part : NULL, T,
+                                            DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM, pos0, false, 0u, scale) != 0;
++#else
++    /* The verify modes and their split-key tables are Metal-only, so a dense
++     * forward chooses between prompt and decode attention only. */
++    (void)attn_slot;
++    const bool attn = (T > 8u
++        ? ds4_gpu_qwen35_attn_fa_tensor(g->attn_o, g->q, g->gate, g->layer_k_cache[il], g->layer_v_cache[il],
++                                        T, DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM, pos0, scale)
++        : ds4_gpu_qwen4_attn_decode_tensor(g->attn_o, g->q, g->gate, g->layer_k_cache[il], g->layer_v_cache[il],
++                                           NULL, NULL, T <= 2u ? g->attn_part : NULL, T,
++                                           DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM, pos0, false, 0u, scale)) != 0;
++#endif
+     return attn && qwen4_graph_gemv(g, g->blk, m, l->attn_output, g->attn_o, T);
+ }
+ 
++#if defined(__APPLE__)
+ /* The verify mode of one qwen35 forward.  The session's DFlash mode MMA
+  * takes every forward of 1..8 rows.  Off, the diagnostics decide (read per
+  * call, as the attention split keys are, so a tool can switch them per
+@@ -60869,6 +60874,8 @@ static bool qwen35_graph_verify_alloc(ds4_qwen4_gpu_graph *g) {
+     return true;
+ }
+ 
++#endif
++
+ /* Embedding rows dequantized on the host into R, and text rope positions. */
+ static bool qwen35_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds4_weights *w,
+                                       const int *tokens, uint32_t T) {
+@@ -60882,6 +60889,7 @@ static bool qwen35_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m
+            ds4_gpu_tensor_write(g->pos3, (uint64_t)g->pos * 16u, g->host_pos3, (uint64_t)T * 16u);
+ }
+ 
++#if defined(__APPLE__)
+ /* After layer il's FFN residual add, R holds the input of layer il + 1 for
+  * every row: llama.cpp's t_layer_inp[il + 1], the drafter's tap when il + 1
+  * is one of its target layers.  Rows at positions below cap_from are not
+@@ -60978,6 +60986,8 @@ static void qwen35_dflash_capture_end(ds4_qwen35_dflash *d, uint32_t pos0, uint3
+     if (committed) d->feat_end = pos0 + T;
+ }
+ 
++#endif
++
+ /* Dense qwen35 forward, the layer order of llama.cpp's qwen35 graph:
+  *   R += mixer(rmsnorm(R) * attn_norm)
+  *   R += down(silu(gate(x)) * up(x)),  x = rmsnorm(R) * post_attention_norm
+@@ -60988,16 +60998,26 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+                                         const int *tokens, uint32_t T, float *logits_out, bool all_rows) {
+     const uint32_t pos0 = g->pos, E = DS4_N_EMBD, F = DS4_N_FF_DENSE;
+     const uint32_t n_trunk = DS4_N_LAYER - DS4_N_NEXTN_PREDICT;
++#if defined(__APPLE__)
+     const uint32_t verify = qwen35_graph_verify_mode(g, T);
+     if (verify != DS4_QWEN35_VERIFY_OFF && !qwen35_graph_verify_alloc(g)) return false;
++#else
++    /* Verify mode and the DFlash capture are Metal-only; a CUDA forward is the
++     * ordinary dense decode and prefill. */
++    const uint32_t verify = DS4_QWEN35_VERIFY_OFF;
++#endif
+     if (all_rows && T > g->n_logit_rows) return false;
+     if (!qwen35_graph_stage_inputs(g, m, w, tokens, T)) return false;
+     if (!glm_graph_begin_commands_if_needed()) return false;
++#if defined(__APPLE__)
+     qwen35_dflash_capture_begin(g->dflash, pos0, T);
++#endif
+     /* Under a verify every kernel below runs in the mode; both switches are
+      * cleared before anything can return. */
+     g->qwen35_verify_now = verify;
++#if defined(__APPLE__)
+     ds4_gpu_qwen35_set_verify_rows(verify != DS4_QWEN35_VERIFY_OFF ? T : 0u);
++#endif
+     bool ok = true;
+     uint32_t attn_slot = 0;
+     for (uint32_t il = 0; il < n_trunk && ok; il++) {
+@@ -61020,7 +61040,9 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+         }
+         if (ok) ok = qwen4_graph_apply_steering_ffn(g, il, T);
+         if (ok) ok = ds4_gpu_add_tensor(g->R, g->R, g->blk, T * E) != 0;
++#if defined(__APPLE__)
+         if (ok && g->dflash) ok = qwen35_dflash_capture(g, il, pos0, T);
++#endif
+         if (ok && il == 1u && n_trunk > 2u) ok = ds4_gpu_flush_commands() != 0;
+     }
+     /* A verify computes every row's logits; off computes the last row's, or
+@@ -61035,7 +61057,9 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+              qwen4_graph_gemv(g, g->logits, m, w->output, g->mixed, rows);
+         ds4_gpu_tensor_free(src);
+     }
++#if defined(__APPLE__)
+     ds4_gpu_qwen35_set_verify_rows(0u);
++#endif
+     g->qwen35_verify_now = DS4_QWEN35_VERIFY_OFF;
+     if (!ds4_gpu_end_commands()) ok = false;
+     if (ok && verify != DS4_QWEN35_VERIFY_OFF) {
+@@ -61050,10 +61074,13 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+         ok = ds4_gpu_tensor_read(g->logits, 0, logits_out, (uint64_t)rows * DS4_N_VOCAB * sizeof(float)) != 0;
+     }
+     if (ok && !g->qwen35_no_write_back) g->pos += T;
++#if defined(__APPLE__)
+     if (ok) qwen35_dflash_capture_end(g->dflash, pos0, T, !g->qwen35_no_write_back);
++#endif
+     return ok;
+ }
+ 
++#if defined(__APPLE__)
+ /* A DFlash verify of T <= 8 rows at g->pos in the graph's mode (MMA):
+  * every row's logits land in qwen35_verify_host; the GDN layers write back
+  * neither conv history nor state and keep their rows for qwen35_graph_commit;
+@@ -61228,9 +61255,7 @@ static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *
+         }
+     }
+     /* qwen35 checks all_rows itself, after a verify has grown the logit rows */
+-#if defined(__APPLE__)
+     if (ds4_model_is_qwen35()) return qwen35_graph_forward_tokens(g, m, w, tokens, T, logits_out, all_rows);
+-#endif
+     if (all_rows && T > g->n_logit_rows) return false;
+     const uint32_t pos0 = g->pos;
+     const uint32_t n_trunk = DS4_N_LAYER - DS4_N_NEXTN_PREDICT;
+diff --git a/tests/test_qwen35_host.c b/tests/test_qwen35_host.c
+new file mode 100644
+index 00000000..d79e99f0
+--- /dev/null
++++ b/tests/test_qwen35_host.c
+@@ -0,0 +1,185 @@
++/* Host-side gate checks for the dense qwen35 graph: no device, no model, no
++ * weights file. ../ds4.c is included so its static predicates are reachable,
++ * the pattern tests/test_deepseek41_graph.c and tests/test_qwen4_ngram_state.c
++ * already use. The link is the other half of the check: a neutral function that
++ * still called a Metal-only symbol would fail to link here. */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "../ds4.c"
++
++static ds4_tensor g_embd, g_out, g_out_norm;
++static ds4_tensor g_dense[2][12];
++static ds4_tensor g_alpha[2], g_beta[2];
++
++static ds4_tensor *shape_tensor(ds4_tensor *t, uint32_t type, uint64_t rows, uint64_t cols) {
++    memset(t, 0, sizeof(*t));
++    t->type = type;
++    t->ndim = 2;
++    t->dim[0] = cols;
++    t->dim[1] = rows;
++    t->elements = rows * cols;
++    t->bytes = t->elements * 2u;
++    return t;
++}
++
++/* The dims the graph reads come from g_ds4_shape, so a two-layer dense qwen35
++ * needs no GGUF: layer 0 is linear and layer 1 is full attention because the
++ * interval is 2. Interval 4 would make both linear and leave the attention
++ * gate untested. */
++static void shape_dense_qwen35(void) {
++    g_ds4_shape = DS4_SHAPE_QWEN35;
++    g_ds4_shape.n_layer = 2;
++    g_ds4_shape.n_embd = 512;
++    g_ds4_shape.n_vocab = 32;
++    g_ds4_shape.n_head = 2;
++    g_ds4_shape.n_head_kv = 1;
++    g_ds4_shape.n_head_dim = 256;
++    g_ds4_shape.n_value_dim = 256;
++    g_ds4_shape.n_rot = 64;
++    g_ds4_shape.n_ff_dense = 512;
++    g_ds4_shape.n_full_attn_interval = 2;
++    g_ds4_shape.n_nextn_predict = 0;
++    g_ds4_shape.n_lin_k_head = 2;
++    g_ds4_shape.n_lin_v_head = 2;
++    g_ds4_shape.n_lin_head_dim = 128;
++    g_ds4_shape.n_lin_conv = 4;
++}
++
++static void build_weights(ds4_weights *w) {
++    memset(w, 0, sizeof(*w));
++    w->token_embd = shape_tensor(&g_embd, DS4_TENSOR_F32, 32, 512);
++    /* The output head contracts over the embedding width, so that is dim[0]. */
++    w->output = shape_tensor(&g_out, DS4_TENSOR_F32, 32, 512);
++    w->output_norm = shape_tensor(&g_out_norm, DS4_TENSOR_F32, 1, 512);
++    for (unsigned il = 0; il < 2; il++) {
++        ds4_layer_weights *l = &w->layer[il];
++        for (unsigned i = 0; i < 12; i++) shape_tensor(&g_dense[il][i], DS4_TENSOR_F32, 512, 512);
++        shape_tensor(&g_alpha[il], DS4_TENSOR_F32, 512, 16);
++        shape_tensor(&g_beta[il], DS4_TENSOR_F32, 512, 16);
++        l->lin_qkv = &g_dense[il][0];
++        l->lin_gate = &g_dense[il][1];
++        l->lin_beta = &g_beta[il];
++        l->lin_alpha = &g_alpha[il];
++        l->lin_out = &g_dense[il][4];
++        l->attn_q = &g_dense[il][5];
++        l->attn_k = &g_dense[il][6];
++        l->attn_v = &g_dense[il][7];
++        l->attn_output = &g_dense[il][8];
++        l->ffn_gate = &g_dense[il][9];
++        l->ffn_up = &g_dense[il][10];
++        l->ffn_down = &g_dense[il][11];
++        l->attn_norm = &g_dense[il][0];
++        l->ffn_norm = &g_dense[il][1];
++        l->lin_norm = &g_dense[il][2];
++        l->lin_conv = &g_dense[il][3];
++        l->lin_a = &g_dense[il][5];
++        l->lin_dt_bias = &g_dense[il][6];
++    }
++}
++
++/* Run the verdict with stderr diverted, so a test can tell "refused" from
++ * "refused while still claiming qwen35 needs Metal". */
++static bool verdict(const ds4_weights *w, char *message, size_t capacity) {
++    char path[] = "/tmp/qwen35-host-XXXXXX";
++    const int fd = mkstemp(path);
++    if (fd < 0) {
++        perror("mkstemp");
++        exit(1);
++    }
++    fflush(stderr);
++    const int saved = dup(STDERR_FILENO);
++    if (saved < 0 || dup2(fd, STDERR_FILENO) < 0) {
++        perror("dup");
++        exit(1);
++    }
++    const bool ok = qwen35_graph_weights_supported(w);
++    fflush(stderr);
++    if (dup2(saved, STDERR_FILENO) < 0) {
++        perror("dup2");
++        exit(1);
++    }
++    close(saved);
++    if (capacity) message[0] = '\0';
++    if (capacity) {
++        FILE *in = fdopen(fd, "r");
++        if (!in) {
++            perror("fdopen");
++            exit(1);
++        }
++        size_t n = fread(message, 1, capacity - 1, in);
++        message[n] = '\0';
++        fclose(in);
++    } else {
++        close(fd);
++    }
++    unlink(path);
++    return ok;
++}
++
++static void expect(bool got, const char *what) {
++    if (!got) {
++        fprintf(stderr, "qwen35 host test: %s\n", what);
++        exit(1);
++    }
++}
++
++int main(void) {
++    shape_dense_qwen35();
++    ds4_weights w;
++    build_weights(&w);
++
++    char message[512];
++    expect(verdict(&w, message, sizeof(message)), "a dense layout is accepted on this backend");
++    if (strstr(message, "runs on the Metal graph only")) {
++        fprintf(stderr, "qwen35 host test: %s", message);
++        return 1;
++    }
++
++    /* Q6_K dense weights are in the supported set: the output head and two
++     * per-layer tensors, at widths the row stride accepts. */
++    g_out.type = DS4_TENSOR_Q6_K;
++    expect(verdict(&w, NULL, 0), "Q6_K output head");
++    g_dense[1][11].type = DS4_TENSOR_Q6_K;
++    expect(verdict(&w, NULL, 0), "Q6_K ffn_down");
++    g_dense[0][0].type = DS4_TENSOR_Q6_K;
++    expect(verdict(&w, NULL, 0), "Q6_K lin_qkv");
++    g_dense[0][0].type = DS4_TENSOR_F32;
++    g_dense[1][11].type = DS4_TENSOR_F32;
++    g_out.type = DS4_TENSOR_F32;
++
++    /* Q5_K stays out of the dense set while D1 holds. */
++    g_dense[0][11].type = DS4_TENSOR_Q5_K;
++    expect(!verdict(&w, NULL, 0), "Q5_K refused");
++    g_dense[0][11].type = DS4_TENSOR_F32;
++
++    /* A Q6_K embedding is refused by name, and a K-quant narrower than one
++     * block cannot be read by the strided kernels. */
++    g_embd.type = DS4_TENSOR_Q6_K;
++    expect(!verdict(&w, NULL, 0), "Q6_K token embedding refused");
++    g_embd.type = DS4_TENSOR_F32;
++    g_dense[1][9].type = DS4_TENSOR_Q6_K;
++    g_dense[1][9].dim[0] = 128;
++    expect(!verdict(&w, NULL, 0), "Q6_K width below one block refused");
++    g_dense[1][9].dim[0] = 512;
++    g_dense[1][9].type = DS4_TENSOR_F32;
++
++    /* The fused decode front reads alpha and beta through one dot, so the two
++     * must share a type and neither may be Q6_K. Layer 0 is the linear one. */
++    g_beta[0].type = DS4_TENSOR_Q8_0;
++    expect(!verdict(&w, NULL, 0), "mismatched alpha/beta types refused");
++    g_beta[0].type = DS4_TENSOR_F32;
++    expect(verdict(&w, NULL, 0), "matching alpha/beta types accepted");
++
++#if defined(__APPLE__)
++    /* The verify and DFlash helpers are Apple-only by design: on a CUDA build
++     * this binary links only because no neutral function calls them. */
++    (void)&qwen35_graph_verify_mode;
++    (void)&qwen35_graph_verify_alloc;
++#endif
++
++    printf("all qwen35 host gate tests passed\n");
++    return 0;
++}

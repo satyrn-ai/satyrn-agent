@@ -1,0 +1,655 @@
+From 411aab8bc5249e60206ece62d53041f843ce7a39 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Wed, 11 Nov 2026 10:38:08 +0200
+Subject: [PATCH 11/13] qwen35: dense attention prep and causal attention on
+ CUDA
+
+attn_prep drives the shared prep kernel with qwen35's rope settings and the
+indexer tensors null: it RMS-norms and partially rotates q and k, copies the
+raw gate out of the q/gate projection's second half and writes half K/V cache
+rows. attn_fa delegates to ds4_gpu_qwen4_attn_decode_tensor with the
+selection tensors null and sparse false, which is the dense causal path; there
+is no causal argument to get wrong.
+
+The test builds both from the primitive definitions: norm, partial NeoX rope
+at pos0+t, half caches, causal softmax over keys 0..pos0+t, sigmoid(gate). It
+sweeps T in {1,7,8,9,31,32,33} at pos0 0 and 13, checks the whole batch,
+split rows and prepare-twice schedules, runs T = 32 with
+DS4_QWEN4_NO_ATTN_MM set so both decode routes are covered, and checks six
+prep and five attention refusals leave the output untouched.
+
+Silencing the rope makes the q check fail and passing sparse=true makes the
+attention dispatch refuse, so the test discriminates both.
+
+The harness gained half conversions and raw uploads; the quant test now uses
+the shared half reader.
+
+Upstream: not offered, fork only
+Retire-when: dense qwen35 runs on CUDA upstream
+Carried-commits: none (authored here)
+---
+ .gitignore                         |   1 +
+ Makefile                           |  10 +
+ ds4_qwen35_cuda.cuh                |  44 ++++
+ tests/qwen35_cuda_test.c           |  70 ++++++
+ tests/qwen35_cuda_test.h           |   8 +
+ tests/test_qwen35_cuda_attention.c | 381 +++++++++++++++++++++++++++++
+ tests/test_qwen35_cuda_quant.c     |  27 +-
+ 7 files changed, 515 insertions(+), 26 deletions(-)
+ create mode 100644 tests/test_qwen35_cuda_attention.c
+
+diff --git a/.gitignore b/.gitignore
+index 2f7d7bad..f47da096 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -119,3 +119,4 @@ __pycache__/
+ /tests/test_q8_prefill_variants
+ /tests/test_qwen35_cuda_quant
+ /tests/test_qwen35_cuda_recurrent
++/tests/test_qwen35_cuda_attention
+diff --git a/Makefile b/Makefile
+index 563b9b73..306ec205 100644
+--- a/Makefile
++++ b/Makefile
+@@ -770,6 +770,16 @@ tests/test_qwen35_cuda_recurrent: tests/test_qwen35_cuda_recurrent.o tests/qwen3
+ .PHONY: test-qwen35-cuda-recurrent
+ test-qwen35-cuda-recurrent: tests/test_qwen35_cuda_recurrent
+ 	./tests/test_qwen35_cuda_recurrent
++
++tests/test_qwen35_cuda_attention.o: tests/test_qwen35_cuda_attention.c tests/qwen35_cuda_test.h ds4_gpu.h
++	$(CC) $(QUALITY_CFLAGS) -D_GNU_SOURCE -I. -c -o $@ $<
++
++tests/test_qwen35_cuda_attention: tests/test_qwen35_cuda_attention.o tests/qwen35_cuda_test.o ds4_cuda.o ds4_image.o $(MMQ_OBJS)
++	$(DS4_LINK) -o $@ $^ $(DS4_LINK_LIBS)
++
++.PHONY: test-qwen35-cuda-attention
++test-qwen35-cuda-attention: tests/test_qwen35_cuda_attention
++	./tests/test_qwen35_cuda_attention
+ endif
+ 
+ ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+diff --git a/ds4_qwen35_cuda.cuh b/ds4_qwen35_cuda.cuh
+index 3a7af1e6..9b1d35d8 100644
+--- a/ds4_qwen35_cuda.cuh
++++ b/ds4_qwen35_cuda.cuh
+@@ -44,3 +44,47 @@ extern "C" int ds4_gpu_qwen35_gdn_out_tensor(
+         (float *)o->ptr, (const float *)z->ptr, (const float *)w, eps, H, D);
+     return launched();
+ }
++
++extern "C" int ds4_gpu_qwen35_attn_prep_tensor(
++        ds4_gpu_tensor *q, ds4_gpu_tensor *gate, ds4_gpu_tensor *kc, ds4_gpu_tensor *vc,
++        const ds4_gpu_tensor *qg, const ds4_gpu_tensor *kp, const ds4_gpu_tensor *vp,
++        const ds4_gpu_tensor *pos3, const void *map, uint64_t size, uint64_t qo, uint64_t ko,
++        uint32_t T, uint32_t H, uint32_t Hkv, uint32_t D, uint32_t nrot,
++        uint32_t pos0, uint32_t cap, float base, float eps) {
++    using namespace qwen4_cuda;
++    if (!T || !H || !Hkv || H % Hkv || D < 32u || D > 256u || D % 32u || nrot > 64u || nrot > D ||
++        nrot % 2u || (uint64_t)pos0 + T > cap ||
++        !(base > 1.0f && base < 3.402823466e+38f) ||
++        !(eps > 0.0f && eps < 3.402823466e+38f)) return 0;
++    const uint64_t qb = (uint64_t)T * H * D * 4, kb = (uint64_t)T * Hkv * D * 4;
++    const uint64_t cb = (uint64_t)cap * Hkv * D * 2;
++    const char *gq = weight(map, size, qo, (uint64_t)D * 4);
++    const char *gk = weight(map, size, ko, (uint64_t)D * 4);
++    if (!tensor(q, qb) || !tensor(gate, qb) || !tensor(qg, qb * 2) || !tensor(kp, kb) ||
++        !tensor(vp, kb) || !tensor(kc, cb) || !tensor(vc, cb) ||
++        !tensor(pos3, (uint64_t)cap * 16) || !gq || !gk) return 0;
++    /* The shared prep kernel also serves the Qwen4 indexer. Dense qwen35 has no
++     * indexer, so its tensors are null and its head and dim counts are zero. */
++    attn_prep<<<dim3(H + Hkv + 1, T), 32, 0, cuda_decode_stream()>>>(
++        (float *)q->ptr, (float *)gate->ptr, (__half *)kc->ptr, (__half *)vc->ptr,
++        NULL, NULL, (const float *)qg->ptr, (const float *)kp->ptr, (const float *)vp->ptr,
++        NULL, NULL, (const uint32_t *)pos3->ptr, (const float *)gq, (const float *)gk, NULL,
++        H, Hkv, D, 0, 0, pos0, eps, rope(nrot, base));
++    return launched();
++}
++
++extern "C" int ds4_gpu_qwen35_attn_fa_tensor(
++        ds4_gpu_tensor *out, const ds4_gpu_tensor *q, const ds4_gpu_tensor *gate,
++        const ds4_gpu_tensor *kc, const ds4_gpu_tensor *vc,
++        uint32_t T, uint32_t H, uint32_t Hkv, uint32_t D, uint32_t pos0, float scale) {
++    using namespace qwen4_cuda;
++    if (!T || D != 256u || !H || !Hkv || H % Hkv ||
++        !(scale > 0.0f && scale < 3.402823466e+38f)) return 0;
++    const uint64_t qb = (uint64_t)T * H * D * 4, cb = ((uint64_t)pos0 + T) * Hkv * D * 2;
++    if (!tensor(out, qb) || !tensor(q, qb) || !tensor(gate, qb) ||
++        !tensor(kc, cb) || !tensor(vc, cb)) return 0;
++    /* Dense causal attention is the shared entry point's non-sparse path: the
++     * selection tensors are null, sparse is false and the stride is unused. */
++    return ds4_gpu_qwen4_attn_decode_tensor(out, q, gate, kc, vc, NULL, NULL, NULL,
++                                            T, H, Hkv, D, pos0, false, 0u, scale);
++}
+diff --git a/tests/qwen35_cuda_test.c b/tests/qwen35_cuda_test.c
+index 20f39ea9..ac1c0fd6 100644
+--- a/tests/qwen35_cuda_test.c
++++ b/tests/qwen35_cuda_test.c
+@@ -71,6 +71,76 @@ ds4_gpu_tensor *q35_upload(const float *data, uint64_t count) {
+     return t;
+ }
+ 
++float q35_half_to_float(uint16_t h) {
++    const uint32_t sign = (uint32_t)(h & 0x8000u) << 16;
++    uint32_t exp = (h >> 10) & 0x1fu, man = h & 0x3ffu, bits;
++    if (exp == 0) {
++        if (man == 0) {
++            bits = sign;
++        } else {
++            exp = 127u - 15u + 1u;
++            while ((man & 0x400u) == 0) {
++                man <<= 1;
++                exp--;
++            }
++            man &= 0x3ffu;
++            bits = sign | (exp << 23) | (man << 13);
++        }
++    } else if (exp == 31) {
++        bits = sign | 0x7f800000u | (man << 13);
++    } else {
++        bits = sign | ((exp + 127u - 15u) << 23) | (man << 13);
++    }
++    float f;
++    memcpy(&f, &bits, sizeof(f));
++    return f;
++}
++
++uint16_t q35_float_to_half(float f) {
++    uint32_t bits;
++    memcpy(&bits, &f, sizeof(bits));
++    const uint32_t sign = (bits >> 16) & 0x8000u, fexp = (bits >> 23) & 0xffu, man = bits & 0x7fffffu;
++    if (fexp == 0xffu) return (uint16_t)(sign | 0x7c00u | (man ? 0x200u : 0));
++    const int32_t exp = (int32_t)fexp - 127 + 15;
++    if (exp >= 31) return (uint16_t)(sign | 0x7c00u);
++    if (exp <= 0) {
++        if (exp < -10) return (uint16_t)sign;
++        const uint32_t m = man | 0x800000u, shift = (uint32_t)(14 - exp);
++        uint32_t half = m >> shift;
++        const uint32_t rest = m & ((1u << shift) - 1u), halfway = 1u << (shift - 1u);
++        if (rest > halfway || (rest == halfway && (half & 1u))) half++;
++        return (uint16_t)(sign | half);
++    }
++    uint32_t half = sign | ((uint32_t)exp << 10) | (man >> 13);
++    const uint32_t rest = man & 0x1fffu;
++    if (rest > 0x1000u || (rest == 0x1000u && (half & 1u))) half++;
++    return (uint16_t)half;
++}
++
++ds4_gpu_tensor *q35_upload_raw(const void *data, uint64_t bytes) {
++    ds4_gpu_tensor *t = ds4_gpu_tensor_alloc(bytes);
++    q35_require(t != NULL, "ds4_gpu_tensor_alloc");
++    q35_require(ds4_gpu_tensor_write(t, 0, data, bytes), "ds4_gpu_tensor_write");
++    return t;
++}
++
++void q35_check_half_tensor(const char *what, const ds4_gpu_tensor *tensor,
++                           const double *expect, uint64_t count, double tolerance) {
++    const uint64_t bytes = count * sizeof(uint16_t);
++    uint16_t *actual = q35_alloc(bytes ? bytes : sizeof(uint16_t));
++    q35_require(ds4_gpu_tensor_read(tensor, 0, actual, bytes), "ds4_gpu_tensor_read");
++    for (uint64_t i = 0; i < count; i++) {
++        const double want = expect[i], got = (double)q35_half_to_float(actual[i]);
++        if (!(fabs(got - want) <= tolerance * (1.0 + fabs(want)))) {
++            fprintf(stderr, "qwen35 test: %s[%llu] got %.9g want %.9g\n", what,
++                    (unsigned long long)i, got, want);
++            free(actual);
++            exit(1);
++        }
++    }
++    free(actual);
++}
++
+ void q35_check_tensor(const char *what, const ds4_gpu_tensor *tensor,
+                       const double *expect, uint64_t count, double tolerance) {
+     const uint64_t bytes = count * sizeof(float);
+diff --git a/tests/qwen35_cuda_test.h b/tests/qwen35_cuda_test.h
+index d51672cd..3d9407b8 100644
+--- a/tests/qwen35_cuda_test.h
++++ b/tests/qwen35_cuda_test.h
+@@ -28,7 +28,15 @@ void q35_arena_bind(const q35_arena *arena);
+ void q35_arena_free(q35_arena *arena);
+ 
+ ds4_gpu_tensor *q35_upload(const float *data, uint64_t count);
++ds4_gpu_tensor *q35_upload_raw(const void *data, uint64_t bytes);
+ void q35_check_tensor(const char *what, const ds4_gpu_tensor *tensor,
+                       const double *expect, uint64_t count, double tolerance);
++void q35_check_half_tensor(const char *what, const ds4_gpu_tensor *tensor,
++                           const double *expect, uint64_t count, double tolerance);
++
++/* Half conversions, so a test can predict what a kernel wrote to a half
++ * cache without depending on CUDA headers. Both round to nearest even. */
++float q35_half_to_float(uint16_t h);
++uint16_t q35_float_to_half(float f);
+ 
+ #endif
+diff --git a/tests/test_qwen35_cuda_attention.c b/tests/test_qwen35_cuda_attention.c
+new file mode 100644
+index 00000000..0df60c71
+--- /dev/null
++++ b/tests/test_qwen35_cuda_attention.c
+@@ -0,0 +1,381 @@
++#define _POSIX_C_SOURCE 200809L
++#include "qwen35_cuda_test.h"
++
++#include <math.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++/* Dense qwen35 attention. Prep writes the RMS-normed, partially rotated q and
++ * the raw gate, and fills half-precision K/V caches; attention then takes the
++ * dense causal softmax over keys 0..pos0+t and scales by sigmoid(gate). The
++ * reference builds both from the primitive definitions. */
++
++typedef struct {
++    uint32_t T, H, Hkv, D, nrot, pos0, cap;
++    float base, eps;
++} q35_attn_shape;
++
++enum { SCHEDULE_WHOLE, SCHEDULE_PREP_TWICE, SCHEDULE_SPLIT };
++
++static double ref_sigmoid(double x) {
++    return 1.0 / (1.0 + exp(-x));
++}
++
++/* RMS norm with the D-wide gamma, then partial NeoX rope over the first nrot
++ * dims at pos: theta_i = pos * base^(-2i/nrot) rotates the pair
++ * (i, i + nrot/2). With no vision spans every mrope axis carries the same
++ * position, so a single theta applies. */
++static void ref_prep(const float *x, uint32_t D, uint32_t nrot, const double *gamma,
++                     uint32_t pos, float base, float eps, double *out) {
++    double ss = 0;
++    for (uint32_t i = 0; i < D; i++) ss += (double)x[i] * (double)x[i];
++    const double inv = 1.0 / sqrt(ss / (double)D + (double)eps);
++    for (uint32_t i = 0; i < D; i++) out[i] = (double)x[i] * inv * gamma[i];
++    for (uint32_t i = 0; i < nrot / 2; i++) {
++        const double theta = (double)pos * pow((double)base, -2.0 * (double)i / (double)nrot);
++        const double c = cos(theta), s = sin(theta);
++        const double a = out[i], b = out[i + nrot / 2];
++        out[i] = a * c - b * s;
++        out[i + nrot / 2] = a * s + b * c;
++    }
++}
++
++static double half_round(double x) {
++    return (double)q35_half_to_float(q35_float_to_half((float)x));
++}
++
++static void fill_random(float *p, uint64_t n) {
++    for (uint64_t i = 0; i < n; i++) p[i] = q35_random_uniform();
++}
++
++static void prep_call(const q35_attn_shape *s, const q35_arena *arena, uint64_t qo, uint64_t ko,
++                      uint32_t pos0, uint32_t T, ds4_gpu_tensor *q, ds4_gpu_tensor *gate,
++                      ds4_gpu_tensor *kc, ds4_gpu_tensor *vc, ds4_gpu_tensor *qg,
++                      ds4_gpu_tensor *kp, ds4_gpu_tensor *vp, ds4_gpu_tensor *pos3) {
++    q35_require(ds4_gpu_qwen35_attn_prep_tensor(q, gate, kc, vc, qg, kp, vp, pos3,
++                arena->base, arena->size, qo, ko, T, s->H, s->Hkv, s->D, s->nrot, pos0,
++                s->cap, s->base, s->eps), "attn prep dispatch");
++}
++
++static void q35_attn_case(const q35_attn_shape *s, int schedule) {
++    const uint64_t qc = (uint64_t)s->T * s->H * s->D;
++    const uint64_t kvc = (uint64_t)s->T * s->Hkv * s->D;
++    const uint64_t cc = (uint64_t)s->cap * s->Hkv * s->D;
++    const uint32_t gh = s->H / s->Hkv;
++    const double scale = 1.0 / sqrt((double)s->D);
++
++    q35_arena arena;
++    q35_arena_init(&arena, 2ull * s->D * sizeof(float));
++    float *wq = q35_alloc((uint64_t)s->D * sizeof(float));
++    float *wk = q35_alloc((uint64_t)s->D * sizeof(float));
++    double *gq = q35_alloc((uint64_t)s->D * sizeof(double));
++    double *gk = q35_alloc((uint64_t)s->D * sizeof(double));
++    for (uint32_t i = 0; i < s->D; i++) {
++        wq[i] = 0.5f + (float)(q35_random() % 64u) / 32.0f;
++        wk[i] = 0.5f + (float)(q35_random() % 64u) / 32.0f;
++        gq[i] = wq[i];
++        gk[i] = wk[i];
++    }
++    const uint64_t qo = q35_arena_add(&arena, wq, (uint64_t)s->D * sizeof(float));
++    const uint64_t ko = q35_arena_add(&arena, wk, (uint64_t)s->D * sizeof(float));
++    q35_arena_bind(&arena);
++    free(wq);
++    free(wk);
++
++    float *qg = q35_alloc(qc * 2 * sizeof(float));
++    float *kp = q35_alloc(kvc * sizeof(float));
++    float *vp = q35_alloc(kvc * sizeof(float));
++    fill_random(qg, qc * 2);
++    fill_random(kp, kvc);
++    fill_random(vp, kvc);
++
++    uint32_t *pos3 = q35_alloc((uint64_t)s->cap * 16u);
++    for (uint32_t p = 0; p < s->cap; p++) {
++        pos3[p * 4 + 0] = pos3[p * 4 + 1] = pos3[p * 4 + 2] = p;
++        pos3[p * 4 + 3] = 0;
++    }
++
++    ds4_gpu_tensor *tqg = q35_upload(qg, qc * 2);
++    ds4_gpu_tensor *tkp = q35_upload(kp, kvc);
++    ds4_gpu_tensor *tvp = q35_upload(vp, kvc);
++    ds4_gpu_tensor *tpos = q35_upload_raw(pos3, (uint64_t)s->cap * 16u);
++    ds4_gpu_tensor *tq = ds4_gpu_tensor_alloc(qc * sizeof(float));
++    ds4_gpu_tensor *tgate = ds4_gpu_tensor_alloc(qc * sizeof(float));
++    ds4_gpu_tensor *tkc = ds4_gpu_tensor_alloc(cc * sizeof(uint16_t));
++    ds4_gpu_tensor *tvc = ds4_gpu_tensor_alloc(cc * sizeof(uint16_t));
++    ds4_gpu_tensor *tout = ds4_gpu_tensor_alloc(qc * sizeof(float));
++    q35_require(tqg && tkp && tvp && tpos && tq && tgate && tkc && tvc && tout, "attention tensors");
++    /* Rows outside pos0..pos0+T-1 must stay zero, as they do in the graph. */
++    uint16_t *zeros = q35_alloc(cc * sizeof(uint16_t));
++    q35_require(ds4_gpu_tensor_write(tkc, 0, zeros, cc * sizeof(uint16_t)), "zero k cache");
++    q35_require(ds4_gpu_tensor_write(tvc, 0, zeros, cc * sizeof(uint16_t)), "zero v cache");
++    free(zeros);
++
++    if (schedule == SCHEDULE_SPLIT) {
++        const uint32_t half = s->T / 2, rest = s->T - half;
++        const uint64_t qg_row = (uint64_t)s->H * 2u * s->D * sizeof(float);
++        const uint64_t kv_row = (uint64_t)s->Hkv * s->D * sizeof(float);
++        const uint64_t q_row = (uint64_t)s->H * s->D * sizeof(float);
++        ds4_gpu_tensor *qg1 = ds4_gpu_tensor_view(tqg, 0, (uint64_t)half * qg_row);
++        ds4_gpu_tensor *qg2 = ds4_gpu_tensor_view(tqg, (uint64_t)half * qg_row, (uint64_t)rest * qg_row);
++        ds4_gpu_tensor *kp1 = ds4_gpu_tensor_view(tkp, 0, (uint64_t)half * kv_row);
++        ds4_gpu_tensor *kp2 = ds4_gpu_tensor_view(tkp, (uint64_t)half * kv_row, (uint64_t)rest * kv_row);
++        ds4_gpu_tensor *vp1 = ds4_gpu_tensor_view(tvp, 0, (uint64_t)half * kv_row);
++        ds4_gpu_tensor *vp2 = ds4_gpu_tensor_view(tvp, (uint64_t)half * kv_row, (uint64_t)rest * kv_row);
++        ds4_gpu_tensor *q1 = ds4_gpu_tensor_view(tq, 0, (uint64_t)half * q_row);
++        ds4_gpu_tensor *q2 = ds4_gpu_tensor_view(tq, (uint64_t)half * q_row, (uint64_t)rest * q_row);
++        ds4_gpu_tensor *gate1 = ds4_gpu_tensor_view(tgate, 0, (uint64_t)half * q_row);
++        ds4_gpu_tensor *gate2 = ds4_gpu_tensor_view(tgate, (uint64_t)half * q_row, (uint64_t)rest * q_row);
++        q35_require(qg1 && qg2 && kp1 && kp2 && vp1 && vp2 && q1 && q2 && gate1 && gate2, "row views");
++        prep_call(s, &arena, qo, ko, s->pos0, half, q1, gate1, tkc, tvc, qg1, kp1, vp1, tpos);
++        prep_call(s, &arena, qo, ko, s->pos0 + half, rest, q2, gate2, tkc, tvc, qg2, kp2, vp2, tpos);
++        ds4_gpu_tensor_free(gate2); ds4_gpu_tensor_free(gate1);
++        ds4_gpu_tensor_free(q2); ds4_gpu_tensor_free(q1);
++        ds4_gpu_tensor_free(vp2); ds4_gpu_tensor_free(vp1);
++        ds4_gpu_tensor_free(kp2); ds4_gpu_tensor_free(kp1);
++        ds4_gpu_tensor_free(qg2); ds4_gpu_tensor_free(qg1);
++    } else {
++        prep_call(s, &arena, qo, ko, s->pos0, s->T, tq, tgate, tkc, tvc, tqg, tkp, tvp, tpos);
++        if (schedule == SCHEDULE_PREP_TWICE) {
++            /* The second prepare must overwrite the first. */
++            fill_random(qg, qc * 2);
++            fill_random(kp, kvc);
++            fill_random(vp, kvc);
++            q35_require(ds4_gpu_tensor_write(tqg, 0, qg, qc * 2 * sizeof(float)), "rewrite q/gate");
++            q35_require(ds4_gpu_tensor_write(tkp, 0, kp, kvc * sizeof(float)), "rewrite k");
++            q35_require(ds4_gpu_tensor_write(tvp, 0, vp, kvc * sizeof(float)), "rewrite v");
++            prep_call(s, &arena, qo, ko, s->pos0, s->T, tq, tgate, tkc, tvc, tqg, tkp, tvp, tpos);
++        }
++    }
++
++    double *expect_q = q35_alloc(qc * sizeof(double));
++    double *expect_gate = q35_alloc(qc * sizeof(double));
++    double *expect_k = q35_alloc(cc * sizeof(double));
++    double *expect_v = q35_alloc(cc * sizeof(double));
++    double *row = q35_alloc((uint64_t)s->D * sizeof(double));
++    memset(expect_k, 0, cc * sizeof(double));
++    memset(expect_v, 0, cc * sizeof(double));
++    for (uint32_t t = 0; t < s->T; t++) {
++        const uint32_t pos = s->pos0 + t;
++        for (uint32_t h = 0; h < s->H; h++) {
++            const uint64_t src = ((uint64_t)t * s->H + h) * 2u * s->D;
++            const uint64_t dst = ((uint64_t)t * s->H + h) * s->D;
++            ref_prep(qg + src, s->D, s->nrot, gq, pos, s->base, s->eps, expect_q + dst);
++            for (uint32_t i = 0; i < s->D; i++) expect_gate[dst + i] = qg[src + s->D + i];
++        }
++        for (uint32_t h = 0; h < s->Hkv; h++) {
++            const uint64_t src = ((uint64_t)t * s->Hkv + h) * s->D;
++            const uint64_t dst = ((uint64_t)pos * s->Hkv + h) * s->D;
++            ref_prep(kp + src, s->D, s->nrot, gk, pos, s->base, s->eps, row);
++            for (uint32_t i = 0; i < s->D; i++) expect_k[dst + i] = half_round(row[i]);
++            for (uint32_t i = 0; i < s->D; i++) expect_v[dst + i] = half_round(vp[src + i]);
++        }
++    }
++
++    char what[128];
++    snprintf(what, sizeof(what), "prep q T=%u pos0=%u sched=%d", s->T, s->pos0, schedule);
++    q35_check_tensor(what, tq, expect_q, qc, 5e-5);
++    snprintf(what, sizeof(what), "prep gate T=%u pos0=%u sched=%d", s->T, s->pos0, schedule);
++    q35_check_tensor(what, tgate, expect_gate, qc, 5e-5);
++    snprintf(what, sizeof(what), "prep k T=%u pos0=%u sched=%d", s->T, s->pos0, schedule);
++    q35_check_half_tensor(what, tkc, expect_k, cc, 2e-3);
++    snprintf(what, sizeof(what), "prep v T=%u pos0=%u sched=%d", s->T, s->pos0, schedule);
++    q35_check_half_tensor(what, tvc, expect_v, cc, 2e-3);
++
++    /* Dense causal attention, fed with what the device actually wrote so this
++     * check covers the attention math alone. */
++    float *q_dev = q35_alloc(qc * sizeof(float)), *gate_dev = q35_alloc(qc * sizeof(float));
++    uint16_t *k_dev = q35_alloc(cc * sizeof(uint16_t)), *v_dev = q35_alloc(cc * sizeof(uint16_t));
++    q35_require(ds4_gpu_tensor_read(tq, 0, q_dev, qc * sizeof(float)), "read q");
++    q35_require(ds4_gpu_tensor_read(tgate, 0, gate_dev, qc * sizeof(float)), "read gate");
++    q35_require(ds4_gpu_tensor_read(tkc, 0, k_dev, cc * sizeof(uint16_t)), "read k cache");
++    q35_require(ds4_gpu_tensor_read(tvc, 0, v_dev, cc * sizeof(uint16_t)), "read v cache");
++
++    double *expect_o = q35_alloc(qc * sizeof(double));
++    double *scores = q35_alloc(((uint64_t)s->pos0 + s->T) * sizeof(double));
++    for (uint32_t t = 0; t < s->T; t++) {
++        const uint32_t n = s->pos0 + t + 1;
++        for (uint32_t h = 0; h < s->H; h++) {
++            const uint32_t kh = h / gh;
++            const uint64_t qb = ((uint64_t)t * s->H + h) * s->D;
++            double mx = -INFINITY;
++            for (uint32_t j = 0; j < n; j++) {
++                double score = 0;
++                for (uint32_t i = 0; i < s->D; i++)
++                    score += (double)q_dev[qb + i] *
++                             (double)q35_half_to_float(k_dev[((uint64_t)j * s->Hkv + kh) * s->D + i]);
++                scores[j] = score * scale;
++                if (scores[j] > mx) mx = scores[j];
++            }
++            double denom = 0;
++            for (uint32_t j = 0; j < n; j++) {
++                scores[j] = exp(scores[j] - mx);
++                denom += scores[j];
++            }
++            for (uint32_t i = 0; i < s->D; i++) {
++                double acc = 0;
++                for (uint32_t j = 0; j < n; j++)
++                    acc += scores[j] * (double)q35_half_to_float(v_dev[((uint64_t)j * s->Hkv + kh) * s->D + i]);
++                expect_o[qb + i] = acc / denom * ref_sigmoid((double)gate_dev[qb + i]);
++            }
++        }
++    }
++    q35_require(ds4_gpu_qwen35_attn_fa_tensor(tout, tq, tgate, tkc, tvc, s->T, s->H, s->Hkv,
++                s->D, s->pos0, (float)scale), "attn fa dispatch");
++    /* From 32 rows the shared entry point may take the token-tile kernel, which
++     * rounds the scaled q into half plus a residual before tensor-core products. */
++    const double tol = s->T >= 32 ? 5e-3 : 5e-5;
++    snprintf(what, sizeof(what), "attn out T=%u pos0=%u sched=%d", s->T, s->pos0, schedule);
++    q35_check_tensor(what, tout, expect_o, qc, tol);
++
++    free(v_dev);
++    free(k_dev);
++    free(gate_dev);
++    free(q_dev);
++    free(scores);
++    free(expect_o);
++    free(row);
++    free(expect_v);
++    free(expect_k);
++    free(expect_gate);
++    free(expect_q);
++    ds4_gpu_tensor_free(tout);
++    ds4_gpu_tensor_free(tvc);
++    ds4_gpu_tensor_free(tkc);
++    ds4_gpu_tensor_free(tgate);
++    ds4_gpu_tensor_free(tq);
++    ds4_gpu_tensor_free(tpos);
++    ds4_gpu_tensor_free(tvp);
++    ds4_gpu_tensor_free(tkp);
++    ds4_gpu_tensor_free(tqg);
++    free(pos3);
++    free(vp);
++    free(kp);
++    free(qg);
++    free(gk);
++    free(gq);
++    q35_arena_free(&arena);
++}
++
++static void q35_attn_refusals(void) {
++    const q35_attn_shape s = { 2, 4, 2, 256, 64, 7, 8, 10000.0f, 1e-6f };
++    const uint64_t qc = (uint64_t)s.T * s.H * s.D, kvc = (uint64_t)s.T * s.Hkv * s.D;
++    const uint64_t cc = (uint64_t)s.cap * s.Hkv * s.D;
++
++    q35_arena arena;
++    q35_arena_init(&arena, 2ull * s.D * sizeof(float));
++    float *w = q35_alloc(2ull * s.D * sizeof(float));
++    for (uint32_t i = 0; i < 2u * s.D; i++) w[i] = 1.0f;
++    const uint64_t qo = q35_arena_add(&arena, w, (uint64_t)s.D * sizeof(float));
++    const uint64_t ko = q35_arena_add(&arena, w + s.D, (uint64_t)s.D * sizeof(float));
++    q35_arena_bind(&arena);
++    free(w);
++
++    float *qg = q35_alloc(qc * 2 * sizeof(float)), *kp = q35_alloc(kvc * sizeof(float));
++    float *vp = q35_alloc(kvc * sizeof(float));
++    fill_random(qg, qc * 2);
++    fill_random(kp, kvc);
++    fill_random(vp, kvc);
++    uint32_t *pos3 = q35_alloc((uint64_t)s.cap * 16u);
++    for (uint32_t p = 0; p < s.cap; p++) pos3[p * 4 + 0] = pos3[p * 4 + 1] = pos3[p * 4 + 2] = p;
++
++    ds4_gpu_tensor *tqg = q35_upload(qg, qc * 2);
++    ds4_gpu_tensor *tkp = q35_upload(kp, kvc);
++    ds4_gpu_tensor *tvp = q35_upload(vp, kvc);
++    ds4_gpu_tensor *tpos = q35_upload_raw(pos3, (uint64_t)s.cap * 16u);
++    ds4_gpu_tensor *tq = ds4_gpu_tensor_alloc(qc * sizeof(float));
++    ds4_gpu_tensor *tgate = ds4_gpu_tensor_alloc(qc * sizeof(float));
++    ds4_gpu_tensor *tkc = ds4_gpu_tensor_alloc(cc * sizeof(uint16_t));
++    ds4_gpu_tensor *tvc = ds4_gpu_tensor_alloc(cc * sizeof(uint16_t));
++    ds4_gpu_tensor *tout = ds4_gpu_tensor_alloc(qc * sizeof(float));
++    ds4_gpu_tensor *short_kc = ds4_gpu_tensor_view(tkc, 0, cc * sizeof(uint16_t) - 2u);
++    q35_require(tqg && tkp && tvp && tpos && tq && tgate && tkc && tvc && tout && short_kc, "refusal tensors");
++    /* A refused call must leave the output exactly as it was. */
++    float *sentinel = q35_alloc(qc * sizeof(float));
++    for (uint64_t i = 0; i < qc; i++) sentinel[i] = 7.5f;
++    q35_require(ds4_gpu_tensor_write(tout, 0, sentinel, qc * sizeof(float)), "sentinel output");
++
++    struct {
++        const char *what;
++        uint32_t T, D, nrot, pos0;
++        float base, eps;
++        ds4_gpu_tensor *kc;
++    } prep_cases[] = {
++        { "prep pos0 + T > cap", s.T, s.D, s.nrot, 7, s.base, s.eps, tkc },
++        { "prep nrot > D", s.T, s.D, 258, 0, s.base, s.eps, tkc },
++        { "prep odd nrot", s.T, s.D, 63, 0, s.base, s.eps, tkc },
++        { "prep short k cache", s.T, s.D, s.nrot, 0, s.base, s.eps, short_kc },
++        { "prep base = 0", s.T, s.D, s.nrot, 0, 0.0f, s.eps, tkc },
++        { "prep eps = NaN", s.T, s.D, s.nrot, 0, s.base, NAN, tkc },
++    };
++    for (unsigned i = 0; i < sizeof(prep_cases) / sizeof(prep_cases[0]); i++)
++        q35_require(!ds4_gpu_qwen35_attn_prep_tensor(tq, tgate, prep_cases[i].kc, tvc, tqg, tkp, tvp,
++                    tpos, arena.base, arena.size, qo, ko, prep_cases[i].T, s.H, s.Hkv,
++                    prep_cases[i].D, prep_cases[i].nrot, prep_cases[i].pos0, s.cap,
++                    prep_cases[i].base, prep_cases[i].eps), prep_cases[i].what);
++
++    struct {
++        const char *what;
++        uint32_t T, D, pos0;
++        float scale;
++    } fa_cases[] = {
++        { "fa T = 0", 0, s.D, 0, 0.0625f },
++        { "fa D = 128", s.T, 128, 0, 0.0625f },
++        { "fa scale = 0", s.T, s.D, 0, 0.0f },
++        { "fa scale = NaN", s.T, s.D, 0, NAN },
++        { "fa pos0 + T > cache", s.T, s.D, 7, 0.0625f },
++    };
++    for (unsigned i = 0; i < sizeof(fa_cases) / sizeof(fa_cases[0]); i++)
++        q35_require(!ds4_gpu_qwen35_attn_fa_tensor(tout, tq, tgate, tkc, tvc, fa_cases[i].T, s.H,
++                    s.Hkv, fa_cases[i].D, fa_cases[i].pos0, fa_cases[i].scale), fa_cases[i].what);
++
++    float *after = q35_alloc(qc * sizeof(float));
++    q35_require(ds4_gpu_tensor_read(tout, 0, after, qc * sizeof(float)), "read after refusals");
++    for (uint64_t i = 0; i < qc; i++) q35_require(after[i] == 7.5f, "refusals must not write the output");
++    free(after);
++    free(sentinel);
++
++    ds4_gpu_tensor_free(short_kc);
++    ds4_gpu_tensor_free(tout);
++    ds4_gpu_tensor_free(tvc);
++    ds4_gpu_tensor_free(tkc);
++    ds4_gpu_tensor_free(tgate);
++    ds4_gpu_tensor_free(tq);
++    ds4_gpu_tensor_free(tpos);
++    ds4_gpu_tensor_free(tvp);
++    ds4_gpu_tensor_free(tkp);
++    ds4_gpu_tensor_free(tqg);
++    free(pos3);
++    free(vp);
++    free(kp);
++    free(qg);
++    q35_arena_free(&arena);
++}
++
++int main(void) {
++    q35_init();
++    const uint32_t tokens[] = { 1, 7, 8, 9, 31, 32, 33 };
++    const uint32_t starts[] = { 0, 13 };
++    for (unsigned a = 0; a < sizeof(starts) / sizeof(starts[0]); a++) {
++        for (unsigned b = 0; b < sizeof(tokens) / sizeof(tokens[0]); b++) {
++            const q35_attn_shape s = { tokens[b], 4, 2, 256, 64, starts[a], 64, 10000.0f, 1e-6f };
++            q35_attn_case(&s, SCHEDULE_WHOLE);
++        }
++    }
++    const q35_attn_shape mid = { 9, 4, 2, 256, 64, 0, 64, 10000.0f, 1e-6f };
++    q35_attn_case(&mid, SCHEDULE_SPLIT);
++    q35_attn_case(&mid, SCHEDULE_PREP_TWICE);
++
++    /* Force the per-row route at 32 rows, so both routes run on the same shape. */
++    setenv("DS4_QWEN4_NO_ATTN_MM", "1", 1);
++    const q35_attn_shape tiled = { 32, 4, 2, 256, 64, 13, 64, 10000.0f, 1e-6f };
++    q35_attn_case(&tiled, SCHEDULE_WHOLE);
++    unsetenv("DS4_QWEN4_NO_ATTN_MM");
++
++    q35_attn_refusals();
++    q35_cleanup();
++    printf("all qwen35 CUDA attention tests passed\n");
++    return 0;
++}
+diff --git a/tests/test_qwen35_cuda_quant.c b/tests/test_qwen35_cuda_quant.c
+index e05ec63d..018306b1 100644
+--- a/tests/test_qwen35_cuda_quant.c
++++ b/tests/test_qwen35_cuda_quant.c
+@@ -20,31 +20,6 @@
+ /* Half-precision values the encoder uses, as raw bits: 2^-10, 2^-8, 2^-12. */
+ static const uint16_t q6k_d[] = { 0x1400u, 0x1c00u, 0x0c00u };
+ 
+-static float half_to_float(uint16_t h) {
+-    const uint32_t sign = (uint32_t)(h & 0x8000u) << 16;
+-    uint32_t exp = (h >> 10) & 0x1fu, man = h & 0x3ffu, bits;
+-    if (exp == 0) {
+-        if (man == 0) {
+-            bits = sign;
+-        } else {
+-            exp = 127u - 15u + 1u;
+-            while ((man & 0x400u) == 0) {
+-                man <<= 1;
+-                exp--;
+-            }
+-            man &= 0x3ffu;
+-            bits = sign | (exp << 23) | (man << 13);
+-        }
+-    } else if (exp == 31) {
+-        bits = sign | 0x7f800000u | (man << 13);
+-    } else {
+-        bits = sign | ((exp + 127u - 15u) << 23) | (man << 13);
+-    }
+-    float f;
+-    memcpy(&f, &bits, sizeof(f));
+-    return f;
+-}
+-
+ /* Block layout: 128 low nibbles, 128 high 2-bit parts at byte 128, sixteen
+  * int8 scales at byte 192, fp16 d at byte 208. Value j is
+  * d * scale(j / 16) * ((low | high << 4) - 32). */
+@@ -70,7 +45,7 @@ static double q6k_value(const unsigned char *row, unsigned k) {
+     const int scale = ((const int8_t *)block)[192u + j / 16u];
+     uint16_t d;
+     memcpy(&d, block + 208, sizeof(d));
+-    return (double)half_to_float(d) * (double)scale * (double)q;
++    return (double)q35_half_to_float(d) * (double)scale * (double)q;
+ }
+ 
+ static void q6k_case(uint32_t K, uint32_t M, uint32_t T) {
