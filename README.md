@@ -199,7 +199,9 @@ ds4-check --build
 ```
 
 `ds4-check --build` runs `ds4py build --src <tree>` for each checked tree,
-using the Metal backend on macOS and the CPU backend elsewhere.
+using the Metal backend on macOS, the CUDA backend on other hosts where `nvcc` is
+on PATH (the devenv shell always provides it), and the CPU backend otherwise.
+`ds4py`'s own default is CPU off macOS, so the selection lives in the tool.
 
 ### Model-backed end-to-end gate
 
