@@ -20,6 +20,7 @@
 - CUDA lives inside `patches/qwen35`, never a sibling model directory; series order is `common` then models in `LC_ALL=C` order (L178).
 - Patch ledger trailers are mandatory: `Upstream:`, `Retire-when:`, `Carried-commits:` (L54).
 - CUDA architecture is `sm_86` for the RTX 3060 and RTX 3090.
+- The CUDA toolchain comes from `devenv.nix`: `cudaPackages` 12.9 (`cuda_nvcc`, `cuda_cudart`, `cuda_cccl`, `libcublas`), Linux only. Run every build and test inside `devenv shell`. Do not add a second toolchain, a `nix shell` wrapper or a `cuda.mk`.
 - The pin already carries `.shared` on all three `ldmatrix` forms. Do not re-add it.
 
 ## Decisions required before execution
@@ -360,7 +361,7 @@ git commit -m "qwen35: add the dense serial CUDA path to the patch series"
 **Files:**
 - Modify: `tools/ds4-check.sh` (backend selection), or the ds4-py invocation it uses
 
-- [ ] **Step 1:** Select `--backend cuda` when `nvcc` is present, falling back to `cpu`; do not add a local build file.
+- [ ] **Step 1:** Select `--backend cuda` on Linux when `nvcc` is on PATH (the devenv shell always provides it), falling back to `cpu` elsewhere; do not add a local build file.
 - [ ] **Step 2:** Build with `CUDA_ARCH=sm_86` and run `test-qwen35-cuda-quant`, `-recurrent`, `-attention`, and `test-qwen35-host`.
 - [ ] **Step 3 (optional):** Run the three CUDA tests under `compute-sanitizer --tool memcheck`; zero errors required.
 - [ ] **Step 4:** Load the pinned `Qwen3.8-27B-Q4_K_M.gguf` at `ctx=8192` and decode two prompts twice. The 27B carries no Q5_K, so an unsupported-dense-type error here means a real gap in Task 2, not a reason to revisit **D1**.
