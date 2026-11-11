@@ -257,7 +257,7 @@ git -C .ds4/tree commit -m "qwen35: dense preparation and causal attention on CU
 - Consumes: Tasks 2–4.
 - Produces: make targets `test-qwen35-host` and `test-qwen35-graph`; a CUDA build in which `qwen4_graph_forward_tokens` reaches the qwen35 graph.
 
-**Execution notes** (from the completed Tasks 2–4 baseline at the 11-commit pin):
+**Guard map for Step 5** (measured at the 14-commit tree):
 
 - `ds4.c` has no `int main`, and eight existing tests already `#include "../ds4.c"`, so the host test can reach the statics that way.
 - `g_ds4_shape` is the runtime shape; `DS4_SHAPE_QWEN35` is its qwen35 initializer. `ds4_qwen4_layer_is_linear(il)` reads `n_full_attn_interval` and `n_nextn_predict`, so the test must set both before checking per-layer verdicts.
