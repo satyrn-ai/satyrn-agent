@@ -42,7 +42,7 @@
 | `tests/test_qwen35_cuda_recurrent.c` | Recurrent SiLU output tests, schedules and refusals | 3 |
 | `tests/test_qwen35_cuda_attention.c` | Attention preparation and causal attention tests | 4 |
 | `tests/test_qwen35_host.c` | New host suite: weight acceptance, refusals, Metal-only verdicts (includes `../ds4.c`) | 5 |
-| `tests/test_qwen35_graph.c` | Numerical oracle: tiny graph versus a double-precision reference | 5 |
+| `tests/test_qwen35_oracle.c` | Numerical oracle: tiny graph versus a double-precision reference | 5 |
 | `Makefile`, `.gitignore` | Test targets and build products | 2–5 |
 | `patches/qwen35/0009-*.patch` … `0012-*.patch` | Generated ledger entries | 6 |
 | `docs/specs/2026-10-24-ds4-patch-series-design.md` | Patch ledger table | 6 |
@@ -282,7 +282,7 @@ Expected: no rule to make target, because neither the target nor the file exists
 
 - [ ] **Step 3: Add both test targets**
 
-`Makefile` gains `test-qwen35-host` and `test-qwen35-graph`; `.gitignore` gains `/tests/test_qwen35_host` and `/tests/test_qwen35_graph`.
+`Makefile` gains `test-qwen35-host` and `test-qwen35-oracle`; `.gitignore` gains `/tests/test_qwen35_host` and `/tests/test_qwen35_oracle`. The oracle cannot be called `test-qwen35-graph`: that target already exists and drives `tests/test_qwen4_kernels` with `DS4_TEST_QWEN35_GRAPH_ONLY=1` on Metal.
 
 - [ ] **Step 4: Run the host test to see the real red state**
 
@@ -304,9 +304,33 @@ The qwen35 region currently sits in one `#if defined(__APPLE__)` block that open
 
 Leave `ds4_engine_verify_rows()` untouched: it must still return `8` only under `DS4_HAS_QWEN4_METAL` on Metal.
 
-- [ ] **Step 6: Add the numerical oracle**
+- [x] **Step 6: Add the numerical oracle**
 
 `tests/test_qwen35_graph.c` builds a small dense qwen35 model in memory: two layers, F32 tensors, `head_dim = 256` (Task 4 accepts no other size), `n_head = 2`, `n_head_kv = 1`, `n_embd = 512`, `vocab = 32`, and `full_attention_interval = 2`. Interval 2 makes layer 1 full attention and layer 0 linear; interval 4 would make both layers linear and leave Task 4's ops and its guard edits unexercised. The dims live in `g_ds4_shape`, so they are runtime values and no GGUF or loader is involved. Run `qwen4_graph_forward_tokens` for one token and compare the logits against a double-precision reference implementing the documented layer order. Assert `max_abs_err < 1e-3` and an identical repeat run. On a build without a GPU, skip with a printed reason. A graph wired to the wrong model path fails this test; determinism alone would not.
+
+**As executed (`tests/test_qwen35_oracle.c`, `test-qwen35-oracle`).** Three cases
+run against the reference: `full_attention_interval = 1` (both layers attention,
+so a failure cannot be confused with the recurrent mixer), and `interval = 2`
+(linear layer 0, attention layer 1) once through the fused decode front and once
+through `DS4_QWEN4_NO_FUSE`'s plain ops. One token at position 0 keeps the
+attention contract small: with a single cached key the softmax is 1, so a head's
+output is its value rounded to the half cache times `sigmoid(gate)`; rope and the
+q/k norms belong to Task 4's suite. The reference does not read the alpha
+projection, because the decay multiplies a zero state and cannot move these
+logits.
+
+Two traps, both found by running it:
+
+- **Gamma vectors must not be scaled like matrices.** Generating every tensor at
+  `1/sqrt(width)` shrinks each normalisation by `sqrt(width)`, the residual
+  stream decays geometrically and the logits land near `1e-2`, where a `1e-3`
+  absolute bound stops discriminating: an injected `sigmoid` for `silu` in the
+  gated output norm moved them by only `1.06e-04`. With the gammas centred on 1
+  the same injection moves a logit from `1.30` to `-0.09`.
+- **The oracle must be shown to fail.** Injections used: `silu(z)` -> `sigmoid(z)`
+  in `qwen35_cuda::gdn_out` (fails at `1.40`, while the attention-only case stays
+  at `3.2e-06`, which is the coverage split working) and the FFN normalisation
+  reading `attn_norm` (fails at `0.24`). Both were reverted before the commit.
 
 - [ ] **Step 7: Run both tests to verify they pass**
 
@@ -316,7 +340,7 @@ Expected: both pass. The graph test must report that the qwen35 path ran, not th
 - [ ] **Step 8: Commit**
 
 ```bash
-git -C .ds4/tree add ds4.c Makefile .gitignore tests/test_qwen35_host.c tests/test_qwen35_graph.c
+git -C .ds4/tree add ds4.c Makefile .gitignore tests/test_qwen35_host.c tests/test_qwen35_oracle.c
 git -C .ds4/tree commit -m "qwen35: the ordinary dense graph on CUDA"
 ```
 
@@ -395,7 +419,7 @@ git commit -m "qwen35: add the dense serial CUDA path to the patch series"
 | Recurrent op matches reference | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-recurrent` | pass |
 | Attention matches reference | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-attention` | pass |
 | Graph accepts the model | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host` | pass |
-| Graph is wired correctly | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-graph` | logits within `1e-3` of the reference |
+| Graph is wired correctly | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-oracle` | logits within `1e-3` of the reference |
 | Metal verify still gated | `grep -c "DS4_HAS_QWEN4_METAL" .ds4/tree/ds4.c` | unchanged from baseline |
 | Existing patches unchanged | `git diff --stat -- 'patches/qwen35/000[1-8]-*.patch'` | empty |
 | Series reconstructs | `ds4-check --model qwen35` | exit 0 |
