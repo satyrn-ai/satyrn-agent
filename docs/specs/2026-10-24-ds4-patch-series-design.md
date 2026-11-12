@@ -67,9 +67,11 @@ the number each patch has on disk:
 | `qwen35/0011` | dense attention prep and causal attention on CUDA | none, authored here | not offered, fork only | pass, M4 Max |
 | `qwen35/0012` | reach the dense graph on CUDA | none, authored here | not offered, fork only | pass, M4 Max |
 | `qwen35/0013` | dense graph versus a double-precision reference | none, authored here | not offered, fork only | pass, M4 Max |
+| `qwen35/0014` | CUDA device residency for the model map | none, authored here | not offered, fork only | n/a, CUDA only |
 
-All five are adopted as of 2026-11-12. The gate was `ds4-check --model qwen35
---build`, `make -C .ds4/tree test-qwen4-kernels`, and `DS4_TEST_MODEL=
+The five Metal-affecting patches are adopted as of 2026-11-12; `0014` is
+CUDA-only, so the Metal gate does not apply to it. The gate for those five was `ds4-check --model qwen35 --build`,
+`make -C .ds4/tree test-qwen4-kernels`, and `DS4_TEST_MODEL=
 Qwen3.8-27B-Q4_K_M.gguf bash tests/ds4_e2e_test.sh` on an Apple M4 Max: the
 CUDA additions left the Metal paths working, which is what adoption required.
 

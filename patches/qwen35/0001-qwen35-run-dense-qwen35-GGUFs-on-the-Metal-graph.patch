@@ -1,7 +1,7 @@
 From 31327518b56b3225800b5c30d3e5046956d78f51 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 30 Sep 2026 12:59:41 +0900
-Subject: [PATCH 01/13] qwen35: run dense qwen35 GGUFs on the Metal graph
+Subject: [PATCH 01/14] qwen35: run dense qwen35 GGUFs on the Metal graph
 
 Loads general.architecture = qwen35 (the dense Qwen3.8-27B) as a Qwen-family variant, follows llama.cpp's qwen35 graph on Metal, tiles Q6_K prompt batches, and allows the 27B's four KV heads.
 
