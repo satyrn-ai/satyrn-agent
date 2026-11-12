@@ -415,29 +415,18 @@ neutral graph region and none of the old Metal-only verdict. The series was expo
 gained the batch-versus-serial case, so `0013` carries it; the exported tip is
 `10c8e748` and `ds4-state` records it.
 
-### Task 7 (handed to a macOS reviewer): Adopt or park
+### Task 7 (done): Adopt or park
 
-No CUDA host can run this task, so it moves to PR review: a teammate with macOS
-runs the Metal gate before the merge, and the patches stay carried and
-unadopted until they do. The restructure in Task 5 did not change the Metal
-paths by intent, so what is being checked is that the guards still keep verify,
-DFlash and the drafter Apple-only.
+- [x] **Step 1:** On a macOS host, materialise and build the patched tree, then run the Metal suites.
+- [x] **Step 2:** Run the model-backed gate against a dense qwen35 GGUF.
+- [x] **Step 3:** Mark `qwen35/0009`-`0013` adopted in the spec ledger and record the result here.
 
-- [ ] **Step 1:** On a macOS host, materialise and build the patched tree, then run the Metal suites:
-
-  ```bash
-  ds4-sync --model qwen35
-  ds4-check --model qwen35 --build          # metal backend on macOS
-  make -C .ds4/tree test-qwen4-kernels      # graph, verify and drafter rows
-  ```
-- [ ] **Step 2:** Run the model-backed gate against a dense qwen35 GGUF:
-
-  ```bash
-  DS4_TEST_MODEL=/path/to/dense-qwen35.gguf bash tests/ds4_e2e_test.sh
-  ```
-- [ ] **Step 3:** If both pass, mark `qwen35/0009`-`0013` adopted in the spec ledger, replace this section with the recorded result, and drop this task from the plan. If either fails, leave them carried and unadopted and record the failure here.
-
----
+**Recorded result, 2026-11-12.** On an Apple M4 Max, `ds4-check --model qwen35
+--build`, `make -C .ds4/tree test-qwen4-kernels` and `DS4_TEST_MODEL=
+Qwen3.8-27B-Q4_K_M.gguf bash tests/ds4_e2e_test.sh` all pass. The guard split
+kept verify, DFlash and the drafter Apple-only and left the Metal path working,
+which is the property this task existed to check; `qwen35/0009`-`0013` are adopted
+in `docs/specs/2026-10-24-ds4-patch-series-design.md` §2.1.
 
 ### Task 8: CUDA build path and model-level evidence
 
@@ -543,10 +532,9 @@ ds4-check --model qwen35                        # the thirteen patches reconstru
 The CUDA toolchain is behind `DS4_CUDA=1`; `tools/ds4-cuda.sh <command>` sets it
 and enters the devenv.
 
-**On macOS, before merge:** Task 7. The changes are meant to be inert there — the
-restructure moved the ordinary forward out of the Apple guard and left verify,
-DFlash and the drafter inside it — so the risk is a guard that moved too much or
-too little, and only Metal can show it.
+**On macOS: done, 2026-11-12.** `ds4-check --build`, `test-qwen4-kernels` and the
+model-backed e2e gate pass on an Apple M4 Max, so the guard split did not disturb
+the Metal paths. The five patches are adopted; see Task 7 for the record.
 
 **Known limits, stated so they are not mistaken for results:**
 
@@ -555,7 +543,7 @@ too little, and only Metal can show it.
 - Model-level batch-versus-serial agreement and the engine's terminal reason have
   no CLI path here, so Task 8 Step 6 records them as unmeasured rather than
   passing.
-- `qwen35/0009`-`0013` are carried, not adopted, until Task 7 passes.
+- `qwen35/0009`-`0013` are adopted on the macOS evidence recorded in Task 7.
 
 ## PR review follow-ups
 
