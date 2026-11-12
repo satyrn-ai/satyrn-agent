@@ -1,7 +1,7 @@
 From e05869bc2bc57ee9a406c195bdcc80970ae100c1 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 13:24:07 +0200
-Subject: [PATCH 14/14] cuda: keep the model resident on a single device
+Subject: [PATCH 14/15] cuda: keep the model resident on a single device
 
 The single-device CUDA path registered the model map no-copy and installed
 nothing else, so every kernel read the weights from host memory over PCIe: one
