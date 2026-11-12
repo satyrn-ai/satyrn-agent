@@ -1,7 +1,7 @@
 From 7682b94c313c6729cea50e4cc1fac04cd0ad4107 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 13:24:13 +0900
-Subject: [PATCH 07/17] qwen35: flash attention for prompt batches
+Subject: [PATCH 07/18] qwen35: flash attention for prompt batches
 
 llama.cpp's packed Q6_K dequantizer and flash-attention tiling for dense qwen35 prompt batches; flash attention is the only prompt-batch attention.
 
