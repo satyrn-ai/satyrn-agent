@@ -444,7 +444,7 @@ DFlash and the drafter Apple-only.
 **Files:**
 - Modify: `tools/ds4-check.sh` (backend selection), or the ds4-py invocation it uses
 
-- [x] **Step 1:** Select `--backend cuda` on Linux when `nvcc` is on PATH (the devenv shell always provides it), falling back to `cpu` elsewhere; do not add a local build file.
+- [x] **Step 1:** Make the build backend explicit: `--backend NAME`, with `DS4_CHECK_BACKEND` as the environment default and `metal`/`cpu` unchanged as the defaults, so no existing build flow moves; do not add a local build file.
 - [x] **Step 2:** Build with `CUDA_ARCH=sm_86` and run `test-qwen35-cuda-quant`, `-recurrent`, `-attention`, and `test-qwen35-host`.
 - [x] **Step 3 (optional):** Run the three CUDA tests under `compute-sanitizer --tool memcheck`; zero errors required.
 - [x] **Step 4:** Load the pinned `Qwen3.8-27B-Q4_K_M.gguf` at `ctx=8192` and decode two prompts twice. The 27B carries no Q5_K, so an unsupported-dense-type error here means a real gap in Task 2, not a reason to revisit **D1**.
@@ -453,13 +453,16 @@ DFlash and the drafter Apple-only.
 
 ---
 
-**As executed for Steps 1 and 2.** `tools/ds4-check.sh` now asks for `cuda` when
-`nvcc` is on PATH and ds4py's own default would be `cpu`. `ds4-check --model
-qwen35 --build` inside the CUDA devenv (~`CUDA_ARCH=sm_86`) reconstructed the
-series from a pristine pin and linked `libds4.so` with `nvcc -arch=sm_86`, exit
-0. Invoking it needs the venv on PATH (`uv run --frozen bash
-tools/ds4-check.sh --build`) or an external ds4-py checkout, as the README's
-build section describes; the devenv shell alone does not put `ds4py` there.
+**As executed for Steps 1 and 2.** The first attempt inferred `cuda` from `nvcc`
+on `PATH`, which retargeted every target's build and made an unrelated flow
+depend on what happened to be installed. Review rejected it; the backend is now
+`--backend NAME` or `DS4_CHECK_BACKEND`, and `nvcc` on `PATH` selects nothing.
+`ds4-check --model qwen35 --build --backend cuda` inside the CUDA devenv with
+`CUDA_ARCH=sm_86` reconstructed the series from a pristine pin and linked
+`libds4.so` with `nvcc -arch=sm_86`, exit 0. Invoking it needs the venv on `PATH`
+(`uv run --frozen bash tools/ds4-check.sh --build`) or an external ds4-py
+checkout, as the README's build section describes; the devenv shell alone does
+not put `ds4py` there.
 
 **As executed for Step 3.** `compute-sanitizer` is in the store but not on the
 devenv PATH, so it was invoked from `cuda-merged-12.9` directly. `--tool memcheck`
@@ -469,8 +472,12 @@ makes no CUDA call to instrument; it is not one of the three suites this step
 covers.
 
 **As executed for Step 5.** The oracle gained a fourth case: nine tokens in one
-forward against the same nine decoded one at a time, for which the synthetic
-model needs no weights. Measured `max |batch - serial| = 1.538e-05`. It is a real
+forward against the same nine decoded one at a time, which is nine separate
+one-token forwards, so every recurrent state transition is the serial one. (The
+first version ran an eight-token prefix and then one step, which review caught:
+it did not exercise repeated one-token transitions. The measured difference did
+not move, `1.538e-05`, because it comes from the last row's prompt-versus-decode
+kernel pair, not from the schedule.) The synthetic model needs no weights. Measured `max |batch - serial| = 1.538e-05`. It is a real
 detector, not a tautology: making the batch tail read the row before the last
 trips it at `1.6` while the three reference cases stay green, because they all
 run one token. A second injection that dropped `dt_bias` from the decay passed
@@ -549,6 +556,27 @@ too little, and only Metal can show it.
   no CLI path here, so Task 8 Step 6 records them as unmeasured rather than
   passing.
 - `qwen35/0009`-`0013` are carried, not adopted, until Task 7 passes.
+
+## PR review follow-ups
+
+Review on PR #24 raised five findings and one performance question. What changed:
+
+| Finding | Response |
+| --- | --- |
+| `ds4-check` retargeted every build when `nvcc` existed | Backend is `--backend NAME` / `DS4_CHECK_BACKEND`; defaults stay metal/cpu; a shell test asserts `nvcc` on `PATH` selects nothing |
+| Platform branches scattered through the dense graph | Attention keeps one ordinary prompt/decode flow with only the verify override guarded; five helpers (`verify_select`, `verify_rows`, `dflash_begin`, `dflash_layer`, `dflash_end`) absorb the rest, so the forward has no `#if` |
+| The batch-versus-serial case ran 8+1, not nine serial steps | Nine one-token forwards; the measurement is unchanged at `1.538e-05` because it comes from the kernel pair, not the schedule |
+| `tools/ds4-cuda.sh` treated any ambient CUDA as the pinned toolchain | devenv is entered unless `DS4_CUDA_SHELL` (set by the script) or `DS4_CUDA_AMBIENT` (explicit) marks the shell |
+| The host gate diverted `stderr` through temp files | `verdict()` deleted; the predicate is called directly, and the positive assertion already catches the old non-Apple refusal |
+
+Performance: `DS4_CUDA_COPY_MODEL=1` did not change the `0.48 t/s` decode rate —
+this build registers the 27B through the multi-tier selective cache, which
+deliberately refuses a full-model copy (`ds4.c:72585`, message from
+`ds4_cuda.cu:4206`), so the variable is never consulted. The arithmetic still
+supports the PCIe diagnosis: one pass over 15.65 GiB at PCIe 4.0 x16 (~25 GB/s)
+is about 0.65 s, and a token costs about 2.1 s, while the 3090's compute time for
+27B at one token is roughly 2 ms. Finding the knob that selects the plain copy
+path is follow-up work.
 
 ## Risks and rollback
 

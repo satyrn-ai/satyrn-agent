@@ -1,4 +1,4 @@
-From 10c8e7487d37e9b21900315d07c52b4935384a81 Mon Sep 17 00:00:00 2001
+From 757b6211900f210e11d4a000cae6b56ac0a63efc Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 12:22:58 +0200
 Subject: [PATCH 13/13] qwen35: compare the dense graph against a
@@ -36,14 +36,17 @@ row before the last trips it at 1.6 while the reference cases stay green.
 Named test-qwen35-oracle, not test-qwen35-graph: that target already exists and
 drives tests/test_qwen4_kernels with DS4_TEST_QWEN35_GRAPH_ONLY=1 on Metal.
 
+The serial side is nine one-token forwards, so every recurrent state transition
+is the serial one, not an eight-token prefix followed by one step.
+
 Upstream: not offered, fork only
 Retire-when: dense qwen35 runs on CUDA upstream
 Carried-commits: none (authored here)
 ---
  .gitignore                 |   1 +
  Makefile                   |  14 +
- tests/test_qwen35_oracle.c | 507 +++++++++++++++++++++++++++++++++++++
- 3 files changed, 522 insertions(+)
+ tests/test_qwen35_oracle.c | 508 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 523 insertions(+)
  create mode 100644 tests/test_qwen35_oracle.c
 
 diff --git a/.gitignore b/.gitignore
@@ -82,10 +85,10 @@ index 7ad37963..a351563d 100644
  
 diff --git a/tests/test_qwen35_oracle.c b/tests/test_qwen35_oracle.c
 new file mode 100644
-index 00000000..9caa6bdf
+index 00000000..eef9bdfd
 --- /dev/null
 +++ b/tests/test_qwen35_oracle.c
-@@ -0,0 +1,507 @@
+@@ -0,0 +1,508 @@
 +/* Numerical oracle for the dense qwen35 graph: a two-layer model built in
 + * memory, one forward on the GPU, logits compared against a double-precision
 + * reference of the documented layer order. Finite or repeatable logits alone
@@ -503,11 +506,12 @@ index 00000000..9caa6bdf
 +    return 0;
 +}
 +
-+/* Nine tokens in one forward against the same nine decoded one at a time. A
-+ * batch that large crosses into the row-major dispatch layer and the plain GDN
-+ * front where a single token takes the fused one, so a type or layer missing
-+ * from a second path shows up here without any weights. The logits compared are
-+ * the last row's in both cases. */
++/* Nine tokens in one forward against the same nine decoded one at a time, nine
++ * separate one-token forwards, so every recurrent state transition is the
++ * serial one. A batch that large crosses into the row-major dispatch layer and
++ * the plain GDN front where a single token takes the fused one, so a type or
++ * layer missing from a second path shows up here without any weights. The
++ * logits compared are the last row's in both cases. */
 +static int check_batch_serial(void) {
 +    enum { BATCH = 9 };
 +    shape_dense_qwen35(2u);
@@ -542,9 +546,9 @@ index 00000000..9caa6bdf
 +    }
 +
 +    if (!qwen4_graph_alloc(&g, &s.weights, 16u, 16u, false, NULL, NULL, NULL, 0)) return 1;
-+    ok = qwen4_graph_forward_tokens(&g, &s.model, &s.weights, ids, BATCH - 1u, serial, false) &&
-+         qwen4_graph_forward_tokens(&g, &s.model, &s.weights, ids + (BATCH - 1u), 1u, serial, false) &&
-+         ds4_gpu_tensor_read(g.logits, 0, serial, (uint64_t)DS4_N_VOCAB * sizeof(float)) != 0 &&
++    for (uint32_t i = 0; ok && i < BATCH; i++)
++        ok = qwen4_graph_forward_tokens(&g, &s.model, &s.weights, ids + i, 1u, serial, false);
++    ok = ok && ds4_gpu_tensor_read(g.logits, 0, serial, (uint64_t)DS4_N_VOCAB * sizeof(float)) != 0 &&
 +         ds4_gpu_synchronize() != 0;
 +    qwen4_graph_free(&g);
 +    if (!ok) {
