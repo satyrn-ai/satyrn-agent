@@ -1,7 +1,7 @@
 From 757b6211900f210e11d4a000cae6b56ac0a63efc Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 12:22:58 +0200
-Subject: [PATCH 13/14] qwen35: compare the dense graph against a
+Subject: [PATCH 13/15] qwen35: compare the dense graph against a
  double-precision reference
 
 tests/test_qwen35_oracle.c builds a two-layer dense qwen35 in one host buffer
