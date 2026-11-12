@@ -1,0 +1,135 @@
+From 9b3b09d3eb1bf11af0bf0e38c9a01db1e12d8750 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Thu, 12 Nov 2026 19:44:49 +0200
+Subject: [PATCH 16/18] qwen35: reduce dense Q4_K decode through __dp4a
+
+Decode still paid 32 float FMAs per 32-value sub-block. Quantise the activations
+to q8_K once per token and reduce each super-block through the integer dot the
+MoE decode has used all along (dev_dot_q4_K_q8_K_block_vec, wide 16B loads).
+
+The q8_K workspace is one cached device buffer, grown on demand and reused by
+every layer; the entry point declines when K is not a whole number of
+super-blocks or the tensor base is not 16B aligned, so callers keep the float
+path instead of reading misaligned.
+
+Measured on the 27B Q4_K_M with weights resident: 15.05 -> 27.35 t/s generation,
+prefill unchanged at 132 t/s. An 8-warp block shape measured 26.76 t/s, so the
+4-warp shape stays. Oracle still 1.538e-05; quant and oracle suites pass.
+
+Q6_K keeps the float path for now; it is a small share of this checkpoint's
+bytes.
+---
+ ds4_cuda.cu        | 72 ++++++++++++++++++++++++++++++++++++++++++++++
+ ds4_qwen4_cuda.cuh |  9 ++++++
+ 2 files changed, 81 insertions(+)
+
+diff --git a/ds4_cuda.cu b/ds4_cuda.cu
+index 98ee5d05..eca5c298 100644
+--- a/ds4_cuda.cu
++++ b/ds4_cuda.cu
+@@ -23289,6 +23289,78 @@ __global__ static void moe_down_qwarp32_kernel(
+     if (lane == 0) down_out[(uint64_t)pair * out_dim + row] = acc;
+ }
+ 
++/* Dense Q4_K decode through integer dot products. The float path costs 32 FMAs
++ * per 32-value sub-block; here the activations are quantised to q8_K once per
++ * token and each super-block reduces through the __dp4a sums the MoE decode has
++ * used all along, which is the arithmetic a bandwidth-bound matvec needs. */
++static cuda_block_q8_K *g_qwen_q8k_ws = NULL;
++static size_t g_qwen_q8k_ws_blocks = 0;
++
++static int qwen_q8k_ws_ensure(size_t blocks) {
++    if (blocks <= g_qwen_q8k_ws_blocks) return 1;
++    if (g_qwen_q8k_ws) {
++        (void)cudaFree(g_qwen_q8k_ws);
++        g_qwen_q8k_ws = NULL;
++        g_qwen_q8k_ws_blocks = 0;
++    }
++    void *p = NULL;
++    if (cudaMalloc(&p, blocks * sizeof(cuda_block_q8_K)) != cudaSuccess) {
++        (void)cudaGetLastError();
++        return 0;
++    }
++    g_qwen_q8k_ws = (cuda_block_q8_K *)p;
++    g_qwen_q8k_ws_blocks = blocks;
++    return 1;
++}
++
++__device__ __forceinline__ static float dev_warp_sum32(float v) {
++    #pragma unroll
++    for (int off = 16; off > 0; off >>= 1) v += __shfl_down_sync(0xffffffffu, v, off);
++    return v;
++}
++
++template<unsigned ROWS>
++__global__ static void dense_q4k_q8k_matvec(float *out, const char *w,
++        const cuda_block_q8_K *xq, unsigned T, unsigned K, unsigned M, uint64_t stride) {
++    const unsigned row = blockIdx.x * 4u + (threadIdx.x >> 5u), lane = threadIdx.x & 31u;
++    if (row >= M) return;
++    const cuda_block_q4_K *wr = (const cuda_block_q4_K *)(w + (uint64_t)row * stride);
++    const unsigned blocks = K / 256u;
++    #pragma unroll
++    for (unsigned t = 0; t < ROWS; t++) {
++        if (t >= T) continue;
++        const cuda_block_q8_K *xqb = xq + (uint64_t)t * blocks;
++        float a = 0.0f;
++        for (unsigned b = lane; b < blocks; b += 32u) {
++            dev_dot_q4_K_q8_K_block_vec(wr + b, xqb + b, &a);
++        }
++        a = dev_warp_sum32(a);
++        if (!lane) out[(uint64_t)t * M + row] = a;
++    }
++}
++
++extern "C" int ds4_gpu_qwen4_dense_q4k_matvec(float *out, const char *w, const float *x,
++        uint32_t T, uint32_t K, uint32_t M, uint64_t stride) {
++    if (!out || !w || !x || !T || !M || !K || (K % 256u) || (stride % 16u) ||
++        ((uintptr_t)w & 15u)) return 0;
++    const unsigned blocks = K / 256u;
++    if (!qwen_q8k_ws_ensure((size_t)T * blocks)) return 0;
++    const cudaStream_t st = cuda_decode_stream();
++    q8_K_quantize_kernel<<<dim3(blocks, T), 256, 0, st>>>(g_qwen_q8k_ws, x, K, T);
++    if (cudaGetLastError() != cudaSuccess) { (void)cudaGetLastError(); return 0; }
++    const dim3 grid((M + 3u) / 4u);
++    switch (T) {
++    case 1: dense_q4k_q8k_matvec<1><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    case 2: dense_q4k_q8k_matvec<2><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    case 3: case 4:
++        dense_q4k_q8k_matvec<4><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    default:
++        dense_q4k_q8k_matvec<8><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    }
++    if (cudaGetLastError() != cudaSuccess) { (void)cudaGetLastError(); return 0; }
++    return 1;
++}
++
+ __global__ static void moe_gate_up_mid_decode_q4K_qwarp32_kernel(
+         float *gate_out,
+         float *up_out,
+diff --git a/ds4_qwen4_cuda.cuh b/ds4_qwen4_cuda.cuh
+index 8b9507e7..9a6dae34 100644
+--- a/ds4_qwen4_cuda.cuh
++++ b/ds4_qwen4_cuda.cuh
+@@ -3,6 +3,11 @@
+ 
+ #include "ds4_qwen4_vision.h"
+ 
++/* Integer-dot dense Q4_K decode, implemented beside the q8_K and __dp4a helpers
++ * in ds4_cuda.cu. Returns 0 to let the caller keep its float path. */
++extern "C" int ds4_gpu_qwen4_dense_q4k_matvec(float *out, const char *w, const float *x,
++        uint32_t T, uint32_t K, uint32_t M, uint64_t stride);
++
+ namespace qwen4_cuda {
+ 
+ __device__ __forceinline__ float sum(float x);
+@@ -1256,6 +1261,10 @@ static int matvec_dispatch(float *out, const char *w, const float *x,
+     const uint64_t stride = row_bytes(type, K);
+     if (!stride) return 0;
+ #define QWEN_KQ(TYPE, N) matvec_kquant<TYPE, N><<<(M+3)/4,128,0,cuda_decode_stream()>>>(out,w,x,T,K,M,stride)
++    if (type == 12 && T <= 8 && !(K % 256) && stride % 144 == 0 &&
++        ds4_gpu_qwen4_dense_q4k_matvec(out, w, x, T, K, M, stride)) {
++        return 1;
++    }
+     if ((type == 12 || type == 14) && T <= 8 && !((uintptr_t)x&15) && !(K % 32)) {
+ #define QWEN_KQ_ROWS(TYPE) \
+         if (T == 1) { QWEN_KQ(TYPE, 1); } \

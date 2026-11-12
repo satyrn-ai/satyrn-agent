@@ -1,0 +1,132 @@
+From e05869bc2bc57ee9a406c195bdcc80970ae100c1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Thu, 12 Nov 2026 13:24:07 +0200
+Subject: [PATCH 14/18] cuda: keep the model resident on a single device
+
+The single-device CUDA path registered the model map no-copy and installed
+nothing else, so every kernel read the weights from host memory over PCIe: one
+15.66 GiB pass per decode step. Measured on a 27B Q4_K_M: 0.49 t/s generation,
+32 t/s prefill, 5.7 GiB of 24 GiB resident.
+
+Copy the model into device memory once when it fits, and resolve weights through
+the existing device base. Measured after: 8.71 t/s generation, 131 t/s prefill,
+15.66 GiB copied in 0.68s.
+
+The copy yields to the rest of the machine. It requires model + margin free
+before starting, re-checks free VRAM after the copy and reverts if the margin is
+gone, and defaults the margin to max(6 GiB, total/8), tunable with
+DS4_CUDA_RESERVE_GIB. DS4_CUDA_COPY_MODEL=0 disables it. Field evidence for that
+margin: taking all but ~2.8 GiB on a card that also drives the display produced
+NVRM Xid 62 and tore down the desktop channels with Xid 45.
+
+The oracle still measures 1.538e-05 batch-versus-serial, and the qwen35 CUDA
+quant, recurrent, attention, host and oracle suites all pass.
+---
+ ds4_cuda.cu | 84 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 84 insertions(+)
+
+diff --git a/ds4_cuda.cu b/ds4_cuda.cu
+index 2a50737f..dc3f1136 100644
+--- a/ds4_cuda.cu
++++ b/ds4_cuda.cu
+@@ -4063,9 +4063,92 @@ extern "C" int ds4_gpu_set_model_map(const void *model_map, uint64_t model_size)
+     return 1;
+ }
+ 
++/* A discrete device reads host-mapped weights over PCIe, so one pass over the
++ * model per decode step dominates every other cost in the graph. Copying the
++ * model into device memory once removes that pass whenever the device can hold
++ * it. Skipped in SSD-streaming mode, which never pins or copies the whole model,
++ * and where the multi-tier packer installs its own per-tier slabs instead of
++ * calling this path. DS4_CUDA_COPY_MODEL=0 forces it off. */
++static int cuda_model_make_resident(const void *model_map, uint64_t model_size) {
++    if (!model_map || model_size == 0) return 0;
++    if (g_ssd_streaming_mode) return 0;
++    if (g_model_device_owned && g_model_host_base == model_map &&
++        g_model_registered_size == model_size) {
++        return 1;
++    }
++    const char *opt = getenv("DS4_CUDA_COPY_MODEL");
++    if (opt && opt[0] == '0') return 0;
++
++    size_t free_b = 0, total_b = 0;
++    if (cudaMemGetInfo(&free_b, &total_b) != cudaSuccess) {
++        (void)cudaGetLastError();
++        return 0;
++    }
++    /* Leave every other client room to work. A card that also drives the
++     * display was faulted in the field by taking all but ~3 GiB: the driver
++     * raised Xid 62 and tore down the desktop channels with Xid 45. Residency
++     * therefore yields rather than starve the machine it runs on. */
++    const char *reserve_env = getenv("DS4_CUDA_RESERVE_GIB");
++    size_t reserve = total_b / 8u;
++    if (reserve_env && reserve_env[0]) {
++        const long gib = strtol(reserve_env, NULL, 10);
++        if (gib > 0) reserve = (size_t)gib << 30;
++    }
++    /* The graph allocates its own scratch after this copy (~4.3 GiB measured on
++     * the 27B), so the margin must cover that plus room for the display. */
++    if (reserve < ((size_t)6u << 30)) reserve = (size_t)6u << 30;
++    if ((size_t)model_size + reserve > free_b) {
++        fprintf(stderr,
++                "ds4: CUDA residency skipped: %.2f GiB model + %.2f GiB reserve exceeds "
++                "%.2f GiB free; weights stay host-mapped\n",
++                (double)model_size / 1073741824.0, (double)reserve / 1073741824.0,
++                (double)free_b / 1073741824.0);
++        return 0;
++    }
++
++    const char *prev_base = g_model_device_base;
++    const double t0 = clock() / (double)CLOCKS_PER_SEC;
++    void *dev = NULL;
++    if (cudaMalloc(&dev, (size_t)model_size) != cudaSuccess) {
++        fprintf(stderr, "ds4: CUDA residency allocation failed: %s\n",
++                cudaGetErrorString(cudaGetLastError()));
++        return 0;
++    }
++    if (cudaMemcpy(dev, model_map, (size_t)model_size, cudaMemcpyHostToDevice) != cudaSuccess) {
++        fprintf(stderr, "ds4: CUDA residency copy failed: %s\n",
++                cudaGetErrorString(cudaGetLastError()));
++        (void)cudaFree(dev);
++        return 0;
++    }
++    /* Verify the margin the copy actually left, not the one it assumed. */
++    size_t free_after = 0, total_after = 0;
++    if (cudaMemGetInfo(&free_after, &total_after) == cudaSuccess &&
++        free_after < ((size_t)6u << 30)) {
++        fprintf(stderr,
++                "ds4: CUDA residency reverted: only %.2f GiB would stay free; "
++                "weights stay host-mapped\n",
++                (double)free_after / 1073741824.0);
++        (void)cudaFree(dev);
++        g_model_device_base = prev_base;
++        return 0;
++    }
++    if (g_model_device_owned && g_model_device_base) {
++        (void)cudaFree((void *)g_model_device_base);
++    }
++    g_model_device_base = (const char *)dev;
++    g_model_device_owned = 1;
++    const double t1 = clock() / (double)CLOCKS_PER_SEC;
++    fprintf(stderr,
++            "ds4: CUDA resident model: %.2f GiB copied in %.2fs, %.2f GiB stays free\n",
++            (double)model_size / 1073741824.0, t1 - t0,
++            (double)free_after / 1073741824.0);
++    return 1;
++}
++
+ extern "C" int ds4_gpu_set_model_map_range(const void *model_map, uint64_t model_size, uint64_t map_offset, uint64_t map_size, uint64_t max_tensor_bytes) {
+     (void)max_tensor_bytes;
+     if (!ds4_gpu_register_model_map_no_copy(model_map, model_size)) return 0;
++    if (cuda_model_make_resident(model_map, model_size)) return 1;
+     if (getenv("DS4_CUDA_COPY_MODEL_CHUNKED") != NULL &&
+         !cuda_model_copy_chunked(model_map, model_size, map_offset, map_size)) {
+         (void)cuda_model_prefetch_range(model_map, model_size, map_offset, map_size);
+@@ -35121,6 +35204,7 @@ extern "C" int ds4_gpu_set_model_map_spans(const void *model_map, uint64_t model
+         }
+     }
+     if (!cuda_register_model_map(model_map, model_size, false)) return 0;
++    if (cuda_model_make_resident(model_map, model_size)) return 1;
+     if (getenv("DS4_CUDA_COPY_MODEL_CHUNKED") != NULL) {
+         for (uint32_t i = 0; i < count; i++) {
+             (void)cuda_model_prefetch_range(model_map, model_size,

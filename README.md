@@ -198,8 +198,11 @@ export PATH="$DS4PY_PROJECT/.venv/bin:$PATH"
 ds4-check --build
 ```
 
-`ds4-check --build` runs `ds4py build --src <tree>` for each checked tree,
-using the Metal backend on macOS and the CPU backend elsewhere.
+`ds4-check --build` runs `ds4py build --src <tree>` for each checked tree, with
+the Metal backend on macOS and the CPU backend elsewhere. Pass `--backend cuda`
+or set `DS4_CHECK_BACKEND=cuda` to build for CUDA. The backend is a request, not
+an inference from `PATH`: the tool builds every target, and an ambient `nvcc`
+must not retarget an unrelated build.
 
 ### Model-backed end-to-end gate
 

@@ -1,0 +1,300 @@
+From 59dba3af73962b84d458296e0e95de52a0d5a3b3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Wed, 11 Nov 2026 10:31:02 +0200
+Subject: [PATCH 10/18] qwen35: dense recurrent SiLU output on CUDA
+
+The dense graph's linear layers end in a per-head RMSNorm scaled by the
+D-wide ssm_norm weights and gated by silu(z). Implement it as one warp per
+head slice with D/32 contiguous elements per lane, the same mapping the Metal
+kernel uses, and reuse the shared Qwen CUDA tensor, weight and launch helpers
+from a new ds4_qwen35_cuda.cuh.
+
+The test checks lengths 1, 8, 9, 17 and 256, head sizes 32, 64, 96 and 128,
+zero and non-zero norm weights, and that the Qwen4 op still gates by
+sigmoid(z). It also checks six refusals leave the output unchanged.
+
+ds4_cuda.o now depends on ds4_qwen35_cuda.cuh; without that line a change to
+the new header leaves a stale object file.
+
+Upstream: not offered, fork only
+Retire-when: dense qwen35 runs on CUDA upstream
+Carried-commits: none (authored here)
+---
+ .gitignore                         |   1 +
+ Makefile                           |  12 ++-
+ ds4_cuda.cu                        |   1 +
+ ds4_qwen35_cuda.cuh                |  46 +++++++++
+ tests/test_qwen35_cuda_recurrent.c | 160 +++++++++++++++++++++++++++++
+ 5 files changed, 219 insertions(+), 1 deletion(-)
+ create mode 100644 ds4_qwen35_cuda.cuh
+ create mode 100644 tests/test_qwen35_cuda_recurrent.c
+
+diff --git a/.gitignore b/.gitignore
+index 59525049..2f7d7bad 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -118,3 +118,4 @@ __pycache__/
+ /tests/test_qwen4_conv_parallel
+ /tests/test_q8_prefill_variants
+ /tests/test_qwen35_cuda_quant
++/tests/test_qwen35_cuda_recurrent
+diff --git a/Makefile b/Makefile
+index e6f80ce2..563b9b73 100644
+--- a/Makefile
++++ b/Makefile
+@@ -760,6 +760,16 @@ tests/test_qwen35_cuda_quant: tests/test_qwen35_cuda_quant.o tests/qwen35_cuda_t
+ .PHONY: test-qwen35-cuda-quant
+ test-qwen35-cuda-quant: tests/test_qwen35_cuda_quant
+ 	./tests/test_qwen35_cuda_quant
++
++tests/test_qwen35_cuda_recurrent.o: tests/test_qwen35_cuda_recurrent.c tests/qwen35_cuda_test.h ds4_gpu.h
++	$(CC) $(QUALITY_CFLAGS) -D_GNU_SOURCE -I. -c -o $@ $<
++
++tests/test_qwen35_cuda_recurrent: tests/test_qwen35_cuda_recurrent.o tests/qwen35_cuda_test.o ds4_cuda.o ds4_image.o $(MMQ_OBJS)
++	$(DS4_LINK) -o $@ $^ $(DS4_LINK_LIBS)
++
++.PHONY: test-qwen35-cuda-recurrent
++test-qwen35-cuda-recurrent: tests/test_qwen35_cuda_recurrent
++	./tests/test_qwen35_cuda_recurrent
+ endif
+ 
+ ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+@@ -1094,7 +1104,7 @@ tests/test_dflash_live: tests/test_dflash_live.o $(CORE_OBJS)
+ 
+ ds4.o ds4_cpu.o ds4_cpu_test_hooks.o ds4_cuda_test_hooks.o ds4_metal.o ds4_cuda.o ds4_rocm.o tests/test_qwen4_cuda.o tests/test_qwen4_kernels.o tests/test_qwen4_ngram_state.o: ds4_qwen4_vision.h
+ 
+-ds4_cuda.o: ds4_cuda.cu ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_gpu_mgpu.h ds4_linux_memory.h ds4_deepseek41_gpu.h ds4_deepseek41_cuda.cuh ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_qwen4_cuda.cuh ds4_image.h ds4_iq2_tables_cuda.inc cuda/mmq/ds4_mmq.h
++ds4_cuda.o: ds4_cuda.cu ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_gpu_mgpu.h ds4_linux_memory.h ds4_deepseek41_gpu.h ds4_deepseek41_cuda.cuh ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_qwen4_cuda.cuh ds4_qwen35_cuda.cuh ds4_image.h ds4_iq2_tables_cuda.inc cuda/mmq/ds4_mmq.h
+ 	$(NVCC) $(NVCCFLAGS) -c -o $@ ds4_cuda.cu
+ 
+ # Vendored mmq pieces (see cuda/mmq/VENDOR.md).  ds4_mmq.cu transitively
+diff --git a/ds4_cuda.cu b/ds4_cuda.cu
+index 97e1590c..2a50737f 100644
+--- a/ds4_cuda.cu
++++ b/ds4_cuda.cu
+@@ -35938,6 +35938,7 @@ extern "C" int ds4_gpu_tp_big_gate_wait(uint64_t seq) {
+ #include "ds4_deepseek4_vision_gpu.cuh"
+ #include "ds4_deepseek41_cuda.cuh"
+ #include "ds4_qwen4_cuda.cuh"
++#include "ds4_qwen35_cuda.cuh"
+ 
+ /* Side region: work encoded between ds4_gpu_side_begin() and
+  * ds4_gpu_side_end() is ordered after everything already queued on the main
+diff --git a/ds4_qwen35_cuda.cuh b/ds4_qwen35_cuda.cuh
+new file mode 100644
+index 00000000..3a7af1e6
+--- /dev/null
++++ b/ds4_qwen35_cuda.cuh
+@@ -0,0 +1,46 @@
++/* Dense qwen35 on CUDA.
++ *
++ * Only the ordinary dense graph's ops live here. Verify mode, the DFlash
++ * drafter and the gather/scatter helpers stay Metal-only. The shared Qwen CUDA
++ * header is included first; this file borrows its tensor, weight, launch and
++ * math helpers rather than redefining them. */
++
++namespace qwen35_cuda {
++
++using namespace qwen4_cuda;
++
++/* Per-head RMSNorm of the scan output, scaled by the D-wide ssm_norm weights
++ * and gated by silu(z): llama.cpp's build_norm_gated for this recipe. One warp
++ * per head slice with D/32 contiguous elements per lane, which matches the
++ * Metal kernel's mapping so both backends sum in the same order. */
++__global__ void gdn_out(float *o, const float *z, const float *w, float eps,
++        unsigned H, unsigned D) {
++    const unsigned h = blockIdx.x, t = blockIdx.y;
++    const unsigned npt = D / 32, lane = threadIdx.x;
++    const uint64_t base = ((uint64_t)t * H + h) * D + (uint64_t)lane * npt;
++    float ss = 0;
++    for (unsigned i = 0; i < npt; i++) ss += o[base + i] * o[base + i];
++    ss = sum(ss);
++    const float r = rsqrtf(ss / (float)D + eps);
++    for (unsigned i = 0; i < npt; i++)
++        o[base + i] = o[base + i] * r * w[lane * npt + i] * silu(z[base + i]);
++}
++
++} // namespace qwen35_cuda
++
++extern "C" int ds4_gpu_qwen35_gdn_out_tensor(
++        ds4_gpu_tensor *o, const ds4_gpu_tensor *z,
++        const void *map, uint64_t size, uint64_t off,
++        uint32_t T, uint32_t H, uint32_t D, float eps) {
++    using namespace qwen4_cuda;
++    using namespace qwen35_cuda;
++    /* The grid carries H across x and T down y, so both must fit gridDim. */
++    if (!T || T > 65535u || !H || H > 65535u || D < 32u || D > 128u || D % 32u ||
++        !(eps > 0.0f && eps < 3.402823466e+38f)) return 0;
++    const uint64_t bytes = (uint64_t)T * H * D * sizeof(float);
++    const char *w = weight(map, size, off, (uint64_t)D * sizeof(float));
++    if (!tensor(o, bytes) || !tensor(z, bytes) || !w) return 0;
++    gdn_out<<<dim3(H, T), 32, 0, cuda_decode_stream()>>>(
++        (float *)o->ptr, (const float *)z->ptr, (const float *)w, eps, H, D);
++    return launched();
++}
+diff --git a/tests/test_qwen35_cuda_recurrent.c b/tests/test_qwen35_cuda_recurrent.c
+new file mode 100644
+index 00000000..68e119a9
+--- /dev/null
++++ b/tests/test_qwen35_cuda_recurrent.c
+@@ -0,0 +1,160 @@
++#define _POSIX_C_SOURCE 200809L
++#include "qwen35_cuda_test.h"
++
++#include <math.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++/* Dense qwen35's gated norm: per-head RMSNorm of the scan output, scaled by
++ * the D-wide ssm_norm weights and gated by silu(z). The Qwen4 op with the same
++ * signature gates by sigmoid(z), so this file checks both: the new op must use
++ * silu, and the existing one must keep sigmoid. */
++
++typedef struct {
++    uint32_t T, H, D;
++    float eps;
++    int zero_weight;
++} q35_gdn_shape;
++
++static double ref_sigmoid(double x) {
++    return 1.0 / (1.0 + exp(-x));
++}
++
++static double ref_silu(double x) {
++    return x * ref_sigmoid(x);
++}
++
++/* qwen35_gate selects silu(z) for the qwen35 op and sigmoid(z) for the qwen4
++ * one, which is the only difference between them. */
++static void q35_gdn_out_case(const q35_gdn_shape *s, int qwen35_gate) {
++    const uint64_t count = (uint64_t)s->T * s->H * s->D;
++
++    q35_arena arena;
++    q35_arena_init(&arena, (uint64_t)s->D * sizeof(float));
++    float *weights = q35_alloc((uint64_t)s->D * sizeof(float));
++    for (uint32_t i = 0; i < s->D; i++)
++        weights[i] = s->zero_weight ? 0.0f : 0.5f + (float)(q35_random() % 64) / 32.0f;
++    const uint64_t off = q35_arena_add(&arena, weights, (uint64_t)s->D * sizeof(float));
++    const float *norm = (const float *)(arena.base + off);
++    q35_arena_bind(&arena);
++    free(weights);
++
++    float *o = q35_alloc(count * sizeof(float));
++    float *z = q35_alloc(count * sizeof(float));
++    double *expect = q35_alloc(count * sizeof(double));
++    for (uint64_t i = 0; i < count; i++) {
++        o[i] = q35_random_uniform();
++        z[i] = q35_random_uniform();
++    }
++    for (uint32_t t = 0; t < s->T; t++) {
++        for (uint32_t h = 0; h < s->H; h++) {
++            const uint64_t base = ((uint64_t)t * s->H + h) * s->D;
++            double ss = 0;
++            for (uint32_t i = 0; i < s->D; i++) ss += (double)o[base + i] * (double)o[base + i];
++            const double r = 1.0 / sqrt(ss / (double)s->D + (double)s->eps);
++            for (uint32_t i = 0; i < s->D; i++)
++                expect[base + i] = (double)o[base + i] * r * (double)norm[i] *
++                                   (qwen35_gate ? ref_silu((double)z[base + i])
++                                                : ref_sigmoid((double)z[base + i]));
++        }
++    }
++
++    ds4_gpu_tensor *ot = q35_upload(o, count);
++    ds4_gpu_tensor *zt = q35_upload(z, count);
++    const int ok = qwen35_gate
++        ? ds4_gpu_qwen35_gdn_out_tensor(ot, zt, arena.base, arena.size, off, s->T, s->H, s->D, s->eps)
++        : ds4_gpu_qwen4_gdn_out_tensor(ot, zt, arena.base, arena.size, off, s->T, s->H, s->D, s->eps);
++    q35_require(ok, "gdn out dispatch");
++
++    char what[128];
++    snprintf(what, sizeof(what), "%s T=%u H=%u D=%u zero_w=%d", qwen35_gate ? "qwen35" : "qwen4",
++             s->T, s->H, s->D, s->zero_weight);
++    q35_check_tensor(what, ot, expect, count, 5e-5);
++
++    ds4_gpu_tensor_free(zt);
++    ds4_gpu_tensor_free(ot);
++    free(expect);
++    free(z);
++    free(o);
++    q35_arena_free(&arena);
++}
++
++static void q35_gdn_out_refusals(void) {
++    const uint32_t T = 2, H = 2, D = 128;
++    const uint64_t count = (uint64_t)T * H * D, bytes = count * sizeof(float);
++
++    q35_arena arena;
++    q35_arena_init(&arena, (uint64_t)D * sizeof(float));
++    float *weights = q35_alloc((uint64_t)D * sizeof(float));
++    for (uint32_t i = 0; i < D; i++) weights[i] = 1.0f;
++    q35_arena_add(&arena, weights, (uint64_t)D * sizeof(float));
++    q35_arena_bind(&arena);
++    free(weights);
++
++    float *o = q35_alloc(bytes), *z = q35_alloc(bytes);
++    for (uint64_t i = 0; i < count; i++) {
++        o[i] = q35_random_uniform();
++        z[i] = q35_random_uniform();
++    }
++
++    ds4_gpu_tensor *ot = q35_upload(o, count);
++    ds4_gpu_tensor *zt = q35_upload(z, count);
++    ds4_gpu_tensor *short_z = ds4_gpu_tensor_view(zt, 0, bytes - sizeof(float));
++    q35_require(short_z != NULL, "short z view");
++
++    const struct {
++        const char *what;
++        uint32_t T, H, D;
++        float eps;
++        const ds4_gpu_tensor *z;
++        uint64_t off;
++    } cases[] = {
++        { "T = 0", 0, H, D, 1e-6f, zt, 0 },
++        { "H = 0", T, 0, D, 1e-6f, zt, 0 },
++        { "D = 127", T, H, 127, 1e-6f, zt, 0 },
++        { "eps = NaN", T, H, D, NAN, zt, 0 },
++        { "short z view", T, H, D, 1e-6f, short_z, 0 },
++        { "short weight", T, H, D, 1e-6f, zt, sizeof(float) },
++    };
++    for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
++        const int ok = ds4_gpu_qwen35_gdn_out_tensor(ot, cases[i].z, arena.base, arena.size,
++                                                     cases[i].off, cases[i].T, cases[i].H,
++                                                     cases[i].D, cases[i].eps);
++        q35_require(!ok, cases[i].what);
++        float first;
++        q35_require(ds4_gpu_tensor_read(ot, 0, &first, sizeof(first)), "read after refusal");
++        q35_require(first == o[0], "refusal must leave the output unchanged");
++    }
++
++    ds4_gpu_tensor_free(short_z);
++    ds4_gpu_tensor_free(zt);
++    ds4_gpu_tensor_free(ot);
++    free(z);
++    free(o);
++    q35_arena_free(&arena);
++}
++
++int main(void) {
++    q35_init();
++    const uint32_t tokens[] = { 1, 8, 9, 17, 256 };
++    for (unsigned i = 0; i < sizeof(tokens) / sizeof(tokens[0]); i++) {
++        for (int zero = 0; zero <= 1; zero++) {
++            const q35_gdn_shape s = { tokens[i], 3, 128, 1e-6f, zero };
++            q35_gdn_out_case(&s, 1);
++        }
++    }
++    for (uint32_t d = 32; d <= 96; d += 32) {
++        const q35_gdn_shape s = { 5, 2, d, 1e-6f, 0 };
++        q35_gdn_out_case(&s, 1);
++    }
++    /* The Qwen4 op keeps its sigmoid gate. */
++    const q35_gdn_shape flash = { 4, 2, 128, 1e-6f, 0 };
++    q35_gdn_out_case(&flash, 0);
++
++    q35_gdn_out_refusals();
++    q35_cleanup();
++    printf("all qwen35 CUDA recurrent tests passed\n");
++    return 0;
++}

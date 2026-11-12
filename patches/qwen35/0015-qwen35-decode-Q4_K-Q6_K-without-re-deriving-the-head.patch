@@ -1,0 +1,161 @@
+From 4b6f96598f17c3ababc157259c657c2fc86195a7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Thu, 12 Nov 2026 19:01:30 +0200
+Subject: [PATCH 15/18] qwen35: decode Q4_K/Q6_K without re-deriving the header
+ per element
+
+The generic value<> path recomputes the super-block index, the 6-bit scale
+unpacking and the nibble position for every element, so dense K-quant decode ran
+at ~146 GB/s on a 3090, 16% of the card.
+
+matvec_kquant gives each lane one 32-value sub-block: the header is decoded once,
+the row is read in 128-byte spans, activations arrive as float4, and the token
+loop reuses the dequantised values. Templated over T=1/2/4/8 and wired into the
+decode dispatch for Q4_K (12) and Q6_K (14); the arithmetic is identical to
+value<12>/value<14>, so the reference tests still define correctness.
+
+Measured on the 27B Q4_K_M, residency on: 8.71 -> 15.05 t/s generation, prefill
+unchanged at 126 t/s. test_qwen35_cuda_quant passes.
+
+Also fix the margin override: an explicit DS4_CUDA_RESERVE_GIB was being clamped
+up to the 6 GiB default floor, so the escape hatch could not lower the margin.
+The floor now applies only to the default, and the post-copy revert check uses
+the margin actually requested.
+---
+ ds4_cuda.cu        | 13 +++++---
+ ds4_qwen4_cuda.cuh | 82 ++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 91 insertions(+), 4 deletions(-)
+
+diff --git a/ds4_cuda.cu b/ds4_cuda.cu
+index dc3f1136..98ee5d05 100644
+--- a/ds4_cuda.cu
++++ b/ds4_cuda.cu
+@@ -4090,13 +4090,18 @@ static int cuda_model_make_resident(const void *model_map, uint64_t model_size)
+      * therefore yields rather than starve the machine it runs on. */
+     const char *reserve_env = getenv("DS4_CUDA_RESERVE_GIB");
+     size_t reserve = total_b / 8u;
++    bool explicit_reserve = false;
+     if (reserve_env && reserve_env[0]) {
+         const long gib = strtol(reserve_env, NULL, 10);
+-        if (gib > 0) reserve = (size_t)gib << 30;
++        if (gib >= 0) { reserve = (size_t)gib << 30; explicit_reserve = true; }
+     }
+     /* The graph allocates its own scratch after this copy (~4.3 GiB measured on
+-     * the 27B), so the margin must cover that plus room for the display. */
+-    if (reserve < ((size_t)6u << 30)) reserve = (size_t)6u << 30;
++     * the 27B), so the default margin must cover that plus room for the display.
++     * An explicit DS4_CUDA_RESERVE_GIB, including 0, always wins: it is the
++     * operator's statement about their own machine. */
++    if (!explicit_reserve && reserve < ((size_t)6u << 30)) {
++        reserve = (size_t)6u << 30;
++    }
+     if ((size_t)model_size + reserve > free_b) {
+         fprintf(stderr,
+                 "ds4: CUDA residency skipped: %.2f GiB model + %.2f GiB reserve exceeds "
+@@ -4123,7 +4128,7 @@ static int cuda_model_make_resident(const void *model_map, uint64_t model_size)
+     /* Verify the margin the copy actually left, not the one it assumed. */
+     size_t free_after = 0, total_after = 0;
+     if (cudaMemGetInfo(&free_after, &total_after) == cudaSuccess &&
+-        free_after < ((size_t)6u << 30)) {
++        free_after < reserve) {
+         fprintf(stderr,
+                 "ds4: CUDA residency reverted: only %.2f GiB would stay free; "
+                 "weights stay host-mapped\n",
+diff --git a/ds4_qwen4_cuda.cuh b/ds4_qwen4_cuda.cuh
+index 918a82fc..8b9507e7 100644
+--- a/ds4_qwen4_cuda.cuh
++++ b/ds4_qwen4_cuda.cuh
+@@ -1179,11 +1179,93 @@ __global__ void matvec_q8(float *out, const char *w, const float *x,
+     }
+ }
+ 
++/* Q4_K and Q6_K decode. The generic value<> path re-derives the super-block
++ * header, the 6-bit scale unpacking and the nibble position for every single
++ * element. Here each lane owns one 32-value sub-block: the header is decoded
++ * once, the row is read in 128-byte spans, and the per-token loop reuses the
++ * same dequantised values. Same arithmetic as value<12>/value<14>, so the
++ * reference tests still define correctness. */
++__device__ __forceinline__ void dequant_q4k_sub(const char *wr, unsigned g, float *v) {
++    const cuda_block_q4_K *b = (const cuda_block_q4_K *)wr + g / 8;
++    const unsigned sub = g % 8, base = sub * 32;
++    unsigned sc, mn;
++    if (sub < 4) { sc = b->scales[sub] & 63; mn = b->scales[sub + 4] & 63; }
++    else {
++        sc = (b->scales[sub + 4] & 15) | ((b->scales[sub - 4] >> 6) << 4);
++        mn = (b->scales[sub + 4] >> 4) | ((b->scales[sub] >> 6) << 4);
++    }
++    const float d = dev_f16_to_f32(b->d) * (float)sc;
++    const float dm = dev_f16_to_f32(b->dmin) * (float)mn;
++    const unsigned shift = 4 * (sub & 1);
++    #pragma unroll
++    for (unsigned u = 0; u < 32; u++) {
++        const unsigned j = base + u;
++        const unsigned q = (b->qs[j / 64 * 32 + (j & 31)] >> shift) & 15;
++        v[u] = d * (float)q - dm;
++    }
++}
++
++__device__ __forceinline__ void dequant_q6k_sub(const char *wr, unsigned g, float *v) {
++    const uint8_t *b = (const uint8_t *)wr + (g / 8) * 210;
++    const unsigned sub = g % 8, half = sub / 4, part = sub % 4;
++    const uint16_t dh = (uint16_t)b[208] | (uint16_t)((unsigned)b[209] << 8);
++    const float d = dev_f16_to_f32(dh);
++    #pragma unroll
++    for (unsigned u = 0; u < 32; u++) {
++        const unsigned lo = (b[half * 64 + (part & 1) * 32 + u] >> (4 * (part / 2))) & 15;
++        const unsigned hi = (b[128 + half * 32 + u] >> (2 * part)) & 3;
++        const int8_t sc = ((const int8_t *)b)[192 + sub * 2 + u / 16];
++        v[u] = d * (float)sc * (float)((int)(lo | (hi << 4)) - 32);
++    }
++}
++
++template<unsigned TYPE, unsigned ROWS>
++__global__ void matvec_kquant(float *out, const char *w, const float *x,
++        unsigned T, unsigned K, unsigned M, uint64_t stride) {
++    const unsigned row = blockIdx.x * 4 + threadIdx.x / 32, lane = threadIdx.x & 31;
++    if (row >= M) return;
++    const char *wr = w + (uint64_t)row * stride;
++    float acc[ROWS] = {};
++    const unsigned groups = K / 32;
++    for (unsigned g = lane; g < groups; g += 32) {
++        float v[32];
++        if (TYPE == 12) dequant_q4k_sub(wr, g, v);
++        else dequant_q6k_sub(wr, g, v);
++        #pragma unroll
++        for (unsigned t = 0; t < ROWS; t++) if (t < T) {
++            const float *xt = x + (uint64_t)t * K + g * 32;
++            float a = 0;
++            #pragma unroll
++            for (unsigned u = 0; u < 32; u += 4) {
++                const float4 xv = *(const float4 *)(xt + u);
++                a += v[u] * xv.x + v[u + 1] * xv.y + v[u + 2] * xv.z + v[u + 3] * xv.w;
++            }
++            acc[t] += a;
++        }
++    }
++    #pragma unroll
++    for (unsigned t = 0; t < ROWS; t++) if (t < T) {
++        const float s = sum(acc[t]);
++        if (!lane) out[(uint64_t)t * M + row] = s;
++    }
++}
++
+ static int matvec_dispatch(float *out, const char *w, const float *x,
+                            unsigned type, unsigned T, unsigned K, unsigned M) {
+     const dim3 grid((M + 3) / 4, T);
+     const uint64_t stride = row_bytes(type, K);
+     if (!stride) return 0;
++#define QWEN_KQ(TYPE, N) matvec_kquant<TYPE, N><<<(M+3)/4,128,0,cuda_decode_stream()>>>(out,w,x,T,K,M,stride)
++    if ((type == 12 || type == 14) && T <= 8 && !((uintptr_t)x&15) && !(K % 32)) {
++#define QWEN_KQ_ROWS(TYPE) \
++        if (T == 1) { QWEN_KQ(TYPE, 1); } \
++        else if (T == 2) { QWEN_KQ(TYPE, 2); } \
++        else if (T <= 4) { QWEN_KQ(TYPE, 4); } \
++        else { QWEN_KQ(TYPE, 8); }
++        if (type == 12) { QWEN_KQ_ROWS(12); } else { QWEN_KQ_ROWS(14); }
++#undef QWEN_KQ_ROWS
++        return launched();
++    }
+     if (type == 8 && T <= 8 && !((uintptr_t)x&15)) {
+ #define QWEN_Q8_ROWS(N) matvec_q8<N><<<(M+3)/4,128,0,cuda_decode_stream()>>>(out,w,x,T,K,M,stride)
+         if (T == 1) { QWEN_Q8_ROWS(1); }

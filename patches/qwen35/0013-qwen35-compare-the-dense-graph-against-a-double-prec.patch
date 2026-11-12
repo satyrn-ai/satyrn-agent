@@ -1,0 +1,599 @@
+From 757b6211900f210e11d4a000cae6b56ac0a63efc Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Wed, 11 Nov 2026 12:22:58 +0200
+Subject: [PATCH 13/18] qwen35: compare the dense graph against a
+ double-precision reference
+
+tests/test_qwen35_oracle.c builds a two-layer dense qwen35 in one host buffer
+(F32 tensors, head_dim 256, n_head 2, n_head_kv 1, n_embd 512, vocab 32) and runs
+qwen4_graph_forward_tokens for one token at position 0. The reference implements
+the documented layer order in double precision: embedding row, per-layer
+rmsnorm, the mixer (recurrent delta rule or gated attention), the residual add,
+the FFN's rmsnorm and swiglu, the second residual add, and the final norm with
+the output head.
+
+Three cases: interval 1 (both layers attention, so a failure cannot hide behind
+the recurrent mixer), and interval 2 once through the fused decode front and
+once through DS4_QWEN4_NO_FUSE's plain ops. Measured max |device - reference|:
+3.2e-06, 3.6e-05 and 3.6e-05 against the 1e-3 bar; repeats are bit identical.
+
+One token at position 0 keeps the attention contract small: a single cached key
+makes the softmax 1, so a head's output is its value rounded to the half cache
+times sigmoid(gate). Rope and the q/k norms are covered by Task 4's suite. The
+reference omits the alpha projection because the decay multiplies a zero state.
+
+Two fault injections prove the comparison discriminates: sigmoid for silu in
+qwen35_cuda::gdn_out fails at 1.40 while the attention-only case stays at
+3.2e-06, and an FFN normalisation reading attn_norm fails at 0.24. Both were
+reverted. An earlier version of this test passed the first injection because
+every tensor was scaled at 1/sqrt(width), which put the logits near 1e-2; gamma
+vectors now centre on 1.
+
+A fourth case compares nine tokens in one forward against the same nine decoded
+one at a time, which is where a batch-only dispatch or state fault shows up
+without any weights: measured max |batch - serial| = 1.5e-05, and reading the
+row before the last trips it at 1.6 while the reference cases stay green.
+Named test-qwen35-oracle, not test-qwen35-graph: that target already exists and
+drives tests/test_qwen4_kernels with DS4_TEST_QWEN35_GRAPH_ONLY=1 on Metal.
+
+The serial side is nine one-token forwards, so every recurrent state transition
+is the serial one, not an eight-token prefix followed by one step.
+
+Upstream: not offered, fork only
+Retire-when: dense qwen35 runs on CUDA upstream
+Carried-commits: none (authored here)
+---
+ .gitignore                 |   1 +
+ Makefile                   |  14 +
+ tests/test_qwen35_oracle.c | 508 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 523 insertions(+)
+ create mode 100644 tests/test_qwen35_oracle.c
+
+diff --git a/.gitignore b/.gitignore
+index e09d0a0d..458163fc 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -121,3 +121,4 @@ __pycache__/
+ /tests/test_qwen35_cuda_recurrent
+ /tests/test_qwen35_cuda_attention
+ /tests/test_qwen35_host
++/tests/test_qwen35_oracle
+diff --git a/Makefile b/Makefile
+index 7ad37963..a351563d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -796,6 +796,20 @@ endif
+ test-qwen35-host: tests/test_qwen35_host
+ 	./tests/test_qwen35_host
+ 
++tests/test_qwen35_oracle.o: tests/test_qwen35_oracle.c ds4.c ds4_gpu.h
++	$(CC) $(CFLAGS) -D_GNU_SOURCE -I. -c -o $@ $<
++
++tests/test_qwen35_oracle: tests/test_qwen35_oracle.o $(filter-out ds4.o,$(CORE_OBJS))
++ifeq ($(UNAME_S),Darwin)
++	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -o $@ $^ $(METAL_LDLIBS)
++else
++	$(DS4_LINK) -o $@ $^ $(DS4_LINK_LIBS)
++endif
++
++.PHONY: test-qwen35-oracle
++test-qwen35-oracle: tests/test_qwen35_oracle
++	./tests/test_qwen35_oracle
++
+ ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+ 	$(CC) $(CFLAGS) -c -o $@ ds4.c
+ 
+diff --git a/tests/test_qwen35_oracle.c b/tests/test_qwen35_oracle.c
+new file mode 100644
+index 00000000..eef9bdfd
+--- /dev/null
++++ b/tests/test_qwen35_oracle.c
+@@ -0,0 +1,508 @@
++/* Numerical oracle for the dense qwen35 graph: a two-layer model built in
++ * memory, one forward on the GPU, logits compared against a double-precision
++ * reference of the documented layer order. Finite or repeatable logits alone
++ * would also pass for a graph wired to the wrong model path, which is what
++ * this catches.
++ *
++ * ../ds4.c is included so the graph entry points and the shape globals are
++ * reachable, the pattern tests/test_qwen35_host.c and
++ * tests/test_deepseek41_graph.c already use. No GGUF and no loader: the dims
++ * live in g_ds4_shape and the weights in one host buffer.
++ *
++ * One token at position 0 keeps the attention layer's contract small: with a
++ * single cached key the softmax is 1, so the output of a head is its value
++ * (rounded to the half cache) times sigmoid(gate). The q/k norms and rope are
++ * covered where they belong, in tests/test_qwen35_cuda_attention.c. */
++
++#include <float.h>
++#include <math.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "../ds4.c"
++
++enum { TEST_N_LAYER = 2, TEST_TOKEN = 7 };
++
++/* One dim set for the whole file; the reference reads it through the same
++ * macros the graph uses, so the two cannot drift. */
++static void shape_dense_qwen35(uint32_t interval) {
++    g_ds4_shape = DS4_SHAPE_QWEN35;
++    g_ds4_shape.n_layer = TEST_N_LAYER;
++    g_ds4_shape.n_embd = 512;
++    g_ds4_shape.n_vocab = 32;
++    g_ds4_shape.n_head = 2;
++    g_ds4_shape.n_head_kv = 1;
++    g_ds4_shape.n_head_dim = 256;
++    g_ds4_shape.n_value_dim = 256;
++    g_ds4_shape.n_rot = 64;
++    g_ds4_shape.n_ff_dense = 512;
++    g_ds4_shape.n_full_attn_interval = interval;
++    g_ds4_shape.n_nextn_predict = 0;
++    g_ds4_shape.n_lin_k_head = 2;
++    g_ds4_shape.n_lin_v_head = 2;
++    g_ds4_shape.n_lin_head_dim = 128;
++    g_ds4_shape.n_lin_conv = 4;
++}
++
++/* Deterministic pseudo-random weights at 1/sqrt(fan_in) scale, so the float
++ * graph and the double reference stay in a range where 1e-3 is a real bound
++ * and not a rounding artefact. */
++static uint32_t g_seed = 0x5eed1234u;
++static float next_weight(double fan_in_scale) {
++    g_seed = g_seed * 1664525u + 1013904223u;
++    const double u = (double)(g_seed >> 8) / (double)(1u << 24);
++    return (float)((u * 2.0 - 1.0) * fan_in_scale);
++}
++
++typedef struct {
++    float *pool;
++    uint64_t used;
++    ds4_model model;
++    ds4_weights weights;
++} synth;
++
++static void synth_init(synth *s, uint64_t bytes) {
++    s->pool = aligned_alloc(64, (bytes + 63u) & ~(uint64_t)63u);
++    if (!s->pool) {
++        fprintf(stderr, "qwen35 graph test: out of memory\n");
++        exit(1);
++    }
++    memset(s->pool, 0, bytes);
++    s->used = 0;
++    memset(&s->weights, 0, sizeof(s->weights));
++    memset(&s->model, 0, sizeof(s->model));
++    s->model.map = (const uint8_t *)s->pool;
++    s->model.size = bytes;
++}
++
++/* Place a F32 tensor [rows][cols] in the pool and return it. A gamma vector is
++ * centred on 1 rather than on zero: scaling it like a matrix would shrink every
++ * normalisation by sqrt(width), decay the residual stream geometrically and
++ * leave logits near 1e-2, where an absolute tolerance stops discriminating. */
++static ds4_tensor *synth_tensor_scaled(synth *s, ds4_tensor *t, uint64_t rows, uint64_t cols,
++                                       bool gamma) {
++    memset(t, 0, sizeof(*t));
++    t->type = DS4_TENSOR_F32;
++    t->ndim = cols > 1 ? 2u : 1u;
++    t->dim[0] = cols;
++    t->dim[1] = rows;
++    t->elements = rows * cols;
++    t->bytes = (uint64_t)t->elements * sizeof(float);
++    t->abs_offset = s->used;
++    for (uint64_t i = 0; i < t->elements; i++)
++        s->pool[s->used / 4u + i] =
++            gamma ? (float)(1.0 + next_weight(0.25)) : next_weight(1.0 / sqrt((double)cols));
++    s->used += t->bytes;
++    return t;
++}
++
++static ds4_tensor *synth_tensor(synth *s, ds4_tensor *t, uint64_t rows, uint64_t cols) {
++    return synth_tensor_scaled(s, t, rows, cols, false);
++}
++
++static ds4_tensor *synth_gamma(synth *s, ds4_tensor *t, uint64_t cols) {
++    return synth_tensor_scaled(s, t, 1, cols, true);
++}
++
++/* Weights the tests compare against, as plain host pointers into the pool. */
++typedef struct {
++    const float *tok_embd, *out_norm, *out;
++    struct {
++        const float *attn_norm, *ffn_norm, *lin_norm;
++        const float *lin_qkv, *lin_gate, *lin_alpha, *lin_beta, *lin_conv, *lin_a, *lin_dt_bias, *lin_out;
++        const float *attn_q, *attn_k, *attn_v, *attn_output, *attn_q_norm, *attn_k_norm;
++        const float *ffn_gate, *ffn_up, *ffn_down;
++    } l[TEST_N_LAYER];
++} ref_view;
++
++static const float *host_ptr(const synth *s, const ds4_tensor *t) { return s->pool + t->abs_offset / 4u; }
++
++static ds4_tensor g_tok, g_out_norm, g_out;
++static ds4_tensor g_norm[TEST_N_LAYER][3];
++static ds4_tensor g_lin[TEST_N_LAYER][8];
++static ds4_tensor g_attn[TEST_N_LAYER][6];
++static ds4_tensor g_ffn[TEST_N_LAYER][3];
++
++static void synth_build(synth *s, ref_view *rv) {
++    const uint64_t E = DS4_N_EMBD, F = DS4_N_FF_DENSE, V = DS4_N_VOCAB;
++    const uint64_t D = DS4_N_HEAD_DIM, Hkv = DS4_N_HEAD_KV;
++    const uint64_t lin_d = DS4_N_LIN_HEAD_DIM, lin_hv = DS4_N_LIN_V_HEAD;
++    synth_init(s, (uint64_t)64 << 20);
++    synth_tensor(s, &g_tok, V, E);
++    synth_gamma(s, &g_out_norm, E);
++    synth_tensor(s, &g_out, V, E);
++    s->weights.token_embd = &g_tok;
++    s->weights.output_norm = &g_out_norm;
++    s->weights.output = &g_out;
++    rv->tok_embd = host_ptr(s, &g_tok);
++    rv->out_norm = host_ptr(s, &g_out_norm);
++    rv->out = host_ptr(s, &g_out);
++    for (uint32_t il = 0; il < TEST_N_LAYER; il++) {
++        ds4_layer_weights *l = &s->weights.layer[il];
++        synth_gamma(s, &g_norm[il][0], E);
++        synth_gamma(s, &g_norm[il][1], E);
++        synth_gamma(s, &g_norm[il][2], lin_d);
++        l->attn_norm = &g_norm[il][0];
++        l->ffn_norm = &g_norm[il][1];
++        l->lin_norm = &g_norm[il][2];
++        rv->l[il].attn_norm = host_ptr(s, &g_norm[il][0]);
++        rv->l[il].ffn_norm = host_ptr(s, &g_norm[il][1]);
++        rv->l[il].lin_norm = host_ptr(s, &g_norm[il][2]);
++
++        synth_tensor(s, &g_lin[il][0], DS4_N_LIN_CONV_DIM, E);
++        synth_tensor(s, &g_lin[il][1], lin_hv * lin_d, E);
++        synth_tensor(s, &g_lin[il][2], lin_hv, E);
++        synth_tensor(s, &g_lin[il][3], lin_hv, E);
++        synth_tensor(s, &g_lin[il][4], DS4_N_LIN_CONV_DIM, DS4_N_LIN_CONV);
++        synth_tensor(s, &g_lin[il][5], lin_hv, 1);
++        synth_tensor(s, &g_lin[il][6], lin_hv, 1);
++        synth_tensor(s, &g_lin[il][7], E, lin_hv * lin_d);
++        l->lin_qkv = &g_lin[il][0];
++        l->lin_gate = &g_lin[il][1];
++        l->lin_alpha = &g_lin[il][2];
++        l->lin_beta = &g_lin[il][3];
++        l->lin_conv = &g_lin[il][4];
++        l->lin_a = &g_lin[il][5];
++        l->lin_dt_bias = &g_lin[il][6];
++        l->lin_out = &g_lin[il][7];
++        rv->l[il].lin_qkv = host_ptr(s, &g_lin[il][0]);
++        rv->l[il].lin_gate = host_ptr(s, &g_lin[il][1]);
++        rv->l[il].lin_alpha = host_ptr(s, &g_lin[il][2]);
++        rv->l[il].lin_beta = host_ptr(s, &g_lin[il][3]);
++        rv->l[il].lin_conv = host_ptr(s, &g_lin[il][4]);
++        rv->l[il].lin_a = host_ptr(s, &g_lin[il][5]);
++        rv->l[il].lin_dt_bias = host_ptr(s, &g_lin[il][6]);
++        rv->l[il].lin_out = host_ptr(s, &g_lin[il][7]);
++
++        synth_tensor(s, &g_attn[il][0], DS4_N_HEAD * DS4_N_HEAD_DIM * 2, E);
++        synth_tensor(s, &g_attn[il][1], Hkv * D, E);
++        synth_tensor(s, &g_attn[il][2], Hkv * D, E);
++        synth_tensor(s, &g_attn[il][3], E, DS4_N_HEAD * DS4_N_HEAD_DIM);
++        synth_gamma(s, &g_attn[il][4], D);
++        synth_gamma(s, &g_attn[il][5], D);
++        l->attn_q = &g_attn[il][0];
++        l->attn_k = &g_attn[il][1];
++        l->attn_v = &g_attn[il][2];
++        l->attn_output = &g_attn[il][3];
++        l->attn_q_norm = &g_attn[il][4];
++        l->attn_k_norm = &g_attn[il][5];
++        rv->l[il].attn_q = host_ptr(s, &g_attn[il][0]);
++        rv->l[il].attn_k = host_ptr(s, &g_attn[il][1]);
++        rv->l[il].attn_v = host_ptr(s, &g_attn[il][2]);
++        rv->l[il].attn_output = host_ptr(s, &g_attn[il][3]);
++        rv->l[il].attn_q_norm = host_ptr(s, &g_attn[il][4]);
++        rv->l[il].attn_k_norm = host_ptr(s, &g_attn[il][5]);
++
++        synth_tensor(s, &g_ffn[il][0], F, E);
++        synth_tensor(s, &g_ffn[il][1], F, E);
++        synth_tensor(s, &g_ffn[il][2], E, F);
++        l->ffn_gate = &g_ffn[il][0];
++        l->ffn_up = &g_ffn[il][1];
++        l->ffn_down = &g_ffn[il][2];
++        rv->l[il].ffn_gate = host_ptr(s, &g_ffn[il][0]);
++        rv->l[il].ffn_up = host_ptr(s, &g_ffn[il][1]);
++        rv->l[il].ffn_down = host_ptr(s, &g_ffn[il][2]);
++    }
++}
++
++/* ---- the reference ---------------------------------------------------- */
++
++static void ref_rmsnorm(double *o, const double *x, const float *w, uint64_t n) {
++    double ss = 0;
++    for (uint64_t i = 0; i < n; i++) ss += x[i] * x[i];
++    const double scale = 1.0 / sqrt(ss / (double)n + (double)DS4_RMS_EPS);
++    for (uint64_t i = 0; i < n; i++) o[i] = x[i] * scale * (double)w[i];
++}
++
++/* out[r] = sum_c W[r * cols + c] * x[c] */
++static void ref_matvec(double *o, const float *W, const double *x, uint64_t rows, uint64_t cols) {
++    for (uint64_t r = 0; r < rows; r++) {
++        const float *row = W + r * cols;
++        double a = 0;
++        for (uint64_t c = 0; c < cols; c++) a += (double)row[c] * x[c];
++        o[r] = a;
++    }
++}
++
++static double ref_silu(double x) { return x / (1.0 + exp(-x)); }
++static double ref_sigmoid(double x) { return 1.0 / (1.0 + exp(-x)); }
++
++/* The value cache is half, so a head's value reaches the output rounded. */
++static double ref_half(double v) {
++#if defined(__FLT16_MAX__)
++    const _Float16 h = (_Float16)v;
++    return (double)h;
++#else
++    return v;
++#endif
++}
++
++/* The two GDN q/k normalisations are not the rms form: the kernel scales by
++ * rsqrt(sum + 1e-6), and q additionally by rsqrt(head_dim). */
++static void ref_gdn_norm(double *dst, const double *src, uint64_t n, bool is_q) {
++    double ss = 0;
++    for (uint64_t i = 0; i < n; i++) ss += src[i] * src[i];
++    const double scale = is_q ? 1.0 / sqrt(ss + 1e-6) / sqrt((double)n) : 1.0 / sqrt(ss + 1e-6);
++    for (uint64_t i = 0; i < n; i++) dst[i] = src[i] * scale;
++}
++
++static void ref_layer_linear(const ref_view *rv, uint32_t il, const double *R, double *blk) {
++    const uint64_t E = DS4_N_EMBD, conv_dim = DS4_N_LIN_CONV_DIM, lin_d = DS4_N_LIN_HEAD_DIM;
++    const uint64_t hk = DS4_N_LIN_K_HEAD, hv = DS4_N_LIN_V_HEAD, v_dim = hv * lin_d;
++    double mixed[1024], qkv[1024], z[512], gb[8], o[512];
++    ref_rmsnorm(mixed, R, rv->l[il].attn_norm, E);
++    ref_matvec(qkv, rv->l[il].lin_qkv, mixed, conv_dim, E);
++    ref_matvec(z, rv->l[il].lin_gate, mixed, v_dim, E);
++    ref_matvec(gb, rv->l[il].lin_beta, mixed, hv, E);
++    /* The convolution starts from an empty history, so only the last tap
++     * survives it; the stream then passes through silu. */
++    for (uint64_t c = 0; c < conv_dim; c++) {
++        const double tap = (double)rv->l[il].lin_conv[c * DS4_N_LIN_CONV + (DS4_N_LIN_CONV - 1)];
++        qkv[c] = ref_silu(tap * qkv[c]);
++    }
++    /* The scan starts from a zero state, so the decay multiplies nothing and
++     * the state after one step is k (x) beta*v: o = beta*v*(k.q). Reading the
++     * alpha projection would not change these logits. */
++    for (uint64_t h = 0; h < hv; h++) {
++        const uint64_t kh = h % hk;
++        const double beta = ref_sigmoid(gb[h]);
++        double qn[128], kn[128], dot = 0;
++        ref_gdn_norm(qn, qkv + kh * lin_d, lin_d, true);
++        ref_gdn_norm(kn, qkv + (hk + kh) * lin_d, lin_d, false);
++        for (uint64_t i = 0; i < lin_d; i++) dot += qn[i] * kn[i];
++        for (uint64_t i = 0; i < lin_d; i++)
++            o[h * lin_d + i] = beta * qkv[2 * hk * lin_d + h * lin_d + i] * dot;
++    }
++    /* Gated output norm: per-head rms norm, the head-wide weights, silu gate. */
++    for (uint64_t h = 0; h < hv; h++) {
++        double ss = 0;
++        for (uint64_t i = 0; i < lin_d; i++) ss += o[h * lin_d + i] * o[h * lin_d + i];
++        const double r = 1.0 / sqrt(ss / (double)lin_d + (double)DS4_RMS_EPS);
++        for (uint64_t i = 0; i < lin_d; i++)
++            o[h * lin_d + i] = o[h * lin_d + i] * r * (double)rv->l[il].lin_norm[i] *
++                               ref_silu(z[h * lin_d + i]);
++    }
++    ref_matvec(blk, rv->l[il].lin_out, o, E, v_dim);
++}
++
++static void ref_layer_attention(const ref_view *rv, uint32_t il, const double *R, double *blk) {
++    const uint64_t E = DS4_N_EMBD, D = DS4_N_HEAD_DIM, H = DS4_N_HEAD, Hkv = DS4_N_HEAD_KV;
++    double mixed[1024], qg[1024], v[1024], attn[1024];
++    ref_rmsnorm(mixed, R, rv->l[il].attn_norm, E);
++    ref_matvec(qg, rv->l[il].attn_q, mixed, 2 * H * D, E);
++    ref_matvec(v, rv->l[il].attn_v, mixed, Hkv * D, E);
++    /* One cached key makes the softmax 1, so a head's output is its value
++     * (rounded to the half cache) times sigmoid(gate); the gate is the second
++     * half of the fused q projection. */
++    for (uint64_t h = 0; h < H; h++)
++        for (uint64_t d = 0; d < D; d++)
++            attn[h * D + d] = ref_half(v[(h % Hkv) * D + d]) * ref_sigmoid(qg[(h * 2 + 1) * D + d]);
++    ref_matvec(blk, rv->l[il].attn_output, attn, E, H * D);
++}
++
++static void ref_forward(const ref_view *rv, int token, double *logits) {
++    const uint64_t E = DS4_N_EMBD, F = DS4_N_FF_DENSE, V = DS4_N_VOCAB;
++    double R[1024], blk[1024], mixed[1024], gate[1024], up[1024], mid[1024], out[1024];
++    for (uint64_t i = 0; i < E; i++) R[i] = (double)rv->tok_embd[(uint64_t)token * E + i];
++    for (uint32_t il = 0; il < TEST_N_LAYER; il++) {
++        const bool linear = ds4_qwen4_layer_is_linear(il);
++        if (linear) {
++            ref_layer_linear(rv, il, R, blk);
++        } else {
++            ref_layer_attention(rv, il, R, blk);
++        }
++        for (uint64_t i = 0; i < E; i++) R[i] += blk[i];
++        ref_rmsnorm(mixed, R, rv->l[il].ffn_norm, E);
++        ref_matvec(gate, rv->l[il].ffn_gate, mixed, F, E);
++        ref_matvec(up, rv->l[il].ffn_up, mixed, F, E);
++        for (uint64_t i = 0; i < F; i++) mid[i] = ref_silu(gate[i]) * up[i];
++        ref_matvec(blk, rv->l[il].ffn_down, mid, E, F);
++        for (uint64_t i = 0; i < E; i++) R[i] += blk[i];
++    }
++    ref_rmsnorm(out, R, rv->out_norm, E);
++    ref_matvec(logits, rv->out, out, V, E);
++}
++
++/* ---- the device ------------------------------------------------------- */
++
++typedef struct {
++    double max_abs;
++    uint64_t worst;
++    float got[64];
++} result;
++
++static bool run_device(const synth *s, int token, result *res) {
++    ds4_qwen4_gpu_graph g;
++    if (!qwen4_graph_alloc(&g, &s->weights, 8u, 4u, false, NULL, NULL, NULL, 0)) {
++        fprintf(stderr, "qwen35 graph test: the graph refused a dense qwen35 layout\n");
++        return false;
++    }
++    float logits[64];
++    const int ids[1] = {token};
++    const bool ok = qwen4_graph_forward_tokens(&g, &s->model, &s->weights, ids, 1u, logits, false) &&
++                    ds4_gpu_tensor_read(g.logits, 0, logits, (uint64_t)DS4_N_VOCAB * sizeof(float)) != 0 &&
++                    ds4_gpu_synchronize() != 0;
++    qwen4_graph_free(&g);
++    if (!ok) {
++        fprintf(stderr, "qwen35 graph test: the forward failed\n");
++        return false;
++    }
++    for (uint32_t i = 0; i < DS4_N_VOCAB && i < 64u; i++) res->got[i] = logits[i];
++    return true;
++}
++
++static bool all_finite(const float *v, uint32_t n) {
++    for (uint32_t i = 0; i < n; i++)
++        if (!isfinite(v[i])) return false;
++    return true;
++}
++
++static bool same(const float *a, const float *b, uint32_t n) {
++    for (uint32_t i = 0; i < n; i++)
++        if (memcmp(&a[i], &b[i], sizeof(float)) != 0) return false;
++    return true;
++}
++
++/* Run one shape, compare, and report what disagreed. */
++static int check_case(uint32_t interval, bool no_fuse, const char *name) {
++    shape_dense_qwen35(interval);
++    synth s;
++    ref_view rv;
++    memset(&rv, 0, sizeof(rv));
++    g_seed = 0x5eed1234u;
++    synth_build(&s, &rv);
++    if (!ds4_gpu_set_model_map_range(s.model.map, s.model.size, 0, s.model.size,
++                                     (uint64_t)64 << 20)) {
++        fprintf(stderr, "qwen35 graph test: the weight map was refused\n");
++        return 1;
++    }
++    if (no_fuse) setenv("DS4_QWEN4_NO_FUSE", "1", 1);
++    else unsetenv("DS4_QWEN4_NO_FUSE");
++
++    result a, b;
++    memset(&a, 0, sizeof(a));
++    memset(&b, 0, sizeof(b));
++    if (!run_device(&s, TEST_TOKEN, &a) || !run_device(&s, TEST_TOKEN, &b)) return 1;
++    if (!all_finite(a.got, DS4_N_VOCAB)) {
++        fprintf(stderr, "qwen35 graph test (%s): logits are not finite\n", name);
++        return 1;
++    }
++    if (!same(a.got, b.got, DS4_N_VOCAB)) {
++        fprintf(stderr, "qwen35 graph test (%s): a repeat run differs\n", name);
++        return 1;
++    }
++    double ref[64];
++    memset(ref, 0, sizeof(ref));
++    ref_forward(&rv, TEST_TOKEN, ref);
++    double max_abs = 0;
++    uint64_t worst = 0;
++    for (uint32_t i = 0; i < DS4_N_VOCAB && i < 64u; i++) {
++        const double d = fabs((double)a.got[i] - ref[i]);
++        if (d > max_abs) {
++            max_abs = d;
++            worst = i;
++        }
++    }
++    printf("qwen35 graph (%s): max |device - reference| = %.3e at logit %llu\n", name, max_abs,
++           (unsigned long long)worst);
++    if (!(max_abs < 1e-3)) {
++        fprintf(stderr, "qwen35 graph test (%s): logit %llu is %.9f, the reference says %.9f\n", name,
++                (unsigned long long)worst, (double)a.got[worst], ref[worst]);
++        return 1;
++    }
++    return 0;
++}
++
++/* Nine tokens in one forward against the same nine decoded one at a time, nine
++ * separate one-token forwards, so every recurrent state transition is the
++ * serial one. A batch that large crosses into the row-major dispatch layer and
++ * the plain GDN front where a single token takes the fused one, so a type or
++ * layer missing from a second path shows up here without any weights. The
++ * logits compared are the last row's in both cases. */
++static int check_batch_serial(void) {
++    enum { BATCH = 9 };
++    shape_dense_qwen35(2u);
++    synth s;
++    ref_view rv;
++    memset(&rv, 0, sizeof(rv));
++    g_seed = 0x5eed1234u;
++    synth_build(&s, &rv);
++    if (!ds4_gpu_set_model_map_range(s.model.map, s.model.size, 0, s.model.size, (uint64_t)64 << 20)) {
++        fprintf(stderr, "qwen35 graph test: the weight map was refused\n");
++        return 1;
++    }
++    unsetenv("DS4_QWEN4_NO_FUSE");
++    int ids[BATCH];
++    for (uint32_t i = 0; i < BATCH; i++) ids[i] = (int)((g_seed = g_seed * 1664525u + 1013904223u) >> 16) %
++                                                 (int)DS4_N_VOCAB;
++    float batch[BATCH <= 64 ? 64 : 64];
++    float serial[64];
++    for (uint32_t i = 0; i < 64u; i++) batch[i] = serial[i] = NAN;
++
++    ds4_qwen4_gpu_graph g;
++    if (!qwen4_graph_alloc(&g, &s.weights, 16u, 16u, false, NULL, NULL, NULL, 0)) {
++        fprintf(stderr, "qwen35 graph test: the graph refused a dense qwen35 layout\n");
++        return 1;
++    }
++    bool ok = qwen4_graph_forward_tokens(&g, &s.model, &s.weights, ids, BATCH, batch, false) &&
++              ds4_gpu_tensor_read(g.logits, 0, batch, (uint64_t)DS4_N_VOCAB * sizeof(float)) != 0;
++    qwen4_graph_free(&g);
++    if (!ok) {
++        fprintf(stderr, "qwen35 graph test: the batch forward failed\n");
++        return 1;
++    }
++
++    if (!qwen4_graph_alloc(&g, &s.weights, 16u, 16u, false, NULL, NULL, NULL, 0)) return 1;
++    for (uint32_t i = 0; ok && i < BATCH; i++)
++        ok = qwen4_graph_forward_tokens(&g, &s.model, &s.weights, ids + i, 1u, serial, false);
++    ok = ok && ds4_gpu_tensor_read(g.logits, 0, serial, (uint64_t)DS4_N_VOCAB * sizeof(float)) != 0 &&
++         ds4_gpu_synchronize() != 0;
++    qwen4_graph_free(&g);
++    if (!ok) {
++        fprintf(stderr, "qwen35 graph test: the serial forward failed\n");
++        return 1;
++    }
++    if (!all_finite(batch, DS4_N_VOCAB) || !all_finite(serial, DS4_N_VOCAB)) {
++        fprintf(stderr, "qwen35 graph test: batch or serial logits are not finite\n");
++        return 1;
++    }
++    double max_abs = 0;
++    uint64_t worst = 0;
++    for (uint32_t i = 0; i < DS4_N_VOCAB && i < 64u; i++) {
++        const double d = fabs((double)batch[i] - (double)serial[i]);
++        if (d > max_abs) {
++            max_abs = d;
++            worst = i;
++        }
++    }
++    printf("qwen35 graph (batch vs serial, 9 tokens): max |batch - serial| = %.3e at logit %llu\n",
++           max_abs, (unsigned long long)worst);
++    if (!(max_abs < 1e-3)) {
++        fprintf(stderr, "qwen35 graph test: batch logit %llu is %.9f, serial says %.9f\n",
++                (unsigned long long)worst, (double)batch[worst], (double)serial[worst]);
++        return 1;
++    }
++    return 0;
++}
++
++int main(void) {
++    if (ds4_gpu_init() == 0) {
++        printf("qwen35 graph test: no CUDA device, skipping\n");
++        return 0;
++    }
++    /* Interval 1 makes both layers full attention: the attention, FFN and head
++     * wiring without the recurrent mixer, so a failure there is not confusable
++     * with the GDN path. */
++    if (check_case(1u, false, "attention-only, interval 1") != 0) return 1;
++    /* Interval 2 is the documented layout: linear layer 0, attention layer 1,
++     * once through the fused decode front and once through the plain ops. */
++    if (check_case(2u, false, "dense layout, fused front") != 0) return 1;
++    if (check_case(2u, true, "dense layout, unfused front") != 0) return 1;
++    /* Nine tokens in one forward against nine decoded one at a time. */
++    if (check_batch_serial() != 0) return 1;
++    printf("all qwen35 graph oracle tests passed\n");
++    ds4_gpu_cleanup();
++    return 0;
++}

@@ -1,7 +1,7 @@
-From e96145592d51ebdb1fe8ed4a2bc628ddb7d9089f Mon Sep 17 00:00:00 2001
+From d93924b31261f8cf36dcbf823bbc05c21774715e Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 05:05:49 +0900
-Subject: [PATCH 5/8] qwen35: verify mode, several rows in one forward
+Subject: [PATCH 05/18] qwen35: verify mode, several rows in one forward
 
 Multi-row verify on Metal for dense qwen35: the fused GDN front, attention rows with their own key splits, exact and MMA few-row matvecs, commit by recompute, and the session API with the open-verify refusal.
 

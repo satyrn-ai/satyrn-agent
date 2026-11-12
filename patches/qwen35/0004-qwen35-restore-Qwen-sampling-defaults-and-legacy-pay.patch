@@ -1,8 +1,8 @@
-From 69622501e362ebdbbd0e3fdefc1e6348e79846d7 Mon Sep 17 00:00:00 2001
+From af9d2526f9bd9cb5f739478cc514b029cb47295e Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 6 Oct 2026 15:10:05 +0900
-Subject: [PATCH 4/8] qwen35: restore Qwen sampling defaults and legacy payload
- predicate
+Subject: [PATCH 04/18] qwen35: restore Qwen sampling defaults and legacy
+ payload predicate
 
 Upstream: offer upstream with the libds4 target
 Retire-when: upstream has both

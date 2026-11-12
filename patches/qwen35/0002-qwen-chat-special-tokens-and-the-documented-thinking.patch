@@ -1,7 +1,7 @@
-From bf1b2eef18ecfc9ba5f8a478b52557899cb16d0c Mon Sep 17 00:00:00 2001
+From 076cd824dcb94235865f8e66e3b0cc0e24990495 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Fri, 2 Oct 2026 12:46:09 +0900
-Subject: [PATCH 2/8] qwen: chat special tokens and the documented
+Subject: [PATCH 02/18] qwen: chat special tokens and the documented
  thinking-mode sampling
 
 Renders <tool_response> and a system message's <tool_call> as the special tokens the template uses, and samples the Qwen family at the documented thinking-mode values (0.6, 0.95, 20, 0) in ds4-agent and ds4.

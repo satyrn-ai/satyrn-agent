@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a dense serial qwen35 decode path to the CUDA build as four new patches in `patches/qwen35/`, each proven by an independent reference test.
+**Goal:** Add a dense serial qwen35 decode path to the CUDA build as five new patches in `patches/qwen35/`, each proven by an independent reference test.
 
 **Architecture:** The neutral op contract already exists — `ds4_gpu.h` declares `ds4_gpu_qwen35_gdn_out_tensor`, `ds4_gpu_qwen35_attn_prep_tensor` and `ds4_gpu_qwen35_attn_fa_tensor`, and the Metal backend implements them. This plan implements the same symbols for CUDA in a new `ds4_qwen35_cuda.cuh`, extends the existing Qwen CUDA quant dispatch with Q6_K, and replaces the model-support refusal with backend-aware dispatch. Verify, DFlash and the drafter stay Metal-only.
 
@@ -20,6 +20,7 @@
 - CUDA lives inside `patches/qwen35`, never a sibling model directory; series order is `common` then models in `LC_ALL=C` order (L178).
 - Patch ledger trailers are mandatory: `Upstream:`, `Retire-when:`, `Carried-commits:` (L54).
 - CUDA architecture is `sm_86` for the RTX 3060 and RTX 3090.
+- The CUDA toolchain comes from `devenv.nix`: `cudaPackages` 12.9 (`cuda_nvcc`, `cuda_cudart`, `cuda_cccl`, `libcublas`), Linux only, added to the shell only when `DS4_CUDA=1`. Run every CUDA build and test through `tools/ds4-cuda.sh`, which sets that flag; a plain `devenv shell` stays CUDA-free because the closure is about 1.5 GiB and every CI job enters it. Do not add a second toolchain, a hand-rolled `nix shell` line or a `cuda.mk`.
 - The pin already carries `.shared` on all three `ldmatrix` forms. Do not re-add it.
 
 ## Decisions required before execution
@@ -41,7 +42,7 @@
 | `tests/test_qwen35_cuda_recurrent.c` | Recurrent SiLU output tests, schedules and refusals | 3 |
 | `tests/test_qwen35_cuda_attention.c` | Attention preparation and causal attention tests | 4 |
 | `tests/test_qwen35_host.c` | New host suite: weight acceptance, refusals, Metal-only verdicts (includes `../ds4.c`) | 5 |
-| `tests/test_qwen35_graph.c` | Numerical oracle: tiny graph versus a double-precision reference | 5 |
+| `tests/test_qwen35_oracle.c` | Numerical oracle: tiny graph versus a double-precision reference | 5 |
 | `Makefile`, `.gitignore` | Test targets and build products | 2–5 |
 | `patches/qwen35/0009-*.patch` … `0012-*.patch` | Generated ledger entries | 6 |
 | `docs/specs/2026-10-24-ds4-patch-series-design.md` | Patch ledger table | 6 |
@@ -62,11 +63,11 @@
 - Modify (scratch only): `.ds4/tree` (gitignored)
 
 **Interfaces:**
-- Produces: `.ds4/tree` at 11 commits past the pin (`3 common + 8 qwen35`), with a clean status and the scratch range recorded.
+- Produces: `.ds4/tree` at 11 commits past the pin (`3 common + 8 qwen35`) on branch `ds4/model/qwen35`, clean status, and the scratch range recorded in `.ds4/tree/.git/ds4-state`.
 
 - [ ] **Step 1: Sync the qwen35 target**
 
-Run: `tools/ds4-sync --model qwen35`
+Run: `ds4-sync --model qwen35` (inside `devenv shell`; the sources are `tools/ds4-*.sh`)
 Expected: exit 0; `.ds4/tree/.git` exists; state records target `qwen35`.
 
 - [ ] **Step 2: Record the baseline**
@@ -114,18 +115,18 @@ Expected: `3` declarations in the header, `0` definitions in the CUDA sources. T
 
 - Q6_K block: 128 low nibbles at byte 0, high 2-bit parts at byte 128, int8 scales at byte 192, fp16 `d` at byte 208, `q = (lo | hi << 4) - 32`.
 - Product cases for `K ∈ {256, 512}`, `M ∈ {1, 4}` and `T ∈ {1, 8, 9, 17, 32, 33}`, comparing GPU output against the reference within `5e-5`. `T ∈ {1, 8}` exercises `matvec_dispatch`, `T ∈ {9, 17}` exercises `matrix_dispatch`, `T ∈ {32, 33}` exercises `dense_blas` and its `unpack` path.
-- One run with the cuBLAS and tensor-core layers forced off, so `QWEN_MM` and unquantized fallbacks are covered too; the switch is the existing quality-mode / no-TF32 environment knob.
+- One run with `DS4_CUDA_NO_TF32=1`, which forces the plain matrix kernel (`QWEN_MM`) instead of the tensor-core one. cuBLAS has no disable knob, so `T ≥ 32` always exercises `dense_blas` and its `unpack` path.
 - Invalid-`K` refusal: `K = 384` must return 0 because `row_bytes` yields 0, and the output must stay unchanged.
 - Short-buffer refusal: a view one byte short must return 0 and leave the output unchanged.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 2: Add the test harness and the target**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-quant`
-Expected: no rule to make target, because the target does not exist yet.
+`tests/qwen35_cuda_test.h` exposes `q35_init`, `q35_cleanup`, `q35_require`, `q35_alloc`, `q35_random`, the `q35_arena` bump allocator and `q35_check_tensor`. `tests/qwen35_cuda_test.c` implements them. `Makefile` gains object rules and `test-qwen35-cuda-quant` (mirroring the existing `test-qwen4-cuda` block). `.gitignore` gains `/tests/test_qwen35_cuda_quant`.
 
-- [ ] **Step 3: Add the test harness and target**
+- [ ] **Step 3: Run it to see the real red state**
 
-`tests/qwen35_cuda_test.h` exposes `q35_init`, `q35_cleanup`, `q35_upload`, `q35_check_tensor`, `q35_require` and the shared arena type. `Makefile` gains object rules and `test-qwen35-cuda-quant` (mirroring the existing `test-qwen4-cuda` block). `.gitignore` gains `/tests/test_qwen35_cuda_quant`.
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-quant`
+Expected: the test fails at `qwen35 test: Q6_K dense mm`, because `row_bytes(14)` is still 0. A missing make rule would mean the target was not added.
 
 - [ ] **Step 4: Implement the decoding**
 
@@ -133,12 +134,12 @@ Expected: no rule to make target, because the target does not exist yet.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-quant`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-quant`
 Expected: `all qwen35 CUDA quant tests passed`.
 
 - [ ] **Step 6: Inject the stride fault and restore**
 
-Change the type-14 stride to `176`; the test must fail on the first Q6_K case. Restore and rerun: passes.
+Change the type-14 stride to `176`; the test must fail on the first multi-row case (`K = 256`, `M = 4`, `T = 1`), where a truncated row makes the next row's bytes bleed in. Restore and rerun: passes.
 
 - [ ] **Step 7: Commit**
 
@@ -171,7 +172,7 @@ git -C .ds4/tree commit -m "qwen35: dense Q6_K weight products on CUDA"
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-recurrent`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-recurrent`
 Expected: link failure, `undefined reference to ds4_gpu_qwen35_gdn_out_tensor`.
 
 - [ ] **Step 3: Implement the op in `ds4_qwen35_cuda.cuh`**
@@ -180,7 +181,7 @@ One kernel launch: 32 threads per head slice, `T × H` blocks. Validate `T ≤ 6
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-recurrent`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-recurrent`
 Expected: `all qwen35 CUDA recurrent tests passed`.
 
 - [ ] **Step 5: Commit**
@@ -216,7 +217,7 @@ git -C .ds4/tree commit -m "qwen35: dense recurrent SiLU output on CUDA"
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-attention`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-attention`
 Expected: link failure for both new symbols.
 
 - [ ] **Step 3: Implement both ops**
@@ -225,7 +226,7 @@ Expected: link failure for both new symbols.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `make -C .ds4/tree test-qwen35-cuda-attention`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-attention`
 Expected: `all qwen35 CUDA attention tests passed`.
 
 - [ ] **Step 5: Commit**
@@ -239,6 +240,13 @@ git -C .ds4/tree commit -m "qwen35: dense preparation and causal attention on CU
 
 ### Task 5: Enable the ordinary dense graph on CUDA
 
+**Execution notes** (from the completed Tasks 2–4 baseline at the 11-commit pin):
+
+- `ds4_cuda.o` must list `ds4_qwen35_cuda.cuh` among its prerequisites. Without that line a header edit leaves a stale object file and a fault injection silently passes.
+- Half caches cannot be compared bitwise to a double reference: one ULP of half, plus the float-versus-double difference in the norm and rope intermediates, moves the last bit. Compare them at `2e-3`.
+- Feed the attention check with the q, gate and cache halves the device wrote, after checking them separately against the reference. Otherwise a prep rounding difference leaks into the attention assertion.
+- Refusal tests must seed the output tensor with a sentinel; a freshly allocated CUDA tensor is uninitialized, so "unchanged" cannot mean "zero".
+
 **Files:**
 - Modify: `.ds4/tree/ds4.c` — `qwen35_graph_weights_supported`, `qwen4_graph_linear`, `qwen35_graph_attention`, the `qwen35_graph_verify_*` boundary, `qwen35_graph_stage_inputs`, `qwen35_graph_forward_tokens`, `qwen4_graph_forward_tokens`
 - Create: `.ds4/tree/tests/test_qwen35_host.c`
@@ -248,6 +256,15 @@ git -C .ds4/tree commit -m "qwen35: dense preparation and causal attention on CU
 **Interfaces:**
 - Consumes: Tasks 2–4.
 - Produces: make targets `test-qwen35-host` and `test-qwen35-graph`; a CUDA build in which `qwen4_graph_forward_tokens` reaches the qwen35 graph.
+
+**Guard map for Step 5** (measured at the 14-commit tree):
+
+- `ds4.c` has no `int main`, and eight existing tests already `#include "../ds4.c"`, so the host test can reach the statics that way.
+- `g_ds4_shape` is the runtime shape; `DS4_SHAPE_QWEN35` is its qwen35 initializer. `ds4_qwen4_layer_is_linear(il)` reads `n_full_attn_interval` and `n_nextn_predict`, so the test must set both before checking per-layer verdicts.
+- `qwen35_graph_dense_ok` (ds4.c:59437) accepts `qwen4_graph_dense_ok` types plus Q4_K and Q6_K, and requires `dim[0] % 256 == 0` for those two. `qwen4_graph_dense_ok` accepts Q8_0, F16, F32, BF16 and Q4_0.
+- The single `#if defined(__APPLE__)` block that blocks CUDA runs from just above `qwen35_graph_attention` to just above `qwen4_graph_forward_tokens`. Member order inside it: `qwen35_graph_attention`, `qwen35_graph_verify_mode`, `qwen35_graph_verify_alloc`, `qwen35_graph_stage_inputs`, `qwen35_dflash_capture`, `qwen35_dflash_capture_begin`, `qwen35_dflash_capture_end`, `qwen35_graph_forward_tokens`, `qwen35_graph_verify`, `qwen35_graph_commit`, `qwen35_dflash_rows`, `qwen35_dflash_draft`.
+- Two smaller Apple guards also matter: the qwen35 branch in `qwen4_graph_linear`, and the qwen35 dispatch inside `qwen4_graph_forward_tokens`.
+- `DS4_HAS_QWEN4_GPU` (ds4.c:59242 onward) already encloses the whole graph, so the neutral functions are compiled on every GPU build and only need symbols from the selected backend.
 
 - [ ] **Step 1: Create the host test**
 
@@ -260,16 +277,16 @@ git -C .ds4/tree commit -m "qwen35: dense preparation and causal attention on CU
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `make -C .ds4/tree test-qwen35-host`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host`
 Expected: no rule to make target, because neither the target nor the file exists yet.
 
 - [ ] **Step 3: Add both test targets**
 
-`Makefile` gains `test-qwen35-host` and `test-qwen35-graph`; `.gitignore` gains `/tests/test_qwen35_host` and `/tests/test_qwen35_graph`.
+`Makefile` gains `test-qwen35-host` and `test-qwen35-oracle`; `.gitignore` gains `/tests/test_qwen35_host` and `/tests/test_qwen35_oracle`. The oracle cannot be called `test-qwen35-graph`: that target already exists and drives `tests/test_qwen4_kernels` with `DS4_TEST_QWEN35_GRAPH_ONLY=1` on Metal.
 
 - [ ] **Step 4: Run the host test to see the real red state**
 
-Run: `make -C .ds4/tree test-qwen35-host`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host`
 Expected: failure reporting `dense qwen35 runs on the Metal graph only`.
 
 - [ ] **Step 5: Restructure the guards**
@@ -287,19 +304,43 @@ The qwen35 region currently sits in one `#if defined(__APPLE__)` block that open
 
 Leave `ds4_engine_verify_rows()` untouched: it must still return `8` only under `DS4_HAS_QWEN4_METAL` on Metal.
 
-- [ ] **Step 6: Add the numerical oracle**
+- [x] **Step 6: Add the numerical oracle**
 
 `tests/test_qwen35_graph.c` builds a small dense qwen35 model in memory: two layers, F32 tensors, `head_dim = 256` (Task 4 accepts no other size), `n_head = 2`, `n_head_kv = 1`, `n_embd = 512`, `vocab = 32`, and `full_attention_interval = 2`. Interval 2 makes layer 1 full attention and layer 0 linear; interval 4 would make both layers linear and leave Task 4's ops and its guard edits unexercised. The dims live in `g_ds4_shape`, so they are runtime values and no GGUF or loader is involved. Run `qwen4_graph_forward_tokens` for one token and compare the logits against a double-precision reference implementing the documented layer order. Assert `max_abs_err < 1e-3` and an identical repeat run. On a build without a GPU, skip with a printed reason. A graph wired to the wrong model path fails this test; determinism alone would not.
 
+**As executed (`tests/test_qwen35_oracle.c`, `test-qwen35-oracle`).** Three cases
+run against the reference: `full_attention_interval = 1` (both layers attention,
+so a failure cannot be confused with the recurrent mixer), and `interval = 2`
+(linear layer 0, attention layer 1) once through the fused decode front and once
+through `DS4_QWEN4_NO_FUSE`'s plain ops. One token at position 0 keeps the
+attention contract small: with a single cached key the softmax is 1, so a head's
+output is its value rounded to the half cache times `sigmoid(gate)`; rope and the
+q/k norms belong to Task 4's suite. The reference does not read the alpha
+projection, because the decay multiplies a zero state and cannot move these
+logits.
+
+Two traps, both found by running it:
+
+- **Gamma vectors must not be scaled like matrices.** Generating every tensor at
+  `1/sqrt(width)` shrinks each normalisation by `sqrt(width)`, the residual
+  stream decays geometrically and the logits land near `1e-2`, where a `1e-3`
+  absolute bound stops discriminating: an injected `sigmoid` for `silu` in the
+  gated output norm moved them by only `1.06e-04`. With the gammas centred on 1
+  the same injection moves a logit from `1.30` to `-0.09`.
+- **The oracle must be shown to fail.** Injections used: `silu(z)` -> `sigmoid(z)`
+  in `qwen35_cuda::gdn_out` (fails at `1.40`, while the attention-only case stays
+  at `3.2e-06`, which is the coverage split working) and the FFN normalisation
+  reading `attn_norm` (fails at `0.24`). Both were reverted before the commit.
+
 - [ ] **Step 7: Run both tests to verify they pass**
 
-Run: `make -C .ds4/tree test-qwen35-host test-qwen35-graph`
+Run: `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host test-qwen35-graph`
 Expected: both pass. The graph test must report that the qwen35 path ran, not the qwen4 path.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git -C .ds4/tree add ds4.c Makefile .gitignore tests/test_qwen35_host.c tests/test_qwen35_graph.c
+git -C .ds4/tree add ds4.c Makefile .gitignore tests/test_qwen35_host.c tests/test_qwen35_oracle.c
 git -C .ds4/tree commit -m "qwen35: the ordinary dense graph on CUDA"
 ```
 
@@ -311,12 +352,17 @@ git -C .ds4/tree commit -m "qwen35: the ordinary dense graph on CUDA"
 - Create: `patches/qwen35/0009-*.patch` … `0012-*.patch`
 - Modify: `docs/specs/2026-10-24-ds4-patch-series-design.md:44-51`
 
-- [ ] **Step 1: Export**
+- [x] **Step 1: Export**
 
-Run: `tools/ds4-export`
+Run: `ds4-export`
 Expected: exit 0. A dirty-tree refusal means a task left work uncommitted; fix that, do not pass `--force`.
 
-- [ ] **Step 2: Prove the existing series is untouched**
+Here the first refusal was the export's own output: a successful `ds4-export`
+leaves `patches/qwen35` modified, so a second run sees a dirty directory. The fix
+is to discard that output with `git checkout -- patches/qwen35 && git clean -fdq
+patches/qwen35` and export again, never `--force`.
+
+- [x] **Step 2: Prove the existing series is untouched**
 
 ```bash
 git status --porcelain patches/qwen35
@@ -324,21 +370,31 @@ git diff --stat -- 'patches/qwen35/000[1-8]-*.patch'
 ```
 Expected: only `??` entries for the new files; the diff is empty.
 
-- [ ] **Step 3: Inspect a new patch**
+It cannot be empty when the series grows: `git format-patch` rewrites `From
+<sha>` in every patch and `[PATCH n/8]` becomes `[PATCH 0n/13]`. The check that
+means something is that no other line changes:
+
+```bash
+git diff -U0 -- 'patches/qwen35/000[1-8]-*.patch' | grep -E '^[-+][^-+]' \
+  | grep -vE '^[-+](From [0-9a-f]{40} Mon Sep 17|Subject: \[PATCH )'
+```
+Expected: `Subject: [PATCH 1/8]` … lines only for the pre-extension numbering.
+
+- [x] **Step 3: Inspect a new patch**
 
 Run: `sed -n '1,20p' patches/qwen35/0009-*.patch`
 Expected: `From <sha>`, `Subject: [PATCH n/N] qwen35: …`, body, then the three trailers and a diffstat.
 
-- [ ] **Step 4: Reconstruct from a pristine pin**
+- [x] **Step 4: Reconstruct from a pristine pin**
 
-Run: `tools/ds4-check --model qwen35`
+Run: `ds4-check --model qwen35`
 Expected: exit 0.
 
-- [ ] **Step 5: Update the ledger table**
+- [x] **Step 5: Update the ledger table**
 
 Add four rows to the spec's patch table with the new subjects and `not offered, fork only`.
 
-- [ ] **Step 6: Run the full check and commit**
+- [x] **Step 6: Run the full check and commit**
 
 ```bash
 nix flake check --accept-flake-config --print-build-logs
@@ -348,41 +404,253 @@ git commit -m "qwen35: add the dense serial CUDA path to the patch series"
 
 ---
 
-### Task 7 (blocked on D3): Adopt or park
+**As executed.** Five patches, not the four this plan predicted: Task 5 became
+two commits, so `0009`-`0013` extend the series. The first export shipped them
+without the mandatory `Upstream:` / `Retire-when:` / `Carried-commits:` trailers
+because the commits were authored without them; the five commits were reworded
+with `git rebase -i` and re-exported. `ds4-check --model qwen35` exits 0, and
+`diff` over the thirteen touched files between `.ds4/check/qwen35` and
+`.ds4/tree` reports no differences, with the reconstructed `ds4.c` holding the
+neutral graph region and none of the old Metal-only verdict. The series was exported a second time after the oracle
+gained the batch-versus-serial case, so `0013` carries it; the exported tip is
+`10c8e748` and `ds4-state` records it.
 
-- [ ] **Step 1:** Run the Metal live gate on a macOS host against the patched tree; record the result beside the patches.
-- [ ] **Step 2:** If Metal passes, mark the four patches adopted in the spec ledger. If not, leave them carried and unadopted and record why.
+### Task 7 (done): Adopt or park
 
----
+- [x] **Step 1:** On a macOS host, materialise and build the patched tree, then run the Metal suites.
+- [x] **Step 2:** Run the model-backed gate against a dense qwen35 GGUF.
+- [x] **Step 3:** Mark `qwen35/0009`-`0013` adopted in the spec ledger and record the result here.
 
-### Task 8 (deferred): CUDA build path and model-level evidence
+**Recorded result, 2026-11-12.** On an Apple M4 Max, `ds4-check --model qwen35
+--build`, `make -C .ds4/tree test-qwen4-kernels` and `DS4_TEST_MODEL=
+Qwen3.8-27B-Q4_K_M.gguf bash tests/ds4_e2e_test.sh` all pass. The guard split
+kept verify, DFlash and the drafter Apple-only and left the Metal path working,
+which is the property this task existed to check; `qwen35/0009`-`0013` are adopted
+in `docs/specs/2026-10-24-ds4-patch-series-design.md` §2.1.
+
+### Task 8: CUDA build path and model-level evidence
 
 **Files:**
 - Modify: `tools/ds4-check.sh` (backend selection), or the ds4-py invocation it uses
 
-- [ ] **Step 1:** Select `--backend cuda` when `nvcc` is present, falling back to `cpu`; do not add a local build file.
-- [ ] **Step 2:** Build with `CUDA_ARCH=sm_86` and run `test-qwen35-cuda-quant`, `-recurrent`, `-attention`, and `test-qwen35-host`.
-- [ ] **Step 3 (optional):** Run the three CUDA tests under `compute-sanitizer --tool memcheck`; zero errors required.
-- [ ] **Step 4:** Load the pinned `Qwen3.8-27B-Q4_K_M.gguf` at `ctx=8192` and decode two prompts twice. The 27B carries no Q5_K, so an unsupported-dense-type error here means a real gap in Task 2, not a reason to revisit **D1**.
-- [ ] **Step 5:** Add the batch-versus-serial check: a prompt of 9 tokens must give the same logits at its last row as a single-token decode at that position. This is the cheapest detector for a missing dispatch layer.
-- [ ] **Step 6:** Record evidence per **D2**: the Task 5 oracle result, batch-versus-serial agreement, finite logits, identical token sequence across repeats, correct terminal reason, metrics identities. Do not record repeatability alone as a pass.
+- [x] **Step 1:** Make the build backend explicit: `--backend NAME`, with `DS4_CHECK_BACKEND` as the environment default and `metal`/`cpu` unchanged as the defaults, so no existing build flow moves; do not add a local build file.
+- [x] **Step 2:** Build with `CUDA_ARCH=sm_86` and run `test-qwen35-cuda-quant`, `-recurrent`, `-attention`, and `test-qwen35-host`.
+- [x] **Step 3 (optional):** Run the three CUDA tests under `compute-sanitizer --tool memcheck`; zero errors required.
+- [x] **Step 4:** Load the pinned `Qwen3.8-27B-Q4_K_M.gguf` at `ctx=8192` and decode two prompts twice. The 27B carries no Q5_K, so an unsupported-dense-type error here means a real gap in Task 2, not a reason to revisit **D1**.
+- [x] **Step 5:** Add the batch-versus-serial check: a prompt of 9 tokens must give the same logits at its last row as a single-token decode at that position. This is the cheapest detector for a missing dispatch layer.
+- [~] **Step 6:** Record evidence per **D2**: the Task 5 oracle result, batch-versus-serial agreement, finite logits, identical token sequence across repeats, correct terminal reason, metrics identities. Do not record repeatability alone as a pass.
 
 ---
+
+**As executed for Steps 1 and 2.** The first attempt inferred `cuda` from `nvcc`
+on `PATH`, which retargeted every target's build and made an unrelated flow
+depend on what happened to be installed. Review rejected it; the backend is now
+`--backend NAME` or `DS4_CHECK_BACKEND`, and `nvcc` on `PATH` selects nothing.
+`ds4-check --model qwen35 --build --backend cuda` inside the CUDA devenv with
+`CUDA_ARCH=sm_86` reconstructed the series from a pristine pin and linked
+`libds4.so` with `nvcc -arch=sm_86`, exit 0. Invoking it needs the venv on `PATH`
+(`uv run --frozen bash tools/ds4-check.sh --build`) or an external ds4-py
+checkout, as the README's build section describes; the devenv shell alone does
+not put `ds4py` there.
+
+**As executed for Step 3.** `compute-sanitizer` is in the store but not on the
+devenv PATH, so it was invoked from `cuda-merged-12.9` directly. `--tool memcheck`
+reported `0 errors` for `test_qwen35_cuda_quant`, `-recurrent` and `-attention`,
+each exit 0. `test_qwen35_host` passes under it too, then exits 255 because it
+makes no CUDA call to instrument; it is not one of the three suites this step
+covers.
+
+**As executed for Step 5.** The oracle gained a fourth case: nine tokens in one
+forward against the same nine decoded one at a time, which is nine separate
+one-token forwards, so every recurrent state transition is the serial one. (The
+first version ran an eight-token prefix and then one step, which review caught:
+it did not exercise repeated one-token transitions. The measured difference did
+not move, `1.538e-05`, because it comes from the last row's prompt-versus-decode
+kernel pair, not from the schedule.) The synthetic model needs no weights. Measured `max |batch - serial| = 1.538e-05`. It is a real
+detector, not a tautology: making the batch tail read the row before the last
+trips it at `1.6` while the three reference cases stay green, because they all
+run one token. A second injection that dropped `dt_bias` from the decay passed
+at `2.6e-05`: the gated output norm renormalises each head, so this synthetic
+model is weakly sensitive to decay, and Step 4's model-level agreement remains
+the check for that.
+
+**As executed for Step 4.** `Qwen3.8-27B-Q4_K_M.gguf` (15.66 GiB) through the
+tree's own `ds4` binary:
+
+```
+ds4 -m Qwen3.8-27B-Q4_K_M.gguf --cuda -c 8192 -p "The capital of France is" \
+    -n 24 --temp 0 --seed 1
+```
+
+`CUDA backend initialized on NVIDIA GeForce RTX 3090 (sm_86)`, planned memory
+`17.24 GiB` = resident model `15.65` + buffers `1.09` + KV `0.50`. The run
+answered `Paris` after a 63-token prompt, prefill `31.25 t/s`, generation
+`0.48 t/s`. Two prompts each decoded twice at `temp 0, seed 1, -n 16` produced
+byte-identical streams (`sha256` `74fc3c65c80b` and `2984507e565a`). Generation
+at `0.48 t/s` is slow enough to deserve its own look: the serial decode path for
+this model's Q4_K/Q6_K mix is the suspect, and nothing here claims it is
+optimised.
+
+**Step 6 evidence, per D2.** Measured: the Task 5 oracle (four cases, `3.2e-06` to
+`3.6e-05`), batch-versus-serial on the synthetic graph (`1.5e-05`), finite logits,
+identical token sequences across repeats, and the model's planned-memory and
+throughput figures. Not measured, and not claimed: the engine's terminal reason
+and its metrics identities (the `ds4` CLI prints neither), and model-level
+batch-versus-serial, because no CLI path exposes the last row's logits. The
+synthetic graph covers the wiring; the 27B run covers load, decode and
+reproducibility.
 
 ## Verification Matrix
 
 | Claim | Command | Expected |
 | --- | --- | --- |
-| Baseline series applies | `git -C .ds4/tree rev-list --count 5379c1c..HEAD` | `11` before, `15` after |
-| Quant types decode correctly | `make -C .ds4/tree test-qwen35-cuda-quant` | pass |
-| Recurrent op matches reference | `make -C .ds4/tree test-qwen35-cuda-recurrent` | pass |
-| Attention matches reference | `make -C .ds4/tree test-qwen35-cuda-attention` | pass |
-| Graph accepts the model | `make -C .ds4/tree test-qwen35-host` | pass |
-| Graph is wired correctly | `make -C .ds4/tree test-qwen35-graph` | logits within `1e-3` of the reference |
+| Baseline series applies | `git -C .ds4/tree rev-list --count 0674e31d..HEAD` | `5`, and `ds4-state` records `EXPORTED_HEAD` at that tip |
+| Quant types decode correctly | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-quant` | pass |
+| Recurrent op matches reference | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-recurrent` | pass |
+| Attention matches reference | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-attention` | pass |
+| Graph accepts the model | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-host` | pass |
+| Graph is wired correctly | `make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-oracle` | logits within `1e-3` of the reference |
+| Batch and serial agree | same target | a 9-token forward matches nine single-token forwards at the last row |
 | Metal verify still gated | `grep -c "DS4_HAS_QWEN4_METAL" .ds4/tree/ds4.c` | unchanged from baseline |
-| Existing patches unchanged | `git diff --stat -- 'patches/qwen35/000[1-8]-*.patch'` | empty |
-| Series reconstructs | `tools/ds4-check --model qwen35` | exit 0 |
-| Repo healthy | `nix flake check --accept-flake-config` | exit 0 |
+| Existing patches unchanged | `git diff -U0 -- 'patches/qwen35/000[1-8]-*.patch'` | only `From <sha>` and the `[PATCH n/13]` counter differ |
+| Series reconstructs | `ds4-check --model qwen35` | exit 0 |
+| Repo healthy | `uv run --frozen prek run --all-files` and `bash tests/ds4_tools_test.sh` | exit 0, 49 passed |
+
+## Review handoff
+
+**On any host (Linux with the CUDA toolchain):**
+
+```bash
+uv run --frozen prek run --all-files            # 23 hooks
+bash tests/ds4_tools_test.sh                    # 49 shell tests
+ds4-check --model qwen35                        # the thirteen patches reconstruct
+./tools/ds4-cuda.sh make -C .ds4/tree CUDA_ARCH=sm_86 \
+    test-qwen35-cuda-quant test-qwen35-cuda-recurrent \
+    test-qwen35-cuda-attention test-qwen35-host test-qwen35-oracle
+```
+
+The CUDA toolchain is behind `DS4_CUDA=1`; `tools/ds4-cuda.sh <command>` sets it
+and enters the devenv.
+
+**On macOS: done, 2026-11-12.** `ds4-check --build`, `test-qwen4-kernels` and the
+model-backed e2e gate pass on an Apple M4 Max, so the guard split did not disturb
+the Metal paths. The five patches are adopted; see Task 7 for the record.
+
+**Known limits, stated so they are not mistaken for results:**
+
+- Generation on the 3090 runs at `0.48 t/s`. Correctness is pinned by the oracle;
+  speed is not addressed anywhere in this branch.
+- Model-level batch-versus-serial agreement and the engine's terminal reason have
+  no CLI path here, so Task 8 Step 6 records them as unmeasured rather than
+  passing.
+- `qwen35/0009`-`0013` are adopted on the macOS evidence recorded in Task 7.
+
+## PR review follow-ups
+
+Review on PR #24 raised five findings and one performance question. What changed:
+
+| Finding | Response |
+| --- | --- |
+| `ds4-check` retargeted every build when `nvcc` existed | Backend is `--backend NAME` / `DS4_CHECK_BACKEND`; defaults stay metal/cpu; a shell test asserts `nvcc` on `PATH` selects nothing |
+| Platform branches scattered through the dense graph | Attention keeps one ordinary prompt/decode flow with only the verify override guarded; five helpers (`verify_select`, `verify_rows`, `dflash_begin`, `dflash_layer`, `dflash_end`) absorb the rest, so the forward has no `#if` |
+| The batch-versus-serial case ran 8+1, not nine serial steps | Nine one-token forwards; the measurement is unchanged at `1.538e-05` because it comes from the kernel pair, not the schedule |
+| `tools/ds4-cuda.sh` treated any ambient CUDA as the pinned toolchain | devenv is entered unless `DS4_CUDA_SHELL` (set by the script) or `DS4_CUDA_AMBIENT` (explicit) marks the shell |
+| The host gate diverted `stderr` through temp files | `verdict()` deleted; the predicate is called directly, and the positive assertion already catches the old non-Apple refusal |
+
+Performance: `DS4_CUDA_COPY_MODEL=1` did not change the `0.48 t/s` decode rate —
+this build registers the 27B through the multi-tier selective cache, which
+deliberately refuses a full-model copy (`ds4.c:72585`, message from
+`ds4_cuda.cu:4206`), so the variable is never consulted. The arithmetic still
+supports the PCIe diagnosis: one pass over 15.65 GiB at PCIe 4.0 x16 (~25 GB/s)
+is about 0.65 s, and a token costs about 2.1 s, while the 3090's compute time for
+27B at one token is roughly 2 ms. Finding the knob that selects the plain copy
+path is follow-up work.
+
+## Performance: weights now reach VRAM, the kernel is next
+
+Decode on the 3090 was `0.48 t/s` because nothing ever put the weights in VRAM.
+`docs/QWEN38_FLASH_NEXT.md` publishes 21.2 t/s decode on a DGX Spark with
+"resident weights", and both documented baselines (M5 Max, DGX Spark) are
+unified-memory hosts where the host mapping *is* device memory, so no copy step
+appears in the docs. A discrete card was the unmeasured case.
+
+Measured before the fix: 5.7 GiB of 24 GiB resident, GPU 100% busy, one 15.66 GiB
+pass over PCIe per token, ~4.8 GB/s effective. Prefill doing 63 tokens for the
+cost of one pass proved the cost was passes over the weights, not arithmetic.
+
+**`qwen35/0014` fixes it.** The single-device path registers the model map
+no-copy and installs no slab, so the copy is now made explicitly, and weights
+resolve through the existing device base.
+
+| Metric | Before | After |
+| --- | --- | --- |
+| Generation | 0.48 t/s | **8.71 t/s** |
+| Prefill | 32 t/s | **131 t/s** |
+| Resident weights | 5.7 GiB | 15.66 GiB copied in 0.68 s |
+| Oracle batch-vs-serial | 1.538e-05 | 1.538e-05, unchanged |
+
+The copy yields rather than starve the machine: it needs model + margin free to
+start, re-checks free VRAM afterwards and reverts if the margin is gone, and
+defaults the margin to max(6 GiB, total/8), tunable with `DS4_CUDA_RESERVE_GIB`;
+`DS4_CUDA_COPY_MODEL=0` disables it. That margin is not theoretical: taking all
+but ~2.8 GiB on a card that also drives the display produced `NVRM Xid 62` and
+tore down the desktop's channels with `Xid 45`.
+
+**What is left is the kernel, and it is now the dominant cost.** The same 27B on
+the same card reaches **43 t/s** under another runtime, i.e. ~673 GB/s, 72% of
+the 3090's 936 GB/s. This branch reaches ~146 GB/s, 16% of peak: 4.9x short. The
+cause is in `ds4_qwen4_cuda.cuh`: Q4_K/Q6_K dense decode uses the generic
+template (`for (i = lane*4; i < K; i += 128)`, scalar dequant plus `fmaf`), while
+Q8_0 uses block-wise `__dp4a` with `__shfl_down_sync` reductions. Ollama runs a
+tuned K-quant GEMV; we run a correctness-first fallback added by `0009`.
+
+**Both kernels are now in the series.** `0015` hoisted the super-block header out
+of the per-element loop, `0016` replaced the float inner loop for Q4_K with
+`__dp4a` over q8_K-quantised activations, `0017` kept four dot products in flight
+per lane, and `0018` did the same for Q6_K. Generation went 8.71 -> 15.05 ->
+27.35 -> 29.62 -> 30.41 t/s, so the kernel work bought 3.5x on top of residency:
+
+| Stage | Generation | Effective bandwidth | Share of 936 GB/s |
+| --- | --- | --- | --- |
+| Weights resident, float kernel | 8.71 t/s | 146 GB/s | 16% |
+| Header hoisted (`0015`) | 15.05 t/s | 253 GB/s | 27% |
+| Q4_K `dp4a` (`0016`) | 27.35 t/s | 460 GB/s | 49% |
+| Four rows per warp (`0017`) | 29.62 t/s | 498 GB/s | 53% |
+| Q6_K `dp4a` (`0018`) | 30.41 t/s | 511 GB/s | 55% |
+
+Against the 43 t/s another runtime reaches on this card, that leaves 1.4x. The
+remaining margin is bandwidth utilisation (55% versus 72%), not arithmetic: Q6_K
+was 27% of the streamed bytes but moving it to `dp4a` bought only 0.8 t/s, which
+says the loop shape is now close to memory-bound.
+
+**What is left, with the evidence for each:**
+
+1. **Per-matvec activation quantisation: measured, rejected.** Every dense
+   matvec launches its own q8_K kernel, about 256 launches per token. Skipping
+   those launches entirely, which gives wrong results and is only a timing
+   probe, measured 31.05 t/s against 31.45 t/s with them. The launches cost
+   nothing, so caching or fusing them buys nothing. The decode loop is
+   memory-bound at 55% of peak bandwidth, and further gains need a profiler that
+   this box does not have (`nsys`, `ncu` and `nvprof` are all absent).
+2. **Footprint, still unresolved.** Peak measured 19,323 MiB with `-c 512
+   --prefill-chunk 256`, so residency now coexists with a desktop session, but
+   only by shrinking context. The plan-versus-measured gap at `-c 4096` is a
+   constant ~4 GiB that neither the context size nor the prefill chunk explains;
+   it needs `cudaMemGetInfo` instrumentation at three points in the run.
+3. **The q8 activation quantisation is an approximation.** Dense K-quant decode
+   now matches what the MoE decode has always done, and the quant suite pins it
+   by comparing against the magnitude of the accumulation (2e-2), while the exact
+   float matrix path keeps 5e-5. A Q4_K case was added because the suite had none
+   and the `dp4a` kernel was otherwise uncovered.
+4. **No CUDA end-to-end suite exists.** `tests/ds4_e2e_test.sh` builds the
+   binding with the `cpu` or `metal` backend only, so the agent-level suite
+   cannot exercise CUDA. Dense qwen35 has no CPU reference either: `--cpu`
+   accepts only `--first-token-test`, and that path wants `DS4_QWEN4_FT_LIST`,
+   which is GPU-only. The CUDA evidence is therefore the kernel suites, the
+   oracle, repeatable greedy output and the measured rates. Separately,
+   `make -C .ds4/tree test-qwen4-kernels` does not build here: the implicit rule
+   for `tests/test_qwen4_kernels.o` has no `-I.`, so `ds4.h` is not found. That
+   fails the same way under plain `make`, so the CUDA flags do not cause it.
 
 ## Risks and rollback
 
