@@ -1,0 +1,76 @@
+From a8bbe26ecf0ab0adecb8900bfd145688b5060dca Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Thu, 12 Nov 2026 20:05:21 +0200
+Subject: [PATCH 17/17] qwen35: give each decode warp four rows
+
+One row per warp left each lane with a single 144-byte block in flight, so the
+matvec waited on memory rather than saturating it. Four rows per warp keeps four
+independent dot products outstanding per lane.
+
+Measured on the 27B, weights resident: 27.35 -> 29.62 t/s. Two rows measured
+29.11, so the wider shape wins slightly; 8 warps per block measured 26.76 and was
+rejected earlier. Oracle 1.538e-05, quant and oracle suites pass, no Xid.
+---
+ ds4_cuda.cu | 35 +++++++++++++++++++++++++++--------
+ 1 file changed, 27 insertions(+), 8 deletions(-)
+
+diff --git a/ds4_cuda.cu b/ds4_cuda.cu
+index eca5c298..7c728663 100644
+--- a/ds4_cuda.cu
++++ b/ds4_cuda.cu
+@@ -23322,20 +23322,39 @@ __device__ __forceinline__ static float dev_warp_sum32(float v) {
+ template<unsigned ROWS>
+ __global__ static void dense_q4k_q8k_matvec(float *out, const char *w,
+         const cuda_block_q8_K *xq, unsigned T, unsigned K, unsigned M, uint64_t stride) {
+-    const unsigned row = blockIdx.x * 4u + (threadIdx.x >> 5u), lane = threadIdx.x & 31u;
+-    if (row >= M) return;
+-    const cuda_block_q4_K *wr = (const cuda_block_q4_K *)(w + (uint64_t)row * stride);
++    const unsigned warp = blockIdx.x * 4u + (threadIdx.x >> 5u), lane = threadIdx.x & 31u;
++    const unsigned row0 = warp * 4u;
++    if (row0 >= M) return;
+     const unsigned blocks = K / 256u;
++    const bool has1 = row0 + 1u < M, has2 = row0 + 2u < M, has3 = row0 + 3u < M;
++    const cuda_block_q4_K *wr0 = (const cuda_block_q4_K *)(w + (uint64_t)row0 * stride);
++    const cuda_block_q4_K *wr1 = has1 ?
++        (const cuda_block_q4_K *)(w + (uint64_t)(row0 + 1u) * stride) : wr0;
++    const cuda_block_q4_K *wr2 = has2 ?
++        (const cuda_block_q4_K *)(w + (uint64_t)(row0 + 2u) * stride) : wr0;
++    const cuda_block_q4_K *wr3 = has3 ?
++        (const cuda_block_q4_K *)(w + (uint64_t)(row0 + 3u) * stride) : wr0;
+     #pragma unroll
+     for (unsigned t = 0; t < ROWS; t++) {
+         if (t >= T) continue;
+         const cuda_block_q8_K *xqb = xq + (uint64_t)t * blocks;
+-        float a = 0.0f;
++        float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+         for (unsigned b = lane; b < blocks; b += 32u) {
+-            dev_dot_q4_K_q8_K_block_vec(wr + b, xqb + b, &a);
++            dev_dot_q4_K_q8_K_block_vec(wr0 + b, xqb + b, &a0);
++            if (has1) dev_dot_q4_K_q8_K_block_vec(wr1 + b, xqb + b, &a1);
++            if (has2) dev_dot_q4_K_q8_K_block_vec(wr2 + b, xqb + b, &a2);
++            if (has3) dev_dot_q4_K_q8_K_block_vec(wr3 + b, xqb + b, &a3);
++        }
++        a0 = dev_warp_sum32(a0);
++        a1 = dev_warp_sum32(a1);
++        a2 = dev_warp_sum32(a2);
++        a3 = dev_warp_sum32(a3);
++        if (!lane) {
++            out[(uint64_t)t * M + row0] = a0;
++            if (has1) out[(uint64_t)t * M + row0 + 1u] = a1;
++            if (has2) out[(uint64_t)t * M + row0 + 2u] = a2;
++            if (has3) out[(uint64_t)t * M + row0 + 3u] = a3;
+         }
+-        a = dev_warp_sum32(a);
+-        if (!lane) out[(uint64_t)t * M + row] = a;
+     }
+ }
+ 
+@@ -23348,7 +23367,7 @@ extern "C" int ds4_gpu_qwen4_dense_q4k_matvec(float *out, const char *w, const f
+     const cudaStream_t st = cuda_decode_stream();
+     q8_K_quantize_kernel<<<dim3(blocks, T), 256, 0, st>>>(g_qwen_q8k_ws, x, K, T);
+     if (cudaGetLastError() != cudaSuccess) { (void)cudaGetLastError(); return 0; }
+-    const dim3 grid((M + 3u) / 4u);
++    const dim3 grid((M + 15u) / 16u);
+     switch (T) {
+     case 1: dense_q4k_q8k_matvec<1><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
+     case 2: dense_q4k_q8k_matvec<2><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;

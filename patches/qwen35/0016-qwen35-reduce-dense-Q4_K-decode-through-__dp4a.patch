@@ -1,7 +1,7 @@
 From 9b3b09d3eb1bf11af0bf0e38c9a01db1e12d8750 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 19:44:49 +0200
-Subject: [PATCH 16/16] qwen35: reduce dense Q4_K decode through __dp4a
+Subject: [PATCH 16/17] qwen35: reduce dense Q4_K decode through __dp4a
 
 Decode still paid 32 float FMAs per 32-value sub-block. Quantise the activations
 to q8_K once per token and reduce each super-block through the integer dot the

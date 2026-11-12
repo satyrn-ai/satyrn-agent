@@ -1,7 +1,7 @@
 From 59dba3af73962b84d458296e0e95de52a0d5a3b3 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 10:31:02 +0200
-Subject: [PATCH 10/16] qwen35: dense recurrent SiLU output on CUDA
+Subject: [PATCH 10/17] qwen35: dense recurrent SiLU output on CUDA
 
 The dense graph's linear layers end in a per-head RMSNorm scaled by the
 D-wide ssm_norm weights and gated by silu(z). Implement it as one warp per
