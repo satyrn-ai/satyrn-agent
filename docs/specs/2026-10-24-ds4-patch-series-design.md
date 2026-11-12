@@ -60,13 +60,18 @@ Each patch's message carries `Upstream:`, `Retire-when:` and
 numbers the initial series globally in apply order, so these rows instead carry
 the number each patch has on disk:
 
-| File | Patch | Carried commits | Upstream |
-| --- | --- | --- | --- |
-| `qwen35/0009` | dense Q6_K weight products on CUDA | none, authored here | not offered, fork only |
-| `qwen35/0010` | dense recurrent SiLU output on CUDA | none, authored here | not offered, fork only |
-| `qwen35/0011` | dense attention prep and causal attention on CUDA | none, authored here | not offered, fork only |
-| `qwen35/0012` | reach the dense graph on CUDA | none, authored here | not offered, fork only |
-| `qwen35/0013` | dense graph versus a double-precision reference | none, authored here | not offered, fork only |
+| File | Patch | Carried commits | Upstream | Metal gate |
+| --- | --- | --- | --- | --- |
+| `qwen35/0009` | dense Q6_K weight products on CUDA | none, authored here | not offered, fork only | pass, M4 Max |
+| `qwen35/0010` | dense recurrent SiLU output on CUDA | none, authored here | not offered, fork only | pass, M4 Max |
+| `qwen35/0011` | dense attention prep and causal attention on CUDA | none, authored here | not offered, fork only | pass, M4 Max |
+| `qwen35/0012` | reach the dense graph on CUDA | none, authored here | not offered, fork only | pass, M4 Max |
+| `qwen35/0013` | dense graph versus a double-precision reference | none, authored here | not offered, fork only | pass, M4 Max |
+
+All five are adopted as of 2026-11-12. The gate was `ds4-check --model qwen35
+--build`, `make -C .ds4/tree test-qwen4-kernels`, and `DS4_TEST_MODEL=
+Qwen3.8-27B-Q4_K_M.gguf bash tests/ds4_e2e_test.sh` on an Apple M4 Max: the
+CUDA additions left the Metal paths working, which is what adoption required.
 
 `ds4-check --model qwen35` applies all thirteen onto a pristine clone of the pin,
 and the reconstructed tree matches `.ds4/tree` byte for byte in every file the
