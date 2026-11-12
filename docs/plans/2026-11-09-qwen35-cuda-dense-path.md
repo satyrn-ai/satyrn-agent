@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a dense serial qwen35 decode path to the CUDA build as four new patches in `patches/qwen35/`, each proven by an independent reference test.
+**Goal:** Add a dense serial qwen35 decode path to the CUDA build as five new patches in `patches/qwen35/`, each proven by an independent reference test.
 
 **Architecture:** The neutral op contract already exists — `ds4_gpu.h` declares `ds4_gpu_qwen35_gdn_out_tensor`, `ds4_gpu_qwen35_attn_prep_tensor` and `ds4_gpu_qwen35_attn_fa_tensor`, and the Metal backend implements them. This plan implements the same symbols for CUDA in a new `ds4_qwen35_cuda.cuh`, extends the existing Qwen CUDA quant dispatch with Q6_K, and replaces the model-support refusal with backend-aware dispatch. Verify, DFlash and the drafter stay Metal-only.
 
@@ -415,14 +415,31 @@ neutral graph region and none of the old Metal-only verdict. The series was expo
 gained the batch-versus-serial case, so `0013` carries it; the exported tip is
 `10c8e748` and `ds4-state` records it.
 
-### Task 7 (blocked on D3): Adopt or park
+### Task 7 (handed to a macOS reviewer): Adopt or park
 
-- [ ] **Step 1:** Run the Metal live gate on a macOS host against the patched tree; record the result beside the patches.
-- [ ] **Step 2:** If Metal passes, mark the four patches adopted in the spec ledger. If not, leave them carried and unadopted and record why.
+No CUDA host can run this task, so it moves to PR review: a teammate with macOS
+runs the Metal gate before the merge, and the patches stay carried and
+unadopted until they do. The restructure in Task 5 did not change the Metal
+paths by intent, so what is being checked is that the guards still keep verify,
+DFlash and the drafter Apple-only.
+
+- [ ] **Step 1:** On a macOS host, materialise and build the patched tree, then run the Metal suites:
+
+  ```bash
+  ds4-sync --model qwen35
+  ds4-check --model qwen35 --build          # metal backend on macOS
+  make -C .ds4/tree test-qwen4-kernels      # graph, verify and drafter rows
+  ```
+- [ ] **Step 2:** Run the model-backed gate against a dense qwen35 GGUF:
+
+  ```bash
+  DS4_TEST_MODEL=/path/to/dense-qwen35.gguf bash tests/ds4_e2e_test.sh
+  ```
+- [ ] **Step 3:** If both pass, mark `qwen35/0009`-`0013` adopted in the spec ledger, replace this section with the recorded result, and drop this task from the plan. If either fails, leave them carried and unadopted and record the failure here.
 
 ---
 
-### Task 8 (deferred): CUDA build path and model-level evidence
+### Task 8: CUDA build path and model-level evidence
 
 **Files:**
 - Modify: `tools/ds4-check.sh` (backend selection), or the ds4-py invocation it uses
@@ -502,6 +519,36 @@ reproducibility.
 | Existing patches unchanged | `git diff -U0 -- 'patches/qwen35/000[1-8]-*.patch'` | only `From <sha>` and the `[PATCH n/13]` counter differ |
 | Series reconstructs | `ds4-check --model qwen35` | exit 0 |
 | Repo healthy | `uv run --frozen prek run --all-files` and `bash tests/ds4_tools_test.sh` | exit 0, 49 passed |
+
+## Review handoff
+
+**On any host (Linux with the CUDA toolchain):**
+
+```bash
+uv run --frozen prek run --all-files            # 23 hooks
+bash tests/ds4_tools_test.sh                    # 49 shell tests
+ds4-check --model qwen35                        # the thirteen patches reconstruct
+./tools/ds4-cuda.sh make -C .ds4/tree CUDA_ARCH=sm_86 \
+    test-qwen35-cuda-quant test-qwen35-cuda-recurrent \
+    test-qwen35-cuda-attention test-qwen35-host test-qwen35-oracle
+```
+
+The CUDA toolchain is behind `DS4_CUDA=1`; `tools/ds4-cuda.sh <command>` sets it
+and enters the devenv.
+
+**On macOS, before merge:** Task 7. The changes are meant to be inert there — the
+restructure moved the ordinary forward out of the Apple guard and left verify,
+DFlash and the drafter inside it — so the risk is a guard that moved too much or
+too little, and only Metal can show it.
+
+**Known limits, stated so they are not mistaken for results:**
+
+- Generation on the 3090 runs at `0.48 t/s`. Correctness is pinned by the oracle;
+  speed is not addressed anywhere in this branch.
+- Model-level batch-versus-serial agreement and the engine's terminal reason have
+  no CLI path here, so Task 8 Step 6 records them as unmeasured rather than
+  passing.
+- `qwen35/0009`-`0013` are carried, not adopted, until Task 7 passes.
 
 ## Risks and rollback
 
