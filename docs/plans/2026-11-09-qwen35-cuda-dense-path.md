@@ -566,40 +566,52 @@ is about 0.65 s, and a token costs about 2.1 s, while the 3090's compute time fo
 27B at one token is roughly 2 ms. Finding the knob that selects the plain copy
 path is follow-up work.
 
-## Performance: device-resident weights (follow-up, blocking for a non-demo use)
+## Performance: weights reach VRAM, and today they do not
 
-Decode runs at `0.48 t/s` on the 3090. That is not a tuning gap, and it is not
-`DS4_CUDA_COPY_MODEL` either. What was measured:
+Decode runs at `0.48 t/s` on the 3090. `docs/QWEN38_FLASH_NEXT.md` claims this
+model family on CUDA with a measured baseline on a DGX Spark: 513 t/s for the
+first 1024 tokens, 21.2 t/s decode at Q4, "resident weights and disk-only
+n-grams". Both documented CUDA and Metal baselines (M5 Max, DGX Spark) are
+**unified-memory** hosts, where a host mapping is device memory at full
+bandwidth. There "resident" needs no copy step, and the docs never describe one.
+
+A discrete card is the case the docs do not measure. What was measured here:
 
 | Probe | Result |
 | --- | --- |
 | Peak VRAM during a run (`nvidia-smi`) | **5.7 GiB** of 24 GB, GPU utilization 100% |
 | `DS4_CUDA_COPY_MODEL=1` | no change: `0.49 t/s`, still `(no-copy) registered` |
-| `--gpu-vram 22` | no change: `0.52 t/s` |
+| `--gpu-vram 22` and the documented `--gpu-vram auto` (18 GB budget) | no change: `0.52` / `0.56 t/s`, single-tier placement, no slab |
 | `engine_install_gpu_placement`, `engine_install_per_device_caches` | never reached from the CLI generation path (temporary `fprintf` markers, since removed) |
+| Prefill of 63 tokens vs one decode token | ≈2.0 s vs ≈2.1 s: the cost tracks passes over the weights, not arithmetic |
 | Graph weight access | `qwen4_graph_gemv(..., m->map, m->size, offset)`: the host model map |
 
-So the dense qwen35 CUDA graph has no device-resident weights path at all. It was
-designed where host and device memory are the same memory; on CUDA every weight
-byte crosses PCIe on every step. At ~25 GB/s a single pass over 15.65 GiB costs
-~0.65 s, and a token costs ~2.1 s.
+Prefill doing 63 tokens for the cost of about one pass settles the diagnosis:
+compute is negligible and the pass over the weights dominates. With 5.7 GiB
+resident, roughly 10 GiB is streamed per token, which is ~4.8 GB/s effective
+against ~25 GB/s of PCIe 4.0 x16: latency-bound host reads.
 
-**The work this implies.** Put the weights in a device slab and resolve graph
-weights from it: the multi-tier path already has the mechanism
-(`ds4_gpu_device_cache_tensors` allocates the slab, checks free VRAM, and maps the
-ranges), and the dense graph needs to consume it instead of the host map. Then
-decode is bounded by VRAM bandwidth rather than PCIe.
+The engine does have a CUDA residency mechanism. `engine_install_per_device_caches`
+allocates the slab, refuses cleanly when free VRAM is short, and maps the ranges
+— but it is reached only from multi-tier placement, which is the mode
+`docs/CUDA_MULTI_GPU.md` calls "normal layer placement". A single device that
+holds the whole model classifies as single-tier, and that path installs nothing,
+so the weights stay host-mapped. That is the gap for discrete single-GPU hosts.
 
-**Acceptance bar, measured the same way as the rest of this plan:**
+One more doc fact matters for expectations: the dense weight matrix is Q8_0,
+Q4_0, F16, BF16 and F32; Q4_K and Q6_K are listed for experts only. This
+checkpoint's dense tensors are Q4_K/Q6_K, which patch `0009` extends. The branch
+is therefore outside the documented matrix on two axes at once — dense
+quantization support and discrete-device residency — and only the residency axis
+can move the number meaningfully: a different quantization would still stream.
+
+**Acceptance bar for the residency work, measured as the rest of this plan is:**
 
 1. Peak VRAM ≈ model + context (≈17 GiB for the 27B), not 5.7 GiB.
 2. Decode at least 10x today's figure on the same prompt and settings.
 3. Oracle and host-gate results unchanged; `compute-sanitizer` still 0 errors.
 4. The host-map path still works where no slab is installed, so the model-free
    suites keep running without a device.
-
-This is deliberately not in this branch: it changes how the hot kernels reach
-their weights, and the correctness PR is worth merging on its own evidence.
 
 ## Risks and rollback
 
