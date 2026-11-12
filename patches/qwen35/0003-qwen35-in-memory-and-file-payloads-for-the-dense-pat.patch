@@ -1,7 +1,7 @@
 From 8cc0df9194ce71f895f177e2665c831c514e1362 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Sun, 4 Oct 2026 10:40:13 +0900
-Subject: [PATCH 03/16] qwen35: in-memory and file payloads for the dense path
+Subject: [PATCH 03/17] qwen35: in-memory and file payloads for the dense path
 
 Snapshots and KV payloads for dense qwen35, including the linear-attention state, always on.
 
