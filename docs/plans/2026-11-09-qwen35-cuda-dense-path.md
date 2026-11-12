@@ -566,6 +566,41 @@ is about 0.65 s, and a token costs about 2.1 s, while the 3090's compute time fo
 27B at one token is roughly 2 ms. Finding the knob that selects the plain copy
 path is follow-up work.
 
+## Performance: device-resident weights (follow-up, blocking for a non-demo use)
+
+Decode runs at `0.48 t/s` on the 3090. That is not a tuning gap, and it is not
+`DS4_CUDA_COPY_MODEL` either. What was measured:
+
+| Probe | Result |
+| --- | --- |
+| Peak VRAM during a run (`nvidia-smi`) | **5.7 GiB** of 24 GB, GPU utilization 100% |
+| `DS4_CUDA_COPY_MODEL=1` | no change: `0.49 t/s`, still `(no-copy) registered` |
+| `--gpu-vram 22` | no change: `0.52 t/s` |
+| `engine_install_gpu_placement`, `engine_install_per_device_caches` | never reached from the CLI generation path (temporary `fprintf` markers, since removed) |
+| Graph weight access | `qwen4_graph_gemv(..., m->map, m->size, offset)`: the host model map |
+
+So the dense qwen35 CUDA graph has no device-resident weights path at all. It was
+designed where host and device memory are the same memory; on CUDA every weight
+byte crosses PCIe on every step. At ~25 GB/s a single pass over 15.65 GiB costs
+~0.65 s, and a token costs ~2.1 s.
+
+**The work this implies.** Put the weights in a device slab and resolve graph
+weights from it: the multi-tier path already has the mechanism
+(`ds4_gpu_device_cache_tensors` allocates the slab, checks free VRAM, and maps the
+ranges), and the dense graph needs to consume it instead of the host map. Then
+decode is bounded by VRAM bandwidth rather than PCIe.
+
+**Acceptance bar, measured the same way as the rest of this plan:**
+
+1. Peak VRAM ≈ model + context (≈17 GiB for the 27B), not 5.7 GiB.
+2. Decode at least 10x today's figure on the same prompt and settings.
+3. Oracle and host-gate results unchanged; `compute-sanitizer` still 0 errors.
+4. The host-map path still works where no slab is installed, so the model-free
+   suites keep running without a device.
+
+This is deliberately not in this branch: it changes how the hot kernels reach
+their weights, and the correctness PR is worth merging on its own evidence.
+
 ## Risks and rollback
 
 - **Quant stride error.** Silent wrong output. Mitigation: Task 2 Step 6 injects the fault and requires the test to fail first; rollback is discarding the commit in `.ds4/tree` and re-exporting.
