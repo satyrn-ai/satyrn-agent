@@ -566,52 +566,55 @@ is about 0.65 s, and a token costs about 2.1 s, while the 3090's compute time fo
 27B at one token is roughly 2 ms. Finding the knob that selects the plain copy
 path is follow-up work.
 
-## Performance: weights reach VRAM, and today they do not
+## Performance: weights now reach VRAM, the kernel is next
 
-Decode runs at `0.48 t/s` on the 3090. `docs/QWEN38_FLASH_NEXT.md` claims this
-model family on CUDA with a measured baseline on a DGX Spark: 513 t/s for the
-first 1024 tokens, 21.2 t/s decode at Q4, "resident weights and disk-only
-n-grams". Both documented CUDA and Metal baselines (M5 Max, DGX Spark) are
-**unified-memory** hosts, where a host mapping is device memory at full
-bandwidth. There "resident" needs no copy step, and the docs never describe one.
+Decode on the 3090 was `0.48 t/s` because nothing ever put the weights in VRAM.
+`docs/QWEN38_FLASH_NEXT.md` publishes 21.2 t/s decode on a DGX Spark with
+"resident weights", and both documented baselines (M5 Max, DGX Spark) are
+unified-memory hosts where the host mapping *is* device memory, so no copy step
+appears in the docs. A discrete card was the unmeasured case.
 
-A discrete card is the case the docs do not measure. What was measured here:
+Measured before the fix: 5.7 GiB of 24 GiB resident, GPU 100% busy, one 15.66 GiB
+pass over PCIe per token, ~4.8 GB/s effective. Prefill doing 63 tokens for the
+cost of one pass proved the cost was passes over the weights, not arithmetic.
 
-| Probe | Result |
-| --- | --- |
-| Peak VRAM during a run (`nvidia-smi`) | **5.7 GiB** of 24 GB, GPU utilization 100% |
-| `DS4_CUDA_COPY_MODEL=1` | no change: `0.49 t/s`, still `(no-copy) registered` |
-| `--gpu-vram 22` and the documented `--gpu-vram auto` (18 GB budget) | no change: `0.52` / `0.56 t/s`, single-tier placement, no slab |
-| `engine_install_gpu_placement`, `engine_install_per_device_caches` | never reached from the CLI generation path (temporary `fprintf` markers, since removed) |
-| Prefill of 63 tokens vs one decode token | ≈2.0 s vs ≈2.1 s: the cost tracks passes over the weights, not arithmetic |
-| Graph weight access | `qwen4_graph_gemv(..., m->map, m->size, offset)`: the host model map |
+**`qwen35/0014` fixes it.** The single-device path registers the model map
+no-copy and installs no slab, so the copy is now made explicitly, and weights
+resolve through the existing device base.
 
-Prefill doing 63 tokens for the cost of about one pass settles the diagnosis:
-compute is negligible and the pass over the weights dominates. With 5.7 GiB
-resident, roughly 10 GiB is streamed per token, which is ~4.8 GB/s effective
-against ~25 GB/s of PCIe 4.0 x16: latency-bound host reads.
+| Metric | Before | After |
+| --- | --- | --- |
+| Generation | 0.48 t/s | **8.71 t/s** |
+| Prefill | 32 t/s | **131 t/s** |
+| Resident weights | 5.7 GiB | 15.66 GiB copied in 0.68 s |
+| Oracle batch-vs-serial | 1.538e-05 | 1.538e-05, unchanged |
 
-The engine does have a CUDA residency mechanism. `engine_install_per_device_caches`
-allocates the slab, refuses cleanly when free VRAM is short, and maps the ranges
-— but it is reached only from multi-tier placement, which is the mode
-`docs/CUDA_MULTI_GPU.md` calls "normal layer placement". A single device that
-holds the whole model classifies as single-tier, and that path installs nothing,
-so the weights stay host-mapped. That is the gap for discrete single-GPU hosts.
+The copy yields rather than starve the machine: it needs model + margin free to
+start, re-checks free VRAM afterwards and reverts if the margin is gone, and
+defaults the margin to max(6 GiB, total/8), tunable with `DS4_CUDA_RESERVE_GIB`;
+`DS4_CUDA_COPY_MODEL=0` disables it. That margin is not theoretical: taking all
+but ~2.8 GiB on a card that also drives the display produced `NVRM Xid 62` and
+tore down the desktop's channels with `Xid 45`.
 
-One more doc fact matters for expectations: the dense weight matrix is Q8_0,
-Q4_0, F16, BF16 and F32; Q4_K and Q6_K are listed for experts only. This
-checkpoint's dense tensors are Q4_K/Q6_K, which patch `0009` extends. The branch
-is therefore outside the documented matrix on two axes at once — dense
-quantization support and discrete-device residency — and only the residency axis
-can move the number meaningfully: a different quantization would still stream.
+**What is left is the kernel, and it is now the dominant cost.** The same 27B on
+the same card reaches **43 t/s** under another runtime, i.e. ~673 GB/s, 72% of
+the 3090's 936 GB/s. This branch reaches ~146 GB/s, 16% of peak: 4.9x short. The
+cause is in `ds4_qwen4_cuda.cuh`: Q4_K/Q6_K dense decode uses the generic
+template (`for (i = lane*4; i < K; i += 128)`, scalar dequant plus `fmaf`), while
+Q8_0 uses block-wise `__dp4a` with `__shfl_down_sync` reductions. Ollama runs a
+tuned K-quant GEMV; we run a correctness-first fallback added by `0009`.
 
-**Acceptance bar for the residency work, measured as the rest of this plan is:**
+**Two follow-ups, in order:**
 
-1. Peak VRAM ≈ model + context (≈17 GiB for the 27B), not 5.7 GiB.
-2. Decode at least 10x today's figure on the same prompt and settings.
-3. Oracle and host-gate results unchanged; `compute-sanitizer` still 0 errors.
-4. The host-map path still works where no slab is installed, so the model-free
-   suites keep running without a device.
+1. **Tuned Q4_K/Q6_K dense matvec.** Block-wise `__dp4a` over the existing
+   `value<TYPE>` dequant, mirroring `matvec_q8`, with a sweep over T=1..8 and
+   T=32 against the reference kernel. Target: close most of the 4.9x.
+   Acceptance: oracle unchanged, suites pass, generation >= 30 t/s.
+2. **Residency headroom.** The measured footprint is 20.3 GiB against ollama's
+  ~17 GiB, so the graph's buffers/scratch cost about 3 GiB more than the model.
+  A smaller prefill cap is the first lever; if it is not enough, residency
+  belongs in the engine's VRAM plan instead of being allocated beside it.
+  Target: fit alongside a desktop session without starving it.
 
 ## Risks and rollback
 

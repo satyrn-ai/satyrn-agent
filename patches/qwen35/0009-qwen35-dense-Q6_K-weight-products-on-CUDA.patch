@@ -1,7 +1,7 @@
 From 3398a6b30be44ccb5612ee6d8ea6f7fa7da09976 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 10:20:02 +0200
-Subject: [PATCH 09/13] qwen35: dense Q6_K weight products on CUDA
+Subject: [PATCH 09/14] qwen35: dense Q6_K weight products on CUDA
 
 Dense qwen35 keeps output.weight and two tensors per layer in Q6_K, so the
 CUDA path cannot load the model without it. Decode the 6-bit quant with the
