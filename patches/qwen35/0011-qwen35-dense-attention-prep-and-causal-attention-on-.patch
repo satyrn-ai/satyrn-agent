@@ -1,7 +1,7 @@
 From 411aab8bc5249e60206ece62d53041f843ce7a39 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 10:38:08 +0200
-Subject: [PATCH 11/15] qwen35: dense attention prep and causal attention on
+Subject: [PATCH 11/16] qwen35: dense attention prep and causal attention on
  CUDA
 
 attn_prep drives the shared prep kernel with qwen35's rope settings and the
