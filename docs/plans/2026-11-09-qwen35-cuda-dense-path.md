@@ -625,9 +625,13 @@ says the loop shape is now close to memory-bound.
 
 **What is left, with the evidence for each:**
 
-1. **Per-matvec activation quantisation.** Every dense matvec launches its own
-   q8_K kernel (about 256 launches per token on this model). Quantising once per
-   layer, or in shared memory inside the matvec, removes that launch cost.
+1. **Per-matvec activation quantisation: measured, rejected.** Every dense
+   matvec launches its own q8_K kernel, about 256 launches per token. Skipping
+   those launches entirely, which gives wrong results and is only a timing
+   probe, measured 31.05 t/s against 31.45 t/s with them. The launches cost
+   nothing, so caching or fusing them buys nothing. The decode loop is
+   memory-bound at 55% of peak bandwidth, and further gains need a profiler that
+   this box does not have (`nsys`, `ncu` and `nvprof` are all absent).
 2. **Footprint, still unresolved.** Peak measured 19,323 MiB with `-c 512
    --prefill-chunk 256`, so residency now coexists with a desktop session, but
    only by shrinking context. The plan-versus-measured gap at `-c 4096` is a
@@ -638,6 +642,15 @@ says the loop shape is now close to memory-bound.
    by comparing against the magnitude of the accumulation (2e-2), while the exact
    float matrix path keeps 5e-5. A Q4_K case was added because the suite had none
    and the `dp4a` kernel was otherwise uncovered.
+4. **No CUDA end-to-end suite exists.** `tests/ds4_e2e_test.sh` builds the
+   binding with the `cpu` or `metal` backend only, so the agent-level suite
+   cannot exercise CUDA. Dense qwen35 has no CPU reference either: `--cpu`
+   accepts only `--first-token-test`, and that path wants `DS4_QWEN4_FT_LIST`,
+   which is GPU-only. The CUDA evidence is therefore the kernel suites, the
+   oracle, repeatable greedy output and the measured rates. Separately,
+   `make -C .ds4/tree test-qwen4-kernels` does not build here: the implicit rule
+   for `tests/test_qwen4_kernels.o` has no `-I.`, so `ds4.h` is not found. That
+   fails the same way under plain `make`, so the CUDA flags do not cause it.
 
 ## Risks and rollback
 
