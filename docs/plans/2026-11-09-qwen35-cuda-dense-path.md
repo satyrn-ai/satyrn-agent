@@ -604,17 +604,40 @@ template (`for (i = lane*4; i < K; i += 128)`, scalar dequant plus `fmaf`), whil
 Q8_0 uses block-wise `__dp4a` with `__shfl_down_sync` reductions. Ollama runs a
 tuned K-quant GEMV; we run a correctness-first fallback added by `0009`.
 
-**Two follow-ups, in order:**
+**Both kernels are now in the series.** `0015` hoisted the super-block header out
+of the per-element loop, `0016` replaced the float inner loop for Q4_K with
+`__dp4a` over q8_K-quantised activations, `0017` kept four dot products in flight
+per lane, and `0018` did the same for Q6_K. Generation went 8.71 -> 15.05 ->
+27.35 -> 29.62 -> 30.41 t/s, so the kernel work bought 3.5x on top of residency:
 
-1. **Tuned Q4_K/Q6_K dense matvec.** Block-wise `__dp4a` over the existing
-   `value<TYPE>` dequant, mirroring `matvec_q8`, with a sweep over T=1..8 and
-   T=32 against the reference kernel. Target: close most of the 4.9x.
-   Acceptance: oracle unchanged, suites pass, generation >= 30 t/s.
-2. **Residency headroom.** The measured footprint is 20.3 GiB against ollama's
-  ~17 GiB, so the graph's buffers/scratch cost about 3 GiB more than the model.
-  A smaller prefill cap is the first lever; if it is not enough, residency
-  belongs in the engine's VRAM plan instead of being allocated beside it.
-  Target: fit alongside a desktop session without starving it.
+| Stage | Generation | Effective bandwidth | Share of 936 GB/s |
+| --- | --- | --- | --- |
+| Weights resident, float kernel | 8.71 t/s | 146 GB/s | 16% |
+| Header hoisted (`0015`) | 15.05 t/s | 253 GB/s | 27% |
+| Q4_K `dp4a` (`0016`) | 27.35 t/s | 460 GB/s | 49% |
+| Four rows per warp (`0017`) | 29.62 t/s | 498 GB/s | 53% |
+| Q6_K `dp4a` (`0018`) | 30.41 t/s | 511 GB/s | 55% |
+
+Against the 43 t/s another runtime reaches on this card, that leaves 1.4x. The
+remaining margin is bandwidth utilisation (55% versus 72%), not arithmetic: Q6_K
+was 27% of the streamed bytes but moving it to `dp4a` bought only 0.8 t/s, which
+says the loop shape is now close to memory-bound.
+
+**What is left, with the evidence for each:**
+
+1. **Per-matvec activation quantisation.** Every dense matvec launches its own
+   q8_K kernel (about 256 launches per token on this model). Quantising once per
+   layer, or in shared memory inside the matvec, removes that launch cost.
+2. **Footprint, still unresolved.** Peak measured 19,323 MiB with `-c 512
+   --prefill-chunk 256`, so residency now coexists with a desktop session, but
+   only by shrinking context. The plan-versus-measured gap at `-c 4096` is a
+   constant ~4 GiB that neither the context size nor the prefill chunk explains;
+   it needs `cudaMemGetInfo` instrumentation at three points in the run.
+3. **The q8 activation quantisation is an approximation.** Dense K-quant decode
+   now matches what the MoE decode has always done, and the quant suite pins it
+   by comparing against the magnitude of the accumulation (2e-2), while the exact
+   float matrix path keeps 5e-5. A Q4_K case was added because the suite had none
+   and the `dp4a` kernel was otherwise uncovered.
 
 ## Risks and rollback
 

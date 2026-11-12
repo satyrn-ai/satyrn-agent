@@ -1,0 +1,363 @@
+From 3ba59116bbdf43df8d1f764f14ff56cbc8c918ab Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
+Date: Thu, 12 Nov 2026 21:02:52 +0200
+Subject: [PATCH 18/18] qwen35: reduce dense Q6_K decode through __dp4a too
+
+Q6_K is 27% of the bytes this checkpoint streams per token and was still on the
+float path. Its 210-byte block stride leaves most blocks off a 4-byte boundary,
+so the quantised bytes are assembled from byte loads rather than cast to int32,
+and the -32 bias folds into the byte arithmetic so the integer sum stays exact
+with no bsums correction.
+
+Measured: 29.62 -> 30.41 t/s generation on the 27B with weights resident. Q6_K was
+27% of the bytes for 0.8 t/s, which says the decode loop is now close to
+memory-bound rather than arithmetic-bound.
+
+The quant suite had no Q4_K case at all, so the dp4a kernel from 0016 was
+uncovered; it now covers both types. Because the dp4a paths quantise activations
+to q8_K, they are compared against the magnitude of the accumulation with a 2e-2
+bound, while the exact float matrix path keeps 5e-5: a dot product that cancels
+to near zero otherwise fails a result-relative bound for the error of its own
+terms.
+---
+ ds4_cuda.cu                    |  99 +++++++++++++++++++-----
+ ds4_qwen4_cuda.cuh             |   6 ++
+ tests/test_qwen35_cuda_quant.c | 134 +++++++++++++++++++++++++++++++--
+ 3 files changed, 216 insertions(+), 23 deletions(-)
+
+diff --git a/ds4_cuda.cu b/ds4_cuda.cu
+index 7c728663..025d3670 100644
+--- a/ds4_cuda.cu
++++ b/ds4_cuda.cu
+@@ -23319,31 +23319,75 @@ __device__ __forceinline__ static float dev_warp_sum32(float v) {
+     return v;
+ }
+ 
+-template<unsigned ROWS>
+-__global__ static void dense_q4k_q8k_matvec(float *out, const char *w,
++/* Q6_K block dot. The 210-byte block stride leaves most blocks off a 4-byte
++ * boundary, so the quantised bytes are assembled from byte loads instead of
++ * casting to int32: the -32 bias folds into the byte arithmetic, so the integer
++ * sum is exact and no bsums correction is needed. */
++__device__ __forceinline__ static void dev_dot_q6_K_q8_K_block(
++        const uint8_t *x, const cuda_block_q8_K *y, float *out_acc) {
++    const uint16_t dh = (uint16_t)x[208] | (uint16_t)((unsigned)x[209] << 8);
++    const float d = dev_f16_to_f32(dh);
++    const int8_t *sc = (const int8_t *)(x + 192);
++    int isum[16] = {0};
++    #pragma unroll
++    for (unsigned half = 0; half < 2u; half++) {
++        #pragma unroll
++        for (unsigned part = 0; part < 4u; part++) {
++            const unsigned shift = 4u * (part >> 1u), s2 = 2u * part;
++            const uint8_t *ql = x + half * 64u + (part & 1u) * 32u;
++            const uint8_t *qh = x + 128u + half * 32u;
++            #pragma unroll
++            for (unsigned w = 0; w < 8u; w++) {
++                const unsigned base = w * 4u;
++                int32_t v = 0;
++                #pragma unroll
++                for (unsigned k = 0; k < 4u; k++) {
++                    const unsigned lo = (ql[base + k] >> shift) & 15u;
++                    const unsigned hi = (qh[base + k] >> s2) & 3u;
++                    const int q = (int)(lo | (hi << 4u)) - 32;
++                    v |= (int32_t)((unsigned)q & 0xffu) << (8u * k);
++                }
++                const unsigned j = half * 128u + part * 32u + base;
++                isum[j / 16u] = __dp4a(v, *(const int32_t *)(y->qs + j), isum[j / 16u]);
++            }
++        }
++    }
++    int total = 0;
++    #pragma unroll
++    for (unsigned i = 0; i < 16u; i++) total += (int)sc[i] * isum[i];
++    *out_acc += y->d * d * (float)total;
++}
++
++template<unsigned ROWS, bool Q6K>
++__global__ static void dense_kquant_q8k_matvec(float *out, const char *w,
+         const cuda_block_q8_K *xq, unsigned T, unsigned K, unsigned M, uint64_t stride) {
+     const unsigned warp = blockIdx.x * 4u + (threadIdx.x >> 5u), lane = threadIdx.x & 31u;
+     const unsigned row0 = warp * 4u;
+     if (row0 >= M) return;
+     const unsigned blocks = K / 256u;
+     const bool has1 = row0 + 1u < M, has2 = row0 + 2u < M, has3 = row0 + 3u < M;
+-    const cuda_block_q4_K *wr0 = (const cuda_block_q4_K *)(w + (uint64_t)row0 * stride);
+-    const cuda_block_q4_K *wr1 = has1 ?
+-        (const cuda_block_q4_K *)(w + (uint64_t)(row0 + 1u) * stride) : wr0;
+-    const cuda_block_q4_K *wr2 = has2 ?
+-        (const cuda_block_q4_K *)(w + (uint64_t)(row0 + 2u) * stride) : wr0;
+-    const cuda_block_q4_K *wr3 = has3 ?
+-        (const cuda_block_q4_K *)(w + (uint64_t)(row0 + 3u) * stride) : wr0;
++    const unsigned blk = Q6K ? 210u : 144u;
++    const char *wr0 = w + (uint64_t)row0 * stride;
++    const char *wr1 = has1 ? w + (uint64_t)(row0 + 1u) * stride : wr0;
++    const char *wr2 = has2 ? w + (uint64_t)(row0 + 2u) * stride : wr0;
++    const char *wr3 = has3 ? w + (uint64_t)(row0 + 3u) * stride : wr0;
+     #pragma unroll
+     for (unsigned t = 0; t < ROWS; t++) {
+         if (t >= T) continue;
+         const cuda_block_q8_K *xqb = xq + (uint64_t)t * blocks;
+         float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+         for (unsigned b = lane; b < blocks; b += 32u) {
+-            dev_dot_q4_K_q8_K_block_vec(wr0 + b, xqb + b, &a0);
+-            if (has1) dev_dot_q4_K_q8_K_block_vec(wr1 + b, xqb + b, &a1);
+-            if (has2) dev_dot_q4_K_q8_K_block_vec(wr2 + b, xqb + b, &a2);
+-            if (has3) dev_dot_q4_K_q8_K_block_vec(wr3 + b, xqb + b, &a3);
++            if (Q6K) {
++                dev_dot_q6_K_q8_K_block((const uint8_t *)wr0 + b * blk, xqb + b, &a0);
++                if (has1) dev_dot_q6_K_q8_K_block((const uint8_t *)wr1 + b * blk, xqb + b, &a1);
++                if (has2) dev_dot_q6_K_q8_K_block((const uint8_t *)wr2 + b * blk, xqb + b, &a2);
++                if (has3) dev_dot_q6_K_q8_K_block((const uint8_t *)wr3 + b * blk, xqb + b, &a3);
++            } else {
++                dev_dot_q4_K_q8_K_block_vec((const cuda_block_q4_K *)(wr0 + b * blk), xqb + b, &a0);
++                if (has1) dev_dot_q4_K_q8_K_block_vec((const cuda_block_q4_K *)(wr1 + b * blk), xqb + b, &a1);
++                if (has2) dev_dot_q4_K_q8_K_block_vec((const cuda_block_q4_K *)(wr2 + b * blk), xqb + b, &a2);
++                if (has3) dev_dot_q4_K_q8_K_block_vec((const cuda_block_q4_K *)(wr3 + b * blk), xqb + b, &a3);
++            }
+         }
+         a0 = dev_warp_sum32(a0);
+         a1 = dev_warp_sum32(a1);
+@@ -23369,12 +23413,33 @@ extern "C" int ds4_gpu_qwen4_dense_q4k_matvec(float *out, const char *w, const f
+     if (cudaGetLastError() != cudaSuccess) { (void)cudaGetLastError(); return 0; }
+     const dim3 grid((M + 15u) / 16u);
+     switch (T) {
+-    case 1: dense_q4k_q8k_matvec<1><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
+-    case 2: dense_q4k_q8k_matvec<2><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    case 1: dense_kquant_q8k_matvec<1, false><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    case 2: dense_kquant_q8k_matvec<2, false><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    case 3: case 4:
++        dense_kquant_q8k_matvec<4, false><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    default:
++        dense_kquant_q8k_matvec<8, false><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    }
++    if (cudaGetLastError() != cudaSuccess) { (void)cudaGetLastError(); return 0; }
++    return 1;
++}
++
++extern "C" int ds4_gpu_qwen4_dense_q6k_matvec(float *out, const char *w, const float *x,
++        uint32_t T, uint32_t K, uint32_t M, uint64_t stride) {
++    if (!out || !w || !x || !T || !M || !K || (K % 256u) || (stride % 210u)) return 0;
++    const unsigned blocks = K / 256u;
++    if (!qwen_q8k_ws_ensure((size_t)T * blocks)) return 0;
++    const cudaStream_t st = cuda_decode_stream();
++    q8_K_quantize_kernel<<<dim3(blocks, T), 256, 0, st>>>(g_qwen_q8k_ws, x, K, T);
++    if (cudaGetLastError() != cudaSuccess) { (void)cudaGetLastError(); return 0; }
++    const dim3 grid((M + 15u) / 16u);
++    switch (T) {
++    case 1: dense_kquant_q8k_matvec<1, true><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++    case 2: dense_kquant_q8k_matvec<2, true><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
+     case 3: case 4:
+-        dense_q4k_q8k_matvec<4><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++        dense_kquant_q8k_matvec<4, true><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
+     default:
+-        dense_q4k_q8k_matvec<8><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
++        dense_kquant_q8k_matvec<8, true><<<grid, 128, 0, st>>>(out, w, g_qwen_q8k_ws, T, K, M, stride); break;
+     }
+     if (cudaGetLastError() != cudaSuccess) { (void)cudaGetLastError(); return 0; }
+     return 1;
+diff --git a/ds4_qwen4_cuda.cuh b/ds4_qwen4_cuda.cuh
+index 9a6dae34..7453c4c1 100644
+--- a/ds4_qwen4_cuda.cuh
++++ b/ds4_qwen4_cuda.cuh
+@@ -7,6 +7,8 @@
+  * in ds4_cuda.cu. Returns 0 to let the caller keep its float path. */
+ extern "C" int ds4_gpu_qwen4_dense_q4k_matvec(float *out, const char *w, const float *x,
+         uint32_t T, uint32_t K, uint32_t M, uint64_t stride);
++extern "C" int ds4_gpu_qwen4_dense_q6k_matvec(float *out, const char *w, const float *x,
++        uint32_t T, uint32_t K, uint32_t M, uint64_t stride);
+ 
+ namespace qwen4_cuda {
+ 
+@@ -1265,6 +1267,10 @@ static int matvec_dispatch(float *out, const char *w, const float *x,
+         ds4_gpu_qwen4_dense_q4k_matvec(out, w, x, T, K, M, stride)) {
+         return 1;
+     }
++    if (type == 14 && T <= 8 && !(K % 256) &&
++        ds4_gpu_qwen4_dense_q6k_matvec(out, w, x, T, K, M, stride)) {
++        return 1;
++    }
+     if ((type == 12 || type == 14) && T <= 8 && !((uintptr_t)x&15) && !(K % 32)) {
+ #define QWEN_KQ_ROWS(TYPE) \
+         if (T == 1) { QWEN_KQ(TYPE, 1); } \
+diff --git a/tests/test_qwen35_cuda_quant.c b/tests/test_qwen35_cuda_quant.c
+index 018306b1..0318399b 100644
+--- a/tests/test_qwen35_cuda_quant.c
++++ b/tests/test_qwen35_cuda_quant.c
+@@ -48,6 +48,118 @@ static double q6k_value(const unsigned char *row, unsigned k) {
+     return (double)q35_half_to_float(d) * (double)scale * (double)q;
+ }
+ 
++/* Decode for T<=8 goes through the integer dp4a path, which quantises the
++ * activations to q8_K: the result differs from exact float dequant by the
++ * activation quantisation error, the same trade the MoE decode already makes.
++ * T>8 keeps the exact float matrix path, so its tolerance stays tight. */
++#define Q35_TOL_DP4A 2e-2
++#define Q35_TOL_EXACT 5e-5
++
++static double q35_tol(unsigned T) { return T <= 8u ? Q35_TOL_DP4A : Q35_TOL_EXACT; }
++
++static void q4k_encode(unsigned char *block, const uint8_t *q, const uint8_t *scales) {
++    const uint16_t d = 0x1400u, dmin = 0x0c00u;
++    memcpy(block, &d, sizeof(d));
++    memcpy(block + 2, &dmin, sizeof(dmin));
++    memcpy(block + 4, scales, 12);
++    memset(block + 16, 0, 128);
++    for (unsigned j = 0; j < 256u; j++) {
++        const unsigned idx = j / 64u * 32u + j % 32u;
++        block[16u + idx] |= (unsigned char)((q[j] & 15u) << (4u * ((j / 32u) & 1u)));
++    }
++}
++
++static double q4k_value(const unsigned char *row, unsigned k) {
++    const unsigned char *b = row + (k / 256u) * 144u;
++    const unsigned j = k % 256u, group = j / 32u;
++    unsigned sc, mn;
++    if (group < 4u) {
++        sc = b[4u + group] & 63u;
++        mn = b[4u + group + 4u] & 63u;
++    } else {
++        sc = (b[4u + group + 4u] & 15u) | ((unsigned)(b[4u + group - 4u] >> 6) << 4);
++        mn = (b[4u + group + 4u] >> 4) | ((unsigned)(b[4u + group] >> 6) << 4);
++    }
++    const unsigned q = (b[16u + j / 64u * 32u + j % 32u] >> (4u * (group & 1u))) & 15u;
++    uint16_t d, dmin;
++    memcpy(&d, b, sizeof(d));
++    memcpy(&dmin, b + 2, sizeof(dmin));
++    return (double)q35_half_to_float(d) * (double)sc * (double)q -
++           (double)q35_half_to_float(dmin) * (double)mn;
++}
++
++/* Compare against the magnitude of the accumulation, not against the result:
++ * a dot product that cancels to near zero still carries the quantisation error
++ * of its terms, so scaling the bound by |result| alone would fail arbitrarily. */
++static void q35_check_dot(const char *what, const ds4_gpu_tensor *tensor,
++                          const double *expect, const double *magnitude,
++                          uint64_t count, double tolerance) {
++    float *actual = q35_alloc(count * sizeof(float));
++    q35_require(ds4_gpu_tensor_read(tensor, 0, actual, count * sizeof(float)),
++                "ds4_gpu_tensor_read");
++    for (uint64_t i = 0; i < count; i++) {
++        const double got = (double)actual[i], want = expect[i];
++        if (!(fabs(got - want) <= tolerance * (1.0 + magnitude[i]))) {
++            fprintf(stderr, "qwen35 test: %s[%llu] got %.9g want %.9g mag %.6g\n", what,
++                    (unsigned long long)i, got, want, magnitude[i]);
++            free(actual);
++            exit(1);
++        }
++    }
++    free(actual);
++}
++
++static void q4k_case(uint32_t K, uint32_t M, uint32_t T) {
++    q35_require(K % 256u == 0u, "K must be a multiple of 256");
++    const uint64_t blocks = K / 256u, row_bytes = blocks * 144u;
++    const uint64_t weight_bytes = row_bytes * M;
++    unsigned char *weights = q35_alloc(weight_bytes);
++    for (uint32_t m = 0; m < M; m++) {
++        for (uint64_t b = 0; b < blocks; b++) {
++            uint8_t q[256], scales[12];
++            for (unsigned j = 0; j < 256u; j++) q[j] = (uint8_t)(q35_random() & 15u);
++            for (unsigned j = 0; j < 12u; j++) scales[j] = (uint8_t)(q35_random() & 0xffu);
++            q4k_encode(weights + m * row_bytes + b * 144u, q, scales);
++        }
++    }
++    q35_arena arena;
++    q35_arena_init(&arena, weight_bytes);
++    const uint64_t off = q35_arena_add(&arena, weights, weight_bytes);
++    q35_arena_bind(&arena);
++    free(weights);
++    float *x = q35_alloc((uint64_t)T * K * sizeof(float));
++    for (uint64_t i = 0; i < (uint64_t)T * K; i++) x[i] = q35_random_uniform();
++    double *expect = q35_alloc((uint64_t)T * M * sizeof(double));
++    double *mag = q35_alloc((uint64_t)T * M * sizeof(double));
++    for (uint32_t t = 0; t < T; t++) {
++        for (uint32_t m = 0; m < M; m++) {
++            double acc = 0, sum = 0;
++            for (uint32_t k = 0; k < K; k++) {
++                const double w = q4k_value(arena.base + off + m * row_bytes, k);
++                acc += (double)x[(uint64_t)t * K + k] * w;
++                sum += fabs((double)x[(uint64_t)t * K + k] * w);
++            }
++            expect[(uint64_t)t * M + m] = acc;
++            mag[(uint64_t)t * M + m] = sum;
++        }
++    }
++    ds4_gpu_tensor *xt = q35_upload(x, (uint64_t)T * K);
++    ds4_gpu_tensor *out = ds4_gpu_tensor_alloc((uint64_t)T * M * sizeof(float));
++    q35_require(out != NULL, "output tensor");
++    q35_require(ds4_gpu_qwen4_dense_mm_tensor(out, xt, arena.base, arena.size, off, 12, T, K, M),
++                "Q4_K dense mm");
++    char what[96];
++    snprintf(what, sizeof(what), "Q4_K K=%u M=%u T=%u", K, M, T);
++    q35_check_dot(what, out, expect, mag, (uint64_t)T * M,
++                  T <= 8u ? Q35_TOL_DP4A : Q35_TOL_EXACT);
++    ds4_gpu_tensor_free(out);
++    ds4_gpu_tensor_free(xt);
++    q35_arena_free(&arena);
++    free(x);
++    free(expect);
++    free(mag);
++}
++
+ static void q6k_case(uint32_t K, uint32_t M, uint32_t T) {
+     q35_require(K % Q6K_QUANT == 0, "K must be a multiple of 256");
+     const uint64_t blocks = K / Q6K_QUANT;
+@@ -75,13 +187,17 @@ static void q6k_case(uint32_t K, uint32_t M, uint32_t T) {
+     for (uint64_t i = 0; i < (uint64_t)T * K; i++) x[i] = q35_random_uniform();
+ 
+     double *expect = q35_alloc((uint64_t)T * M * sizeof(double));
++    double *mag = q35_alloc((uint64_t)T * M * sizeof(double));
+     for (uint32_t t = 0; t < T; t++) {
+         for (uint32_t m = 0; m < M; m++) {
+-            double acc = 0;
+-            for (uint32_t k = 0; k < K; k++)
+-                acc += (double)x[(uint64_t)t * K + k] *
+-                       q6k_value(arena.base + off + m * row_bytes, k);
++            double acc = 0, sum = 0;
++            for (uint32_t k = 0; k < K; k++) {
++                const double w = q6k_value(arena.base + off + m * row_bytes, k);
++                acc += (double)x[(uint64_t)t * K + k] * w;
++                sum += fabs((double)x[(uint64_t)t * K + k] * w);
++            }
+             expect[(uint64_t)t * M + m] = acc;
++            mag[(uint64_t)t * M + m] = sum;
+         }
+     }
+ 
+@@ -92,11 +208,13 @@ static void q6k_case(uint32_t K, uint32_t M, uint32_t T) {
+                 "Q6_K dense mm");
+     char what[96];
+     snprintf(what, sizeof(what), "Q6_K K=%u M=%u T=%u", K, M, T);
+-    q35_check_tensor(what, out, expect, (uint64_t)T * M, 5e-5);
++    q35_check_dot(what, out, expect, mag, (uint64_t)T * M,
++                  T <= 8u ? Q35_TOL_DP4A : Q35_TOL_EXACT);
+ 
+     ds4_gpu_tensor_free(out);
+     ds4_gpu_tensor_free(xt);
+     free(expect);
++    free(mag);
+     free(x);
+     q35_arena_free(&arena);
+ }
+@@ -128,8 +246,10 @@ int main(void) {
+     const uint32_t ks[] = { 256, 512 }, ms[] = { 1, 4 }, ts[] = { 1, 8, 9, 17, 32, 33 };
+     for (unsigned a = 0; a < sizeof(ks) / sizeof(ks[0]); a++)
+         for (unsigned b = 0; b < sizeof(ms) / sizeof(ms[0]); b++)
+-            for (unsigned c = 0; c < sizeof(ts) / sizeof(ts[0]); c++)
++            for (unsigned c = 0; c < sizeof(ts) / sizeof(ts[0]); c++) {
+                 q6k_case(ks[a], ms[b], ts[c]);
++                q4k_case(ks[a], ms[b], ts[c]);
++            }
+ 
+     /* Force the tensor-core layer off so the plain matrix kernel runs; the
+      * cuBLAS path has no disable knob, so T >= 32 always exercises unpack. */
+@@ -138,6 +258,8 @@ int main(void) {
+         for (unsigned b = 0; b < sizeof(ms) / sizeof(ms[0]); b++) {
+             q6k_case(ks[a], ms[b], 9);
+             q6k_case(ks[a], ms[b], 17);
++            q4k_case(ks[a], ms[b], 9);
++            q4k_case(ks[a], ms[b], 17);
+         }
+     unsetenv("DS4_CUDA_NO_TF32");
+ 

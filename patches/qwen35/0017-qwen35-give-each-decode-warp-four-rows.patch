@@ -1,7 +1,7 @@
 From a8bbe26ecf0ab0adecb8900bfd145688b5060dca Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 20:05:21 +0200
-Subject: [PATCH 17/17] qwen35: give each decode warp four rows
+Subject: [PATCH 17/18] qwen35: give each decode warp four rows
 
 One row per warp left each lane with a single 144-byte block in flight, so the
 matvec waited on memory rather than saturating it. Four rows per warp keeps four
