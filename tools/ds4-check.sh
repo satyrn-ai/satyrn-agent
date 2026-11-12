@@ -28,7 +28,7 @@ DS4_CHECK_DIR="${DS4_CHECK_DIR:-$DS4_REPO_ROOT/.ds4/check}"
 
 usage() {
     cat <<'EOF'
-Usage: ds4-check [--common-only | --model NAME] [--build]
+Usage: ds4-check [--common-only | --model NAME] [--build] [--backend NAME]
        ds4-check --help
 
 Verify each selected patch target from a pristine clone of the pinned
@@ -38,12 +38,14 @@ Options:
   --common-only  check only the common patch directory
   --model NAME   check only the named model prefix
   --build        build each checked tree with ds4py build --src
+  --backend NAME build for metal, cuda or cpu; default metal on macOS, cpu
+                 elsewhere, or DS4_CHECK_BACKEND when that is set
   --help         print this help and exit
 EOF
 }
 
 main() {
-    local common_only=0 model="" build=0 positional=()
+    local common_only=0 model="" build=0 requested_backend="" positional=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --common-only)
@@ -58,6 +60,11 @@ main() {
             --build)
                 build=1
                 shift
+                ;;
+            --backend)
+                [[ $# -ge 2 ]] || ds4_die "--backend requires metal, cuda or cpu"
+                requested_backend="$2"
+                shift 2
                 ;;
             --help)
                 usage
@@ -134,19 +141,14 @@ main() {
         esac
     fi
 
-    local backend
-    case "$(uname -s)" in
-        Darwin) backend="metal" ;;
-        *)
-            # ds4py's own default is cpu off macOS, so a Linux build only reaches
-            # the CUDA path when this asks for it. The devenv shell always
-            # provides nvcc; a host without it still builds and runs on cpu.
-            if command -v nvcc >/dev/null 2>&1; then
-                backend="cuda"
-            else
-                backend="cpu"
-            fi
-            ;;
+    # The backend is the caller's choice, never a guess from PATH: this tool
+    # builds every target, so a CUDA build is a request, not an inference.
+    # tools/ds4-cuda.sh is how a CUDA host asks for one.
+    local backend="${requested_backend:-${DS4_CHECK_BACKEND:-}}"
+    case "$backend" in
+        "") backend="$(uname -s | grep -qx Darwin && echo metal || echo cpu)" ;;
+        metal | cuda | cpu) ;;
+        *) ds4_die "unknown backend: $backend" ;;
     esac
 
     local stop clone m

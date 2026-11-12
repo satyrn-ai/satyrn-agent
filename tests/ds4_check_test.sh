@@ -309,6 +309,60 @@ test_check_rejects_invalid_arguments() {
     }
 }
 
+test_check_backend_is_an_explicit_choice() {
+    _check_fixture "$TMP_ROOT/check-backend-upstream" "$TMP_ROOT/check-backend-patches" \
+        "$TMP_ROOT/check-backend-cache" "$TMP_ROOT/check-backend-tree" \
+        "$TMP_ROOT/check-backend-checkdir"
+
+    local bin="$TMP_ROOT/check-backend-bin"
+    local log="$TMP_ROOT/check-backend-args.log"
+    local err="$TMP_ROOT/check-backend.err"
+    mkdir -p "$bin"
+    rm -f "$log"
+    cat > "$bin/ds4py" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >> "$log"
+EOF
+    chmod +x "$bin/ds4py"
+
+    # A flag on the command line.
+    PATH="$bin:$PATH" _run_check --build --backend cuda >/dev/null
+    assert_eq "3" "$(grep -c '^cuda$' "$log")" "builds asked for the cuda backend"
+
+    # An environment override, when no flag is given.
+    rm -f "$log"
+    PATH="$bin:$PATH" DS4_CHECK_BACKEND=metal _run_check --build >/dev/null
+    assert_eq "3" "$(grep -c '^metal$' "$log")" "builds asked for the metal backend"
+
+    # The flag wins over the environment.
+    rm -f "$log"
+    PATH="$bin:$PATH" DS4_CHECK_BACKEND=metal _run_check --build --backend cpu >/dev/null
+    assert_eq "3" "$(grep -c '^cpu$' "$log")" "builds asked for the cpu backend"
+
+    # An ambient nvcc is not a request: the default stays off macOS cpu.
+    rm -f "$log"
+    mkdir -p "$TMP_ROOT/check-backend-nvcc"
+    printf '#!/bin/sh\nexit 0\n' > "$TMP_ROOT/check-backend-nvcc/nvcc"
+    chmod +x "$TMP_ROOT/check-backend-nvcc/nvcc"
+    PATH="$TMP_ROOT/check-backend-nvcc:$bin:$PATH" _run_check --build >/dev/null
+    assert_eq "0" "$(grep -c '^cuda$' "$log")" "nvcc on PATH did not select cuda"
+
+    # An unsupported backend is refused before any build runs.
+    rm -f "$log"
+    if PATH="$bin:$PATH" _run_check --build --backend rocm 2>"$err"; then
+        printf '  FAIL: expected --backend rocm to fail\n' >&2
+        return 1
+    fi
+    grep -q 'unknown backend' "$err" || {
+        printf '  FAIL: error did not mention unknown backend\n' >&2
+        return 1
+    }
+    if [[ -s "$log" ]]; then
+        printf '  FAIL: a refused backend still ran a build\n' >&2
+        return 1
+    fi
+}
+
 # The runner reads this registry after sourcing the module.
 # shellcheck disable=SC2034
 DS4_MODULE_TESTS=(
@@ -320,6 +374,7 @@ DS4_MODULE_TESTS=(
     test_check_detects_corrupt_selected_boundary_ref
     test_check_help_prints_usage_without_changes
     test_check_rejects_invalid_arguments
+    test_check_backend_is_an_explicit_choice
 )
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

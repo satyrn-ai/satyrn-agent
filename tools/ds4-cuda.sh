@@ -7,12 +7,17 @@
 #
 #   tools/ds4-cuda.sh make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-quant
 #   tools/ds4-cuda.sh            # interactive shell with nvcc and cuBLAS
+#
+# Set DS4_CUDA_AMBIENT=1 to run in the current environment and skip the pinned
+# toolchain on purpose. DS4_CUDA_SHELL marks the shell this script enters.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Already inside a CUDA shell: run the command directly.
-if [[ -n "${CUDA_PATH:-}" ]] && command -v nvcc >/dev/null 2>&1; then
+# Already inside this project's CUDA shell: run the command directly. An ambient
+# CUDA install does not qualify, because its version is not the one the patched
+# tree builds against; uptake of one is an explicit request.
+if [[ -n "${DS4_CUDA_SHELL:-}" ]] || [[ -n "${DS4_CUDA_AMBIENT:-}" ]]; then
     if [[ $# -eq 0 ]]; then
         exec bash -l
     fi
@@ -29,5 +34,5 @@ if [[ $# -eq 0 ]]; then
 fi
 # The quoted program is the inner shell's: $1 and "$@" belong to it, not here.
 # shellcheck disable=SC2016
-exec env DS4_CUDA=1 bash -c 'cd "$1" || exit 1; shift; exec devenv shell -- "$@"' \
+exec env DS4_CUDA=1 DS4_CUDA_SHELL=1 bash -c 'cd "$1" || exit 1; shift; exec devenv shell -- "$@"' \
     ds4-cuda "$root" "$@"
