@@ -1,7 +1,7 @@
 From 41f717215900eb7d020571b503d1baa53962fc7f Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 11:56:27 +0200
-Subject: [PATCH 12/15] qwen35: reach the dense graph on CUDA
+Subject: [PATCH 12/16] qwen35: reach the dense graph on CUDA
 
 Restructure the single #if defined(__APPLE__) block that wrapped the whole
 qwen35 graph so the neutral parts compile on every GPU build:
