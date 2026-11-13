@@ -38,11 +38,18 @@ def test_build_check_manifest_and_load_workflow(live_settings: LiveSettings, tmp
     run(sys.executable, "-m", "ds4py", "check", "--lib", str(library))
 
     manifest = Manifest.read(manifest_path(library))
+    satyrn_names = {binding.name for binding in BINDINGS}
+    assert len(satyrn_names) == 8
+    assert {name for name, record in manifest.bindings.items() if record.source == "satyrn"} == satyrn_names
     for binding in BINDINGS:
         record = manifest.bindings[binding.name]
         assert record.source == "satyrn"
         assert record.ok, f"{binding.name}: {record.message}"
         assert not record.required
+    payload_probe = manifest.bindings["ds4_session_supports_payload"]
+    assert payload_probe.source == "core"
+    assert payload_probe.ok, payload_probe.message
+    assert not payload_probe.required
 
     run(
         sys.executable,
