@@ -99,8 +99,10 @@ class RuntimeController:
         *,
         interactive: bool,
         end_think_token: int,
+        on_step: Callable[[DecodeStep], None],
     ) -> None:
         self._session = session
+        self._on_step = on_step
         self._native = native
         self._config = config
         self._backend = backend
@@ -160,6 +162,7 @@ class RuntimeController:
             self._fail_change(state, requested, error)
         state.requested = requested
         state.step = step
+        self._on_step(step)
         if publish:
             self.publish_status()
 
@@ -169,6 +172,7 @@ class RuntimeController:
         cleanup_error: BaseException | None = None
         try:
             self._session.set_decode_step(state.step)
+            self._on_step(state.step)
             self._set_verify_off()
         except BaseException as cleanup:  # noqa: BLE001 - Preserve the native failure and best-effort cleanup failure.
             cleanup_error = cleanup
@@ -181,6 +185,7 @@ class RuntimeController:
         state = self.state
         state.step = PlainStep()
         self._session.set_decode_step(state.step)
+        self._on_step(state.step)
         self._set_verify_off()
 
     def after_identity_change(self) -> None:

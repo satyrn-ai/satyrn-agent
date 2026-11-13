@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from ds4py import EngineError
 
@@ -6,6 +8,7 @@ from satyrn_agent._native import CtypesDFlashNative
 from satyrn_agent.config import DFlashMode, SatyrnConfig
 from satyrn_agent.dflash import DFlashMetrics, DFlashStep, Recorder
 from satyrn_agent.errors import DFlashError
+from tests.e2e.model_free._harness import native_for_dflash
 from tests.e2e.model_free._native import ScenarioFakeNative
 
 
@@ -29,6 +32,30 @@ def test_dflash_steps_share_only_an_explicit_recorder() -> None:
     assert first.metrics == expected
     assert second.metrics == expected
     assert independent.metrics == DFlashMetrics()
+
+
+def test_close_preserves_last_resolved_step_and_metrics() -> None:
+    native = native_for_dflash("alpha beta")
+    wrapper = satyrn_agent.open(
+        "scenario.gguf",
+        config=SatyrnConfig(dflash=DFlashMode.OFF, drafter_path=Path("drafter.gguf")),
+        native=native,
+    )
+    wrapper.session()
+    wrapper.controller.set_dflash("on")
+    last_step = wrapper.controller.state.step
+    wrapper.controller.state.recorder.committed(4, 2, replacement=False, discarded=2)
+
+    wrapper.close()
+
+    assert wrapper.decode_step is last_step
+    assert wrapper.dflash_metrics == DFlashMetrics(
+        committed_blocks=1,
+        drafts_offered=4,
+        drafts_accepted=2,
+        replacement_anchors=0,
+        discarded_tails=2,
+    )
 
 
 def test_first_only_session_close_and_closed_error() -> None:

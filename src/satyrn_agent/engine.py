@@ -60,11 +60,10 @@ class SatyrnEngine:
                 self._engine.native.backend,
                 interactive=self._interactive,
                 end_think_token=resolve_end_think(self._engine),
+                on_step=self._record_step,
             )
             session.add_logits_hook(self._controller.think_hook)
             self._controller.initialize()
-            self._step = self._controller.state.step
-            session.set_decode_step(self._step)
         except BaseException as error:
             try:
                 self.close()
@@ -74,6 +73,9 @@ class SatyrnEngine:
                 )
             raise
         return session
+
+    def _record_step(self, step: DecodeStep) -> None:
+        self._step = step
 
     @property
     def controller(self) -> RuntimeController:
