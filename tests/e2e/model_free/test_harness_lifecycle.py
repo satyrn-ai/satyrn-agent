@@ -32,9 +32,12 @@ def test_new_orders_safe_native_selection_and_python_only_reset(
         asyncio.run(tui.commands.execute("/think-budget 99 8"))
         statuses = []
         listener_counts = []
+        native_before_start = []
         harness.runtime.on_event(statuses.append, kinds={"status"})
+        harness.runtime.on_event(lambda event: native_before_start.append(len(native.call_log)), kinds={"session_end"})
 
         def check_listener(event: object) -> None:
+            assert native_before_start
             listener_counts.append(len(native.call_log))
             assert isinstance(controller.state.step, PlainStep)
 
@@ -52,7 +55,7 @@ def test_new_orders_safe_native_selection_and_python_only_reset(
                 "dflash: on/off, accept — (0/0)",
                 "dflash: on, accept — (0/0)",
             ]
-            assert len(listener_counts) == 1
+            assert listener_counts == native_before_start
             assert native.verify_modes[-2:] == [0, 1]
         finally:
             tui.close()
