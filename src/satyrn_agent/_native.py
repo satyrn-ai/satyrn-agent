@@ -45,6 +45,11 @@ class DFlashNative(Protocol):
     def sampling_defaults(self, engine_raw: int) -> NativeSampling | None: ...
 
 
+class DFlashPolicyNative(DFlashNative, Protocol):
+    @property
+    def verify_mode_available(self) -> bool: ...
+
+
 class CtypesDFlashNative:
     """Convert optional ds4 extension calls to checked Python values."""
 
@@ -56,6 +61,14 @@ class CtypesDFlashNative:
         if name not in self._functions:
             self._functions[name] = self._native.bind(name)
         return self._functions[name]
+
+    @property
+    def verify_mode_available(self) -> bool:
+        try:
+            self._bind("ds4_session_set_verify_mode")
+        except MissingBinding:
+            return False
+        return True
 
     @property
     def missing_dflash(self) -> tuple[str, ...]:

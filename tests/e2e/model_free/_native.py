@@ -46,11 +46,16 @@ class ScenarioFakeNative(FakeNative):
         self.current_token = 0
         self.cancel_after_samples: int | None = None
         self.cancel_event: threading.Event | None = None
+        self.sample_started: threading.Event | None = None
+        self.sample_release: threading.Event | None = None
+        self.verify_modes: list[int] = []
+        self.verify_mode = 0
         super().__init__(
             script=self._next_token,
             absent=self.config.get("missing", set()),
             info=EngineInfo("scenario", 0, "qwen", False, False, True, False, 0, 7, VOCAB_SIZE),
         )
+        self.payload_support = self.config.get("payload_support")
         self.bindings.update(
             {
                 "ds4_engine_has_dflash": self._has_dflash,
@@ -69,6 +74,10 @@ class ScenarioFakeNative(FakeNative):
         return ScenarioFakeEngine(self)
 
     def _next_token(self, prompt: Sequence[int], generated: Sequence[int]) -> int:
+        if self.sample_started is not None:
+            self.sample_started.set()
+        if self.sample_release is not None:
+            self.sample_release.wait()
         script = self.config["script"]
         index = self.sample_count
         self.sample_count += 1
@@ -100,13 +109,20 @@ class ScenarioFakeNative(FakeNative):
 
     def _has_dflash(self, raw: int) -> bool:
         call = self._response("has_dflash")
+        if call is not None and (message := call.get("error")) is not None:
+            raise DFlashError("ds4_engine_has_dflash", message)
         return bool(call["value"]) if call is not None and "value" in call else self.config.get("has_dflash", True)
 
     def _verify_rows(self, raw: int) -> int:
         call = self._response("verify_rows")
+        if call is not None and (message := call.get("error")) is not None:
+            raise DFlashError("ds4_engine_verify_rows", message)
         return call["value"] if call is not None and "value" in call else self.config.get("verify_rows", 8)
 
     def _set_verify_mode(self, raw: int, mode: int) -> int:
+        self.call_log.append({"op": "mode", "mode": mode})
+        self.verify_modes.append(mode)
+        self.verify_mode = mode
         call = self._response("mode")
         if call is not None and (message := call.get("error")) is not None:
             raise DFlashError("ds4_session_set_verify_mode", message)

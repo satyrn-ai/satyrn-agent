@@ -45,6 +45,14 @@ def native_for(script: str | list[int], *, sampling: list[float] | None = None) 
     )
 
 
+def native_for_dflash(text: str) -> ScenarioFakeNative:
+    answer = tokenize_rendered(text)
+    script = [*answer, FAKE_EOS, *answer, FAKE_EOS, *answer, FAKE_EOS]
+    native = native_for(script)
+    native.responses["draft"] = [{"op": "draft", "tokens": [token]} for token in script[1:]]
+    return native
+
+
 def scripted_tool_exchange() -> list[int]:
     call = "<tool_call><function=read_file><parameter=path>README.md</parameter></function></tool_call>"
     return [
@@ -61,6 +69,8 @@ def open_harness(
     native: ScenarioFakeNative,
     argv: list[str],
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    interactive: bool = False,
 ) -> Generator[Harness]:
     from ds4py import agent_cli
 
@@ -85,7 +95,7 @@ def open_harness(
         return wrapper
 
     extension = SatyrnAgentExtension(open_engine=open_engine)
-    args = agent_cli.parser(extension).parse_args(["--non-interactive", *argv])
+    args = agent_cli.parser(extension).parse_args([*([] if interactive else ["--non-interactive"]), *argv])
     extension_config = extension.resolve_extension_config(args, project_dir)
     with agent_cli.open_runtime(
         args,

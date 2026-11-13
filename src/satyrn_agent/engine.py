@@ -9,9 +9,9 @@ from ds4py import EngineError, ThinkMode
 
 from ._native import CtypesDFlashNative
 from .capabilities.sampling import merge_sampling
-from .capabilities.think_budget import ThinkBudgetHook, resolve_end_think
+from .capabilities.think_budget import resolve_end_think
 from .config import SatyrnConfig
-from .controller import select_step
+from .controller import RuntimeController
 from .dflash import DFlashMetrics, DFlashStep
 
 if TYPE_CHECKING:
@@ -34,6 +34,7 @@ class SatyrnEngine:
         self._interactive = interactive
         self._session: Session | None = None
         self._step: DecodeStep | None = None
+        self._controller: RuntimeController | None = None
         self._closed = False
 
     def session(self) -> Session:
@@ -52,13 +53,17 @@ class SatyrnEngine:
                 self._config.sampling,
                 self._seed,
             )
-            if self._config.think_budget is not None:
-                session.add_logits_hook(ThinkBudgetHook(self._config.think_budget, resolve_end_think(self._engine)))
-            self._step = session.on_worker(
-                lambda handles: select_step(
-                    native, self._config, handles.engine, handles.session, self._engine.native.backend
-                )
-            ).result()
+            self._controller = RuntimeController(
+                session,
+                native,
+                self._config,
+                self._engine.native.backend,
+                interactive=self._interactive,
+                end_think_token=resolve_end_think(self._engine),
+            )
+            session.add_logits_hook(self._controller.think_hook)
+            self._controller.initialize()
+            self._step = self._controller.state.step
             session.set_decode_step(self._step)
         except BaseException as error:
             try:
@@ -71,8 +76,14 @@ class SatyrnEngine:
         return session
 
     @property
+    def controller(self) -> RuntimeController:
+        if self._controller is None:
+            raise EngineError("session is not configured")
+        return self._controller
+
+    @property
     def decode_step(self) -> DecodeStep | None:
-        return self._step
+        return self._step if self._closed or self._controller is None else self._controller.state.step
 
     @property
     def sampling_defaults(self) -> SamplingPolicy:
@@ -80,13 +91,16 @@ class SatyrnEngine:
 
     @property
     def dflash_metrics(self) -> DFlashMetrics | None:
-        if isinstance(self._step, DFlashStep):
-            return self._step.metrics
+        step = self.decode_step
+        if isinstance(step, DFlashStep):
+            return step.metrics
         return None
 
     def close(self) -> None:
         if not self._closed:
             self._closed = True
+            if self._controller is not None:
+                self._controller.close()
             self._engine.close()
 
     def __enter__(self) -> Self:

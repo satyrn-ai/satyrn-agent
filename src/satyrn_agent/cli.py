@@ -47,6 +47,7 @@ class SatyrnAgentExtension:
 
     def __init__(self, *, open_engine: OpenEngine | None = None) -> None:
         self._open_engine = open_satyrn if open_engine is None else open_engine
+        self._wrapper: SatyrnEngine | None = None
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         configure_parser(parser)
@@ -72,17 +73,21 @@ class SatyrnAgentExtension:
             lib=options.lib,
             interactive=options.interactive,
         )
+        self._wrapper = wrapper
         session = wrapper.session()
         return ConfiguredSession(session=session, sampling=wrapper.sampling_defaults, close=wrapper.close)
 
     def configure_commands(self, registry: SlashCommandRegistry, runtime: AgentRuntime) -> None:
-        pass
+        if self._wrapper is not None:
+            self._wrapper.controller.configure_commands(registry)
 
     def before_identity_change(self) -> None:
-        pass
+        if self._wrapper is not None:
+            self._wrapper.controller.before_identity_change()
 
     def after_identity_change(self) -> None:
-        pass
+        if self._wrapper is not None:
+            self._wrapper.controller.after_identity_change()
 
 
 def main(argv: list[str] | None = None, *, extension: SatyrnAgentExtension | None = None) -> int:

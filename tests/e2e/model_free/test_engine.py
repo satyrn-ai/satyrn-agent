@@ -34,6 +34,8 @@ def test_dflash_steps_share_only_an_explicit_recorder() -> None:
 def test_first_only_session_close_and_closed_error() -> None:
     native = ScenarioFakeNative({"script": [10], "calls": []})
     wrapper = satyrn_agent.open("scenario.gguf", config=SatyrnConfig(dflash=DFlashMode.OFF), native=native)
+    with pytest.raises(EngineError, match="session is not configured"):
+        _ = wrapper.controller
     wrapper.session()
 
     with pytest.raises(EngineError, match="one session per engine"):

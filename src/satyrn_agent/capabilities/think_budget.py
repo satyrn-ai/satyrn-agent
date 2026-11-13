@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import threading
 from typing import TYPE_CHECKING, Protocol
 
 from satyrn_agent.errors import ConfigurationError
@@ -17,14 +17,26 @@ class Tokenizer(Protocol):
     def tokenize(self, text: str, *, rendered: bool = False) -> list[int]: ...
 
 
-@dataclass(frozen=True, slots=True)
 class ThinkBudgetHook:
-    config: ThinkBudgetConfig
-    end_think_token: int
+    """One stable worker hook whose immutable setting can be replaced."""
+
+    def __init__(self, config: ThinkBudgetConfig | None, end_think_token: int) -> None:
+        self._config = config
+        self._end_think_token = end_think_token
+        self._lock = threading.Lock()
+
+    def set(self, config: ThinkBudgetConfig | None) -> None:
+        with self._lock:
+            self._config = config
+
+    def snapshot(self) -> ThinkBudgetConfig | None:
+        with self._lock:
+            return self._config
 
     def __call__(self, view: LogitsView) -> None:
-        if view.in_think and view.think_tokens >= self.config.max_tokens:
-            view.bias(self.end_think_token, self.config.bias)
+        config = self.snapshot()
+        if config is not None and view.in_think and view.think_tokens >= config.max_tokens:
+            view.bias(self._end_think_token, config.bias)
 
 
 def resolve_end_think(engine: Tokenizer) -> int:
