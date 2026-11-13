@@ -94,7 +94,7 @@ def resolve_settings(args: argparse.Namespace, project_dir: Path) -> SettingsDoc
         raise ConfigurationError("--no-think-budget conflicts with positive think-budget flags")
     project_budget = values.get("think_budget")
     if project_budget is not None and not _mapping(project_budget):
-        raise TypeError(f"{source}: think_budget must be an object")
+        raise ConfigurationError(f"{source}: think_budget must be an object")
     if project_budget is not None and set(project_budget) != {"max_tokens", "bias"}:
         raise ConfigurationError(f"{source}: think_budget requires max_tokens and bias")
     if args.no_think_budget:
@@ -129,4 +129,4 @@ def resolve_config(options: EngineOpenOptions, extension_config: object) -> Saty
         source = extension_config.source if isinstance(extension_config, SettingsDocument) else None
         if source is None:
             raise
-        raise type(error)(f"{source}: {error}") from error
+        raise ConfigurationError(f"{source}: {error}") from error

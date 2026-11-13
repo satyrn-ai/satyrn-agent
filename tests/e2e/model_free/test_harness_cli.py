@@ -245,6 +245,20 @@ def test_top_level_satyrn_error_has_program_label(
     assert capsys.readouterr().err == "satyrn-agent: missing test binding\n"
 
 
+def test_invalid_project_value_type_has_program_label_without_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.satyrn]\nthink_budget = 1\n")
+    monkeypatch.chdir(tmp_path)
+
+    assert main([]) == 1
+    captured = capsys.readouterr()
+    assert captured.err == f"satyrn-agent: {tmp_path}/pyproject.toml: think_budget must be an object\n"
+    assert "Traceback" not in captured.err
+
+
 def test_yolo_remains_invalid(tmp_path: Path) -> None:
     extension = SatyrnAgentExtension()
     with pytest.raises(SystemExit):
