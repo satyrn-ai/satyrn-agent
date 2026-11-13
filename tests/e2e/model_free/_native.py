@@ -5,7 +5,7 @@ from __future__ import annotations
 import ctypes as C
 import threading
 from collections.abc import Sequence
-from typing import Any, override
+from typing import Any, BinaryIO, override
 
 from ds4py._native.fake import FakeEngine, FakeNative, FakeSession
 from ds4py._native.fake_chat import VOCAB_SIZE
@@ -50,6 +50,7 @@ class ScenarioFakeNative(FakeNative):
         self.sample_release: threading.Event | None = None
         self.verify_modes: list[int] = []
         self.verify_mode = 0
+        self.payload_load_error: Exception | None = None
         super().__init__(
             script=self._next_token,
             absent=self.config.get("missing", set()),
@@ -216,6 +217,12 @@ class ScenarioFakeSession(FakeSession):
     def __init__(self, engine: ScenarioFakeEngine, ctx: int) -> None:
         super().__init__(engine, ctx)
         self.scenario_native = engine.scenario_native
+
+    @override
+    def load_payload(self, file: BinaryIO, payload_bytes: int) -> None:
+        if self.scenario_native.payload_load_error is not None:
+            raise self.scenario_native.payload_load_error
+        super().load_payload(file, payload_bytes)
 
     @override
     def sample(self, temperature: float, top_k: int, top_p: float, min_p: float, rng: C.c_uint64) -> int:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -45,6 +46,13 @@ def native_for(script: str | list[int], *, sampling: list[float] | None = None) 
     )
 
 
+def native_for_rounds(*texts: str) -> ScenarioFakeNative:
+    script: list[int] = []
+    for text in texts:
+        script.extend([*tokenize_rendered(text), FAKE_EOS])
+    return native_for(script)
+
+
 def native_for_dflash(text: str) -> ScenarioFakeNative:
     answer = tokenize_rendered(text)
     script = [*answer, FAKE_EOS, *answer, FAKE_EOS, *answer, FAKE_EOS]
@@ -81,7 +89,9 @@ def open_harness(
     runtimes: list[AgentRuntime] = []
 
     def open_engine(model: str | Path = "ds4flash.gguf", **kwargs: Any) -> satyrn_agent.SatyrnEngine:
-        wrapper = satyrn_agent.open(model, native=native, **kwargs)
+        if native.cancel_event is None:
+            native.cancel_event = threading.Event()
+        wrapper = satyrn_agent.open(model, native=native, cancel=native.cancel_event, **kwargs)
         opened.append({"model": str(model), **kwargs})
         wrappers.append(wrapper)
         original_close = wrapper.close
