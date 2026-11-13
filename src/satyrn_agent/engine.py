@@ -60,10 +60,11 @@ def _select_step(
 class SatyrnEngine:
     """Thin engine-factory wrapper; the configured session is ds4-py's own."""
 
-    def __init__(self, engine: Engine, config: SatyrnConfig, seed: int | None) -> None:
+    def __init__(self, engine: Engine, config: SatyrnConfig, seed: int | None, *, interactive: bool = False) -> None:
         self._engine = engine
         self._config = config
         self._seed = seed
+        self._interactive = interactive
         self._session: Session | None = None
         self._step: DecodeStep | None = None
         self._closed = False
@@ -140,6 +141,7 @@ def open(  # noqa: PLR0913 - Mirror ds4-py's native-open options without hiding 
     lib: str | Path | None = None,
     native: Native | None = None,
     cancel: threading.Event | None = None,
+    interactive: bool = False,
 ) -> SatyrnEngine:
     """Open ds4-py with Satyrn's explicit drafter and decode configuration."""
     resolved = SatyrnConfig() if config is None else config
@@ -156,4 +158,4 @@ def open(  # noqa: PLR0913 - Mirror ds4-py's native-open options without hiding 
         native=native,
         cancel=cancel,
     )
-    return SatyrnEngine(engine, resolved, seed)
+    return SatyrnEngine(engine, resolved, seed, interactive=interactive)
