@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from ds4py.agent_composition import EngineOpenOptions
@@ -192,6 +192,11 @@ def test_think_budget_source_rules(
         ("[tool.satyrn.sampling]\ntop_k = -1\n", [], "at least 0"),
         ("[tool.satyrn.sampling]\ntop_p = 2.0\n", [], "between 0 and 1"),
         ("[tool.satyrn]\nthink_budget = { max_tokens = 50 }\n", [], "requires max_tokens and bias"),
+        ("tool = 1\n", [], "tool must be a table"),
+        ("[tool]\nsatyrn = 1\n", [], "tool.satyrn must be a table"),
+        ("[tool.satyrn]\ndrafter_path = 1\n", [], "drafter_path must be a string"),
+        ("[tool.satyrn]\nthink_budget = 1\n", [], "think_budget must be an object"),
+        ("[tool.satyrn]\nsampling = 1\n", [], "sampling must be an object"),
     ],
 )
 def test_invalid_settings_fail_before_native_open(
@@ -204,9 +209,10 @@ def test_invalid_settings_fail_before_native_open(
         resolved(tmp_path, argv, toml=toml)
 
 
-def test_non_positive_cli_think_budget_is_an_argparse_error(tmp_path: Path) -> None:
+@pytest.mark.parametrize("argv", [["--think-budget", "0"], ["--draft-tokens", "-1"]])
+def test_non_positive_cli_numbers_are_argparse_errors(tmp_path: Path, argv: list[str]) -> None:
     with pytest.raises(SystemExit):
-        resolved(tmp_path, ["--think-budget", "0"])
+        resolved(tmp_path, argv)
 
 
 @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
@@ -243,6 +249,26 @@ def test_yolo_remains_invalid(tmp_path: Path) -> None:
     extension = SatyrnAgentExtension()
     with pytest.raises(SystemExit):
         parse(extension, ["--yolo"])
+
+
+def test_extension_protocol_noops_are_safe_before_controller_configuration() -> None:
+    extension = SatyrnAgentExtension()
+
+    assert extension.configure_commands(cast("Any", object()), cast("Any", object())) is None
+    assert extension.before_identity_change() is None
+    assert extension.after_identity_change() is None
+
+
+def test_resolve_config_rejects_a_non_mapping_document() -> None:
+    with pytest.raises(TypeError, match="must be a mapping"):
+        resolve_config(options(), object())
+
+
+def test_resolve_config_preserves_unsourced_validation_errors() -> None:
+    with pytest.raises(ConfigurationError, match="unknown config fields") as caught:
+        resolve_config(options(), {"unknown": 1})
+
+    assert caught.value.__cause__ is None
 
 
 @pytest.mark.parametrize(

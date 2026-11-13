@@ -6,14 +6,13 @@ from typing import TYPE_CHECKING, Self
 
 import ds4py
 from ds4py import EngineError, ThinkMode
-from ds4py.engine.decode import PlainStep
 
 from ._native import CtypesDFlashNative
 from .capabilities.sampling import merge_sampling
 from .capabilities.think_budget import ThinkBudgetHook, resolve_end_think
-from .config import DFlashMode, SatyrnConfig
+from .config import SatyrnConfig
+from .controller import select_step
 from .dflash import DFlashMetrics, DFlashStep
-from .errors import DFlashUnavailable
 
 if TYPE_CHECKING:
     import threading
@@ -23,38 +22,6 @@ if TYPE_CHECKING:
     from ds4py._native.protocol import Native
     from ds4py.engine.decode import DecodeStep
     from ds4py.engine.sampling import SamplingPolicy
-
-    from ._native import DFlashNative
-
-
-def _select_step(
-    native: DFlashNative,
-    config: SatyrnConfig,
-    engine_raw: int,
-    session_raw: int,
-    backend: str,
-) -> DecodeStep:
-    """Resolve auto/on/off once; never reinterpret policy during a round."""
-    if config.dflash is DFlashMode.OFF or config.drafter_path is None:
-        return PlainStep()
-    reason: str | None = None
-    rows = 0
-    if missing := native.missing_dflash:
-        reason = f"DFlash bindings are missing: {', '.join(missing)}"
-    elif backend != "metal":
-        reason = f"DFlash requires Metal, not {backend}"
-    elif not native.has_dflash(engine_raw):
-        reason = "DFlash requires a loaded drafter"
-    else:
-        rows = native.verify_rows(engine_raw)
-        if rows == 0:
-            reason = "DFlash requires at least one verify row"
-    if reason is not None:
-        if config.dflash is DFlashMode.ON:
-            raise DFlashUnavailable(reason)
-        return PlainStep()
-    native.set_verify_mode(session_raw, 1)
-    return DFlashStep(native, draft_tokens=config.draft_tokens, verify_rows=rows)
 
 
 class SatyrnEngine:
@@ -88,7 +55,7 @@ class SatyrnEngine:
             if self._config.think_budget is not None:
                 session.add_logits_hook(ThinkBudgetHook(self._config.think_budget, resolve_end_think(self._engine)))
             self._step = session.on_worker(
-                lambda handles: _select_step(
+                lambda handles: select_step(
                     native, self._config, handles.engine, handles.session, self._engine.native.backend
                 )
             ).result()

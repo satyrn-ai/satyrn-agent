@@ -2,9 +2,33 @@ import pytest
 from ds4py import EngineError
 
 import satyrn_agent
+from satyrn_agent._native import CtypesDFlashNative
 from satyrn_agent.config import DFlashMode, SatyrnConfig
+from satyrn_agent.dflash import DFlashMetrics, DFlashStep, Recorder
 from satyrn_agent.errors import DFlashError
 from tests.e2e.model_free._native import ScenarioFakeNative
+
+
+def test_dflash_steps_share_only_an_explicit_recorder() -> None:
+    native = ScenarioFakeNative({"script": [10], "calls": []})
+    adapter = CtypesDFlashNative(native)
+    recorder = Recorder()
+    first = DFlashStep(adapter, recorder=recorder)
+    second = DFlashStep(adapter, recorder=recorder)
+    independent = DFlashStep(adapter)
+
+    recorder.committed(4, 3, replacement=True, discarded=1)
+
+    expected = DFlashMetrics(
+        committed_blocks=1,
+        drafts_offered=4,
+        drafts_accepted=3,
+        replacement_anchors=1,
+        discarded_tails=1,
+    )
+    assert first.metrics == expected
+    assert second.metrics == expected
+    assert independent.metrics == DFlashMetrics()
 
 
 def test_first_only_session_close_and_closed_error() -> None:
