@@ -34,7 +34,7 @@ class DFlashMetrics:
         return self.drafts_accepted / self.drafts_offered
 
 
-class _MetricsRecorder:
+class Recorder:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._snapshot = DFlashMetrics()
@@ -79,10 +79,17 @@ class _RowOutcome:
 class DFlashStep:
     hooks_every_sample = True
 
-    def __init__(self, native: DFlashNative, *, draft_tokens: int = 0, verify_rows: int = 8) -> None:
+    def __init__(
+        self,
+        native: DFlashNative,
+        *,
+        draft_tokens: int = 0,
+        verify_rows: int = 8,
+        recorder: Recorder | None = None,
+    ) -> None:
         self._native = native
         self._maximum = verify_rows - 1 if draft_tokens == 0 else min(draft_tokens, verify_rows - 1)
-        self._metrics = _MetricsRecorder()
+        self._metrics = Recorder() if recorder is None else recorder
 
     @property
     def metrics(self) -> DFlashMetrics:
