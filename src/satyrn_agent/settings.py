@@ -67,6 +67,10 @@ def _project_values(project_dir: Path) -> tuple[dict[str, object], Path]:
     return dict(values), source
 
 
+def _sourced_error(source: Path, error: Exception) -> ConfigurationError:
+    return ConfigurationError(f"{source}: {error}")
+
+
 def _resolve_path(value: object, project_dir: Path) -> object:
     if not isinstance(value, str):
         return value
@@ -86,7 +90,7 @@ def _merge_think_budget(args: argparse.Namespace, values: dict[str, object], sou
         try:
             validate_think_budget_document(project_budget)
         except (ConfigurationError, TypeError) as error:
-            raise ConfigurationError(f"{source}: {error}") from error
+            raise _sourced_error(source, error) from error
     if args.no_think_budget:
         values.pop("think_budget", None)
     elif args.think_budget is not None:
@@ -131,7 +135,7 @@ def resolve_settings(args: argparse.Namespace, project_dir: Path) -> ResolvedSet
         )
         if missing_cli_drafter:
             raise
-        raise ConfigurationError(f"{source}: {error}") from error
+        raise _sourced_error(source, error) from error
     return ResolvedSettings(values, source)
 
 
@@ -164,4 +168,4 @@ def resolve_config(options: EngineOpenOptions, extension_config: object) -> Saty
     except (ConfigurationError, TypeError) as error:
         if source is None:
             raise
-        raise ConfigurationError(f"{source}: {error}") from error
+        raise _sourced_error(source, error) from error
