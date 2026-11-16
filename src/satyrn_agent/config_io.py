@@ -17,12 +17,12 @@ _SAMPLING_FIELDS = {"temperature", "top_k", "top_p", "min_p"}
 _DFLASH_MODES = {"auto", "on", "off"}
 
 
-def _mapping(value: object) -> TypeIs[Mapping[str, object]]:
+def is_mapping(value: object) -> TypeIs[Mapping[str, object]]:
     return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
 
 
 def _sampling(value: object) -> TypeIs[SamplingOverridesDocument]:
-    if not _mapping(value):
+    if not is_mapping(value):
         raise TypeError("sampling must be an object")
     if unknown := set(value) - _SAMPLING_FIELDS:
         raise ConfigurationError(f"unknown sampling fields: {', '.join(sorted(unknown))}")
@@ -32,8 +32,8 @@ def _sampling(value: object) -> TypeIs[SamplingOverridesDocument]:
     return True
 
 
-def _think_budget(value: object) -> TypeIs[ThinkBudgetDocument]:
-    if not _mapping(value):
+def validate_think_budget_document(value: object) -> TypeIs[ThinkBudgetDocument]:
+    if not is_mapping(value):
         raise TypeError("think_budget must be an object")
     if set(value) != {"max_tokens", "bias"}:
         raise ConfigurationError("think_budget requires max_tokens and bias")
@@ -41,7 +41,7 @@ def _think_budget(value: object) -> TypeIs[ThinkBudgetDocument]:
 
 
 def _document(value: object) -> ConfigDocument:
-    if not _mapping(value):
+    if not is_mapping(value):
         raise TypeError("config must be an object")
     if unknown := set(value) - _CONFIG_FIELDS:
         raise ConfigurationError(f"unknown config fields: {', '.join(sorted(unknown))}")
@@ -59,7 +59,7 @@ def _document(value: object) -> ConfigDocument:
     if "sampling" in value:
         _sampling(value["sampling"])
     if (budget := value.get("think_budget")) is not None:
-        _think_budget(budget)
+        validate_think_budget_document(budget)
     return cast("ConfigDocument", value)
 
 

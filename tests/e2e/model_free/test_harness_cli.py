@@ -217,8 +217,59 @@ def test_non_positive_cli_numbers_are_argparse_errors(tmp_path: Path, argv: list
 
 @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
 def test_non_finite_cli_think_bias_is_rejected(tmp_path: Path, value: str) -> None:
-    with pytest.raises(ConfigurationError, match="finite"):
+    with pytest.raises(ConfigurationError, match="finite") as caught:
         resolved(tmp_path, ["--think-budget", "2", f"--think-bias={value}"])
+
+    assert "pyproject.toml" not in str(caught.value)
+
+
+@pytest.mark.parametrize("toml", [None, "[project]\nname = 'unrelated'\n"])
+def test_cli_dflash_on_without_drafter_does_not_name_project_file(tmp_path: Path, toml: str | None) -> None:
+    with pytest.raises(ConfigurationError, match="drafter_path is required") as caught:
+        resolved(tmp_path, ["--dflash", "on"], toml=toml)
+
+    assert "pyproject.toml" not in str(caught.value)
+
+
+def test_project_dflash_on_without_drafter_names_project_file(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="drafter_path is required") as caught:
+        resolved(tmp_path, [], toml='[tool.satyrn]\ndflash = "on"\n')
+
+    assert str(caught.value).startswith(f"{tmp_path}/pyproject.toml: ")
+
+
+def test_cli_dflash_on_uses_project_drafter(tmp_path: Path) -> None:
+    config = resolved(
+        tmp_path,
+        ["--dflash", "on"],
+        toml='[tool.satyrn]\ndrafter_path = "models/drafter.gguf"\n',
+    )
+
+    assert config.dflash is DFlashMode.ON
+    assert config.drafter_path == tmp_path / "models/drafter.gguf"
+
+
+def test_cli_budget_inheriting_invalid_project_bias_names_project_file(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="bias must be finite") as caught:
+        resolved(
+            tmp_path,
+            ["--think-budget", "5"],
+            toml="[tool.satyrn]\nthink_budget = { max_tokens = 50, bias = nan }\n",
+        )
+
+    assert str(caught.value).startswith(f"{tmp_path}/pyproject.toml: ")
+
+
+def test_non_finite_generic_sampling_cli_does_not_name_project_file(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="temperature must be finite") as caught:
+        resolved(
+            tmp_path,
+            [],
+            toml="[project]\nname = 'unrelated'\n",
+            generic=["--temp=nan"],
+        )
+
+    assert "pyproject.toml" not in str(caught.value)
 
 
 def test_malformed_toml_names_source_file(tmp_path: Path) -> None:
@@ -276,6 +327,11 @@ def test_extension_protocol_noops_are_safe_before_controller_configuration() -> 
 def test_resolve_config_rejects_a_non_mapping_document() -> None:
     with pytest.raises(TypeError, match="must be a mapping"):
         resolve_config(options(), object())
+
+
+def test_resolve_config_rejects_non_mapping_sampling_for_direct_documents() -> None:
+    with pytest.raises(TypeError, match="sampling must be an object"):
+        resolve_config(options(), {"sampling": 1})
 
 
 def test_resolve_config_preserves_unsourced_validation_errors() -> None:
