@@ -99,17 +99,16 @@ class RuntimeController:
         *,
         interactive: bool,
         end_think_token: int,
-        on_step: Callable[[DecodeStep], None],
     ) -> None:
         self._session = session
-        self._on_step = on_step
         self._native = native
         self._config = config
         self._backend = backend
         self._interactive = interactive
         self._closed = False
         self.think_hook = ThinkBudgetHook(config.think_budget, end_think_token)
-        session.state(_STATE_KEY, lambda: RuntimeState(config.dflash, PlainStep(), Recorder()))
+        self._live_state = session.state(_STATE_KEY, lambda: RuntimeState(config.dflash, PlainStep(), Recorder()))
+        self._resolved = False
         self._unsubscribes: list[Callable[[], None]] = []
         if interactive:
             self._unsubscribes = [
@@ -119,10 +118,16 @@ class RuntimeController:
 
     @property
     def state(self) -> RuntimeState:
-        return self._session.state(
+        self._live_state = self._session.state(
             _STATE_KEY,
             lambda: RuntimeState(self._config.dflash, PlainStep(), Recorder()),
         )
+        return self._live_state
+
+    @property
+    def resolved_step(self) -> DecodeStep | None:
+        """Return the last applied step without reopening a closed session."""
+        return self._live_state.step if self._resolved else None
 
     def initialize(self) -> None:
         self._change(self._config.dflash, publish=False)
@@ -162,7 +167,7 @@ class RuntimeController:
             self._fail_change(state, requested, error)
         state.requested = requested
         state.step = step
-        self._on_step(step)
+        self._resolved = True
         if publish:
             self.publish_status()
 
@@ -172,7 +177,7 @@ class RuntimeController:
         cleanup_error: BaseException | None = None
         try:
             self._session.set_decode_step(state.step)
-            self._on_step(state.step)
+            self._resolved = True
             self._set_verify_off()
         except BaseException as cleanup:  # noqa: BLE001 - Preserve the native failure and best-effort cleanup failure.
             cleanup_error = cleanup
@@ -185,7 +190,7 @@ class RuntimeController:
         state = self.state
         state.step = PlainStep()
         self._session.set_decode_step(state.step)
-        self._on_step(state.step)
+        self._resolved = True
         self._set_verify_off()
 
     def after_identity_change(self) -> None:

@@ -61,6 +61,24 @@ def test_new_orders_safe_native_selection_and_python_only_reset(
             tui.close()
 
 
+def test_close_preserves_fresh_session_step_at_identity_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native = native_for_dflash("alpha beta")
+    argv = ["--dflash", "on", "--drafter", "drafter.gguf"]
+    with open_harness(tmp_path, native, argv, monkeypatch, interactive=True) as harness:
+        wrapper = harness.wrappers[0]
+        controller = wrapper.controller
+        monkeypatch.setattr(controller, "after_identity_change", lambda: None)
+
+        asyncio.run(harness.runtime.new())
+        fresh_step = controller.state.step
+        assert isinstance(fresh_step, PlainStep)
+
+    assert wrapper.decode_step is fresh_step
+
+
 def test_switch_resets_state_and_restores_saved_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

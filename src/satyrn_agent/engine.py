@@ -33,7 +33,7 @@ class SatyrnEngine:
         self._seed = seed
         self._interactive = interactive
         self._session: Session | None = None
-        self._step: DecodeStep | None = None
+        self._finished_step: DecodeStep | None = None
         self._controller: RuntimeController | None = None
         self._closed = False
 
@@ -60,7 +60,6 @@ class SatyrnEngine:
                 self._engine.native.backend,
                 interactive=self._interactive,
                 end_think_token=resolve_end_think(self._engine),
-                on_step=self._record_step,
             )
             session.add_logits_hook(self._controller.think_hook)
             self._controller.initialize()
@@ -74,9 +73,6 @@ class SatyrnEngine:
             raise
         return session
 
-    def _record_step(self, step: DecodeStep) -> None:
-        self._step = step
-
     @property
     def controller(self) -> RuntimeController:
         if self._controller is None:
@@ -85,7 +81,7 @@ class SatyrnEngine:
 
     @property
     def decode_step(self) -> DecodeStep | None:
-        return self._step if self._closed or self._controller is None else self._controller.state.step
+        return self._finished_step if self._closed or self._controller is None else self._controller.state.step
 
     @property
     def sampling_defaults(self) -> SamplingPolicy:
@@ -102,6 +98,7 @@ class SatyrnEngine:
         if not self._closed:
             self._closed = True
             if self._controller is not None:
+                self._finished_step = self._controller.resolved_step
                 self._controller.close()
             self._engine.close()
 
