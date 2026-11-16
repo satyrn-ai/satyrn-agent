@@ -135,6 +135,68 @@ a stop token, passed all three behaviour cases, and leaked no special tokens,
 reasoning or repeated boundary. One trivial hole shows the path can work, not
 that FIM is reliable.
 
+**FIM on realistic holes (separate frozen check, 2026-11-08).** Eight function
+bodies from the public E3 app, two from each of `domain.py`, `operations.py`,
+`queries.py` and `views.py`, kept only if stubbing them makes the E3 suite fail.
+Prompts were built from vocabulary IDs and frozen before decoding. The model saw
+only the one file around each hole. Sampling matched the worker run; one draw per
+hole.
+
+| Hole | Suite | What the model did |
+| --- | --- | --- |
+| `validate_customer_name` | Fail | Guessed the rules; missed one the tests require. |
+| `validate_contact` | Fail | Invented an "at least one contact method" rule. |
+| `create_customer` | Pass | Identical to the reference. |
+| `update_contact` | Pass | Dropped the call to `validate_contact`; the suite didn't notice. |
+| `_to_domain` | Fail | Invented a `name` field; `Customer` is defined in another file. |
+| `list_customers` | Pass | Dropped the ordering; the suite didn't notice. |
+| `customer_list` | Pass | Equivalent. |
+| `customer_detail` | Pass | Equivalent. |
+
+Mechanics were clean on all eight: valid Python, a real stop token, no leaked
+tokens, reasoning or repeated boundaries. By the frozen rule the check is 5 of 8,
+a non-pass. `_to_domain` and `validate_contact` failed for lack of facts from
+outside the file. The `validate_customer_name` failure was a guess the suite
+happened to catch; see below.
+
+**Does packet content help? (separate frozen check, 2026-11-08).** The three
+failed holes, four context arms, five seeds (1–5), 60 draws in 495 s. Context was
+a comment block above the file; scoring ignored it. The seeds pair arms by RNG
+seed only, since the prompts differ.
+
+- `none`: the file only.
+- `packet`: E2's packet as written, plus the source of its consumed declarations.
+  No packet covers `_to_domain`, so its declarations were read off the function's
+  annotations (synthesized).
+- `task`: the public E-task prose.
+- `both`: `packet` then `task`.
+
+| Suite passes of 5 | `none` | `packet` | `task` | `both` |
+| --- | ---: | ---: | ---: | ---: |
+| `validate_customer_name` | 5 | 5 | 5 | 5 |
+| `validate_contact` | 0 | 4 | 5 | 5 |
+| `_to_domain` | 0 | 5 | 2 | 0 |
+
+All 60 draws parsed and ended on a stop token, with no leaks.
+
+Read after the run, so exploratory:
+
+- **The name hole's suite is weak.** Its `none` draws passed with limits of 50 or
+  20; only one used the real 100. All other arms used 100.
+- **E2's acceptance criteria state no limits.** The `packet` arm got 100, 254 and
+  40 from the consumed ORM model's `max_length` values, a resolved declaration.
+- **`packet` passes on `validate_contact` invented rules.** All four added ASCII
+  or `@` checks that the E2 task forbids in spirit; the suite didn't notice. The
+  `task` draws added none.
+- **Every `_to_domain` failure in the `task` and `both` arms was the same error:**
+  `CustomerId(record.id)`, and `type` aliases aren't callable. The `none` failures
+  did this too. `packet` never did; adding the task prose, which mentions semantic
+  aliases, brought it back in all five draws.
+
+So declarations carried structure, prose carried rules, and more context wasn't
+monotonically better. Limits: three holes selected for having failed, one app,
+five seeds, one synthesized packet, and a suite that misses real errors.
+
 **Worker run.** Context 16384, 8192 tokens per request, thinking HIGH, sampling
 temperature 0.6, top-p 0.95, min-p 0.05, top-k 20, seed 7. 223 s wall, 4,204
 generated tokens, 12 tool calls, none failed, final context 3,636 tokens.
@@ -166,8 +228,46 @@ generated tokens, 12 tool calls, none failed, final context 3,636 tokens.
 **Consequences for item 3:** the worker path and checkpoint rollback without
 re-prefill are viable. Still unestablished for paired draws: Python RNG
 restoration and safe cancellation (`supports_paired_draws` needs both). FIM
-needs prompts built from vocabulary IDs and a real test on larger holes.
+works mechanically from vocabulary IDs; on realistic holes it needs facts from
+outside the file.
 Logits success permits further investigation, not routing claims.
+
+## Prose baseline on H1–H3 (2026-11-08)
+
+The real prose arm with no packet help, three seeds per task, graded by the
+hidden tests. Context 65,536, 8,192 tokens per request, `ThinkMode.LOW`, sampling
+as in the worker run, one repair retry, 40 minutes per run. Total 100 minutes.
+Driver and raw records: `.ds4/overnight-domains/item0/` (`probe/baseline.py`,
+`records/live-baseline-20261108-180343`).
+
+An earlier start at `ThinkMode.HIGH` was stopped after about 8 minutes with no
+completed run. On Qwen 3.8, `HIGH` renders "Reasoning effort is set to xhigh".
+
+| Run | Hidden tests | Minutes | Generated tokens | How it ended |
+| --- | --- | ---: | ---: | --- |
+| H1 seed 1 | 41 of 41, pass | 9.7 | 7,193 | Visible gate passed first try |
+| H1 seed 2 | 25 of 41 | 12.1 | 10,335 | Token cap while thinking |
+| H1 seed 3 | 41 of 41, pass | 10.9 | 8,448 | Visible gate passed first try |
+| H2 seed 1 | 27 of 43 | 13.0 | 12,066 | Token cap while thinking |
+| H2 seed 2 | 27 of 43 | 14.9 | 12,682 | Token cap while thinking |
+| H2 seed 3 | 27 of 43 | 12.9 | 11,120 | Token cap while thinking |
+| H3 seed 1 | 28 of 40 | 13.1 | 11,657 | Token cap while thinking |
+| H3 seed 2 | 28 of 40 | 1.0 | not recorded | Malformed tool call in the context phase |
+| H3 seed 3 | 28 of 40 | 12.5 | 11,210 | Tool-syntax error during a write |
+
+**Score: 2 of 9.** The frozen rule calls that usable headroom, but the rule
+assumed failures would be about the task. None of the seven failures reached a
+visible gate or left finished code: each scored only the tests that pass with no
+work done. Five hit the 8,192-token request cap and two ended in `parser_error`.
+All seven ended as `harness_fault` or an exception, so the repair retry never ran.
+
+The two runs that got past the thinking phase passed everything. Two is too few to
+say the 27B can solve these tasks, and H2 and H3 have no completed attempt at all.
+This baseline measures thinking control and tool-call reliability under this
+harness, not the 27B's coding ceiling.
+
+The model also called a nonexistent `read` tool in 3 of 9 runs (11 calls); ds4-py's
+tool prompt uses `read` as its example. The link is unconfirmed.
 
 ## Reproduce the local rehearsal
 
