@@ -440,9 +440,11 @@ containment, read-only policy, events, retries, or output limits.
 The Pi profile emits its own four definitions. It does not reuse
 `DS4FileSystem`'s prepared definitions, which rewrite the read-limit
 description for the native 160-line default
-(`capabilities/file_system.py:12-24`). The Pi read budget is 2000 lines and
-50,000 characters, replacing the native 160-line budget. The output cap remains
-ds4-py's character-based cap, not Pi's byte-based 50 KiB cap.
+(`capabilities/file_system.py:12-24`). Use the reference descriptions verbatim,
+except that the read description says `50,000 characters` instead of `50KB`.
+The Pi read budget is 2000 lines and 50,000 characters, replacing the native
+160-line budget. The output cap remains ds4-py's character-based cap, not Pi's
+byte-based 50 KiB cap.
 
 The initial adapter keeps ds4-py's result text, including numbered read
 output and labelled shell output. Do not claim byte-for-byte Pi result parity;
@@ -451,9 +453,11 @@ the comparison exposes a result-text problem. Use a Pi-specific instruction
 preamble so no `read_file`/`edit_file` instructions contradict the exposed
 schemas.
 
-Tests must prove schema equality with the four reference definitions, offset
-and argument conversion, a real read/write/edit/bash round trip, multi-edit
-atomicity, workspace/read-only enforcement, and unchanged `native` behavior.
+Tests must prove the exact four definitions, including only the documented
+read-description change from `50KB` to `50,000 characters`. They must also
+prove offset and argument conversion, a real read/write/edit/bash round trip,
+multi-edit atomicity, workspace/read-only enforcement, and unchanged `native`
+behavior.
 
 ### Required live comparison
 
