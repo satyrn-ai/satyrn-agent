@@ -40,30 +40,23 @@ class RuntimeState:
         self.closed = True
 
 
-def select_step(  # noqa: PLR0913 - The native policy needs open, mode, metrics, and mutation context.
+def select_step(  # noqa: PLR0913 - The policy needs native handles, configuration, and request context.
     native: DFlashPolicyNative,
     config: SatyrnConfig,
     engine_raw: int,
-    session_raw: int,
     backend: str,
     *,
     requested: DFlashMode | None = None,
     recorder: Recorder | None = None,
-    before_mode_change: Callable[[], None],
-) -> DecodeStep:
-    """Resolve one between-prompt policy without reinterpreting it later."""
+) -> tuple[DecodeStep, int | None]:
+    """Resolve one between-prompt policy without mutating native state."""
     mode = config.dflash if requested is None else requested
-
-    def set_verify(value: int) -> None:
-        before_mode_change()
-        native.set_verify_mode(session_raw, value)
+    verify_off = 0 if native.verify_mode_available else None
 
     if mode is DFlashMode.OFF or config.drafter_path is None:
         if mode is DFlashMode.ON:
             raise DFlashUnavailable("DFlash requires a drafter path")
-        if native.verify_mode_available:
-            set_verify(0)
-        return PlainStep()
+        return PlainStep(), verify_off
     reason: str | None = None
     rows = 0
     if missing := native.missing_dflash:
@@ -79,12 +72,9 @@ def select_step(  # noqa: PLR0913 - The native policy needs open, mode, metrics,
     if reason is not None:
         if mode is DFlashMode.ON:
             raise DFlashUnavailable(reason)
-        if native.verify_mode_available:
-            set_verify(0)
-        return PlainStep()
+        return PlainStep(), verify_off
     step = DFlashStep(native, draft_tokens=config.draft_tokens, verify_rows=rows, recorder=recorder)
-    set_verify(1)
-    return step
+    return step, 1
 
 
 class RuntimeController:
@@ -132,42 +122,35 @@ class RuntimeController:
     def initialize(self) -> None:
         self._change(self._config.dflash, publish=False)
 
-    def _set_verify_off(self) -> None:
-        if self._native.verify_mode_available:
-            self._session.on_worker(lambda handles: self._native.set_verify_mode(handles.session, 0)).result()
+    def _install(self, step: DecodeStep, verify: int | None) -> None:
+        # The initial idle guard proves decode setters succeed before mutation.
+        # These synchronous calls have no generation or await boundary between them.
+        self._session.set_decode_step(step)
+        self._resolved = True
+        if verify is not None:
+            self._session.on_worker(lambda handles: self._native.set_verify_mode(handles.session, verify)).result()
 
     def _change(self, requested: DFlashMode, *, publish: bool) -> None:
         state = self.state
         # This no-op replacement is the public idle/paused-round guard. No
         # native reconfiguration happens until it succeeds.
         self._session.set_decode_step(state.step)
-        mutated = False
-
-        def mark_mutation() -> None:
-            nonlocal mutated
-            mutated = True
-
+        step, verify = self._session.on_worker(
+            lambda handles: select_step(
+                self._native,
+                self._config,
+                handles.engine,
+                self._backend,
+                requested=requested,
+                recorder=state.recorder,
+            )
+        ).result()
         try:
-            step = self._session.on_worker(
-                lambda handles: select_step(
-                    self._native,
-                    self._config,
-                    handles.engine,
-                    handles.session,
-                    self._backend,
-                    requested=requested,
-                    recorder=state.recorder,
-                    before_mode_change=mark_mutation,
-                )
-            ).result()
-            self._session.set_decode_step(step)
-        except BaseException as error:
-            if not mutated:
-                raise
+            self._install(step, verify)
+        except BaseException as error:  # noqa: BLE001 - Roll back before propagating native or cancellation failures.
             self._fail_change(state, requested, error)
         state.requested = requested
         state.step = step
-        self._resolved = True
         if publish:
             self.publish_status()
 
@@ -176,9 +159,8 @@ class RuntimeController:
         state.step = PlainStep()
         cleanup_error: BaseException | None = None
         try:
-            self._session.set_decode_step(state.step)
-            self._resolved = True
-            self._set_verify_off()
+            verify_off = 0 if self._native.verify_mode_available else None
+            self._install(state.step, verify_off)
         except BaseException as cleanup:  # noqa: BLE001 - Preserve the native failure and best-effort cleanup failure.
             cleanup_error = cleanup
         self.publish_status(resolved="off", error=cleanup_error is not None)
@@ -189,9 +171,8 @@ class RuntimeController:
     def before_identity_change(self) -> None:
         state = self.state
         state.step = PlainStep()
-        self._session.set_decode_step(state.step)
-        self._resolved = True
-        self._set_verify_off()
+        verify_off = 0 if self._native.verify_mode_available else None
+        self._install(state.step, verify_off)
 
     def after_identity_change(self) -> None:
         self._change(self._config.dflash, publish=True)
