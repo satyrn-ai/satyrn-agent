@@ -208,6 +208,32 @@ Representative logs are `mxfp4-decode/l2048_b1A_p2.err` and
 `q8-decode/l2048_b1A_p2.err`; `setup.txt`, `runs.txt`, and `events.txt` preserve
 commit, machine, raw values, and power state.
 
+### 2.4 Measured Mac mini baseline
+
+The Mac mini is an Apple M1 with 17,179,869,184 bytes (16 GiB) of RAM running
+macOS 15.1.1. SSH authentication succeeded after registering
+`the registered public key`. The machine had no model process and 34 GiB free.
+A shallow clone contains the same `d2d9338` reference commit and built with
+`make all`.
+
+Only `Mellum2.1-12B-A2.5B-Thinking-MXFP4_MOE.gguf` was copied. Its size and
+SHA-256 match §2.3. No Q8 file was copied, and no unrelated file was removed.
+The valid results are in `~/ds4-runs/mellum-design-mac-mini-baseline` on both
+machines.
+
+The commands are the MXFP4 pair from §2.3 with
+`OUT="$HOME/ds4-runs/mellum-design-mac-mini-baseline"`. Both cells have n=6
+at context 3072 on AC power with no thermal/performance warning.
+
+| Quant, resident | Prefill median (range) | Generation median (range) | Planned memory |
+| --- | ---: | ---: | ---: |
+| MXFP4_MOE | 135 t/s (130-140) | 19.72 t/s (13.98-19.75) | 6.92 GiB |
+
+The full generation range includes 13.85 and 13.98 t/s in the first block and
+19.71-19.75 t/s in the remaining measured processes. The summary retains every
+run and does not substitute a steady-state subset. The representative startup
+log reports `resident model 6.54 GiB = 6.92 GiB planned` at context 3072.
+
 ## 3. Selected architecture and ownership
 
 ```text
@@ -669,9 +695,9 @@ Implementation is also a satyrn-agent branch, `feat/mellum-support`, with
 - Use `make all` for the current reference checkout because its default target
   is `ds4.o`.
 - Model locations: the 36 GB Mac Studio has both SHA-verified GGUFs in
-  `~/models`; the 16 GB Mac mini receives only MXFP4 first; the 24 GB Air has
-  no verified local copy yet; the 8 GB case uses MXFP4 only. Do not assume a
-  model is present on another machine.
+  `~/models`; the 16 GB Mac mini has only the SHA-verified MXFP4 file; the
+  24 GB Air has no verified local copy yet; the 8 GB case uses MXFP4 only.
+  Do not assume a model is present on another machine.
 - Run `pr-review-loop` before requesting human review and after pushing changes
   to a reviewed PR. Use fresh reviewers, alternating
   `deepseek/deepseek-v4-pro` and `kimi-coding/k3.1-pro`; ask Koudai for every
@@ -686,9 +712,6 @@ Implementation is also a satyrn-agent branch, `feat/mellum-support`, with
    already the named owner for the satyrn-agent port; Roché reviews ds4-py.
 2. Koudai: after the n=30/profile/quant comparison, choose `auto -> pi` or
    `auto -> native` for Mellum.
-3. Koudai: provide working SSH authentication for
-   `the Mac mini` or an alternate way to run the required 16 GB
-   baseline. All three existing local keys were denied during design research;
-   no 16 GB number is claimed here.
-4. Koudai: identify who supplies the physical 24 GB MacBook Air and 8 GB
-   streaming acceptance runs. They remain pending, not silently waived.
+3. Koudai: identify who supplies the physical 24 GB MacBook Air and 8 GB
+   streaming acceptance runs. They remain pending, not silently waived. The
+   16 GB MXFP4 baseline is complete in §2.4.
