@@ -160,6 +160,13 @@ the generic GLM/DeepSeek execution path and do not add a second copy of
 | `qwen35/0002,0004` chat and sampling | Qwen special-token rendering and default restoration touch Mellum's native chat/default functions | Keep Mellum's `<|im_start|>`, `<|im_end|>`, think, tool-response, and min-p behavior distinct; run both families' fixtures |
 | `qwen35/0005-0008` verify/DFlash | Multi-row and drafter hooks are Qwen-specific; Mellum has no `NEXTN` drafter | Keep DFlash unavailable on Mellum and run Qwen verify/DFlash regressions on the full tree |
 
+Satyrn PR [#24](https://github.com/satyrn-ai/satyrn-agent/pull/24) at `4beb6f2`
+also changes qwen35 0001-0008, adds qwen35 0009-0018, and changes
+`tools/ds4-check.sh`. To avoid two rebases, #24 merges before the Mellum
+implementation. Paul then rebases the complete, then-current qwen35 series onto
+Mellum. Roché does not rebase #24 onto Mellum in this sequence. This dependency
+does not add CUDA work to Mellum.
+
 ### 2.3 Reference GGUFs and measured Mac Studio baseline
 
 Both files were downloaded from the README's Hugging Face repository into
@@ -211,8 +218,8 @@ commit, machine, raw values, and power state.
 ### 2.4 Measured Mac mini baseline
 
 The Mac mini is an Apple M1 with 17,179,869,184 bytes (16 GiB) of RAM running
-macOS 15.1.1. SSH authentication succeeded after registering
-`the registered public key`. The machine had no model process and 34 GiB free.
+macOS 15.1.1. SSH authentication succeeded. The machine had no model process
+and 34 GiB free.
 A shallow clone contains the same `d2d9338` reference commit and built with
 `make all`.
 
@@ -237,7 +244,7 @@ log reports `resident model 6.54 GiB = 6.92 GiB planned` at context 3072.
 ### 2.5 Measured MacBook Air baseline
 
 The MacBook Air is an Apple M3 with 25,769,803,776 bytes (24 GiB) of RAM
-running macOS 15.3.1 at `the MacBook Air`. A shallow clone contains the
+running macOS 15.3.1. A shallow clone contains the
 same `d2d9338` reference commit and built with `make all`. Both GGUFs were
 copied and passed the size and SHA-256 checks in §2.3. No model process was
 active before the build or runs. No unrelated file was removed.
@@ -324,7 +331,7 @@ patches/
     0004-mellum-optimized-q8-prefill-and-decode.patch
     0005-mellum-mxfp4-moe-experts.patch
     0006-mellum-ssd-expert-streaming.patch
-  qwen35/  # rebased and re-exported after mellum
+  qwen35/  # the then-current series, including #24, rebased after mellum
 ```
 
 Every patch message carries `Upstream:`, `Retire-when:`, and
@@ -619,8 +626,8 @@ Never treat a startup plan alone as a peak measurement.
 | Target | Required configuration and test | Acceptance |
 | --- | --- | --- |
 | 36 GB, Mac Studio M4 Max (this machine) | Both quants resident. Repeat §2.3 at its measured context 3072 with prefill/decode n=6. On this same Mac Studio, measure ds4-mellum `d2d9338` and then the port at context 32768 with the 2,686-token coding request n=3 | Port medians are within 10% of the same-machine reference. Exact greedy ids match. Metal peak is no more than 5% above the same-machine reference, with no swap growth |
-| 24 GB, MacBook Air M3, `the MacBook Air` | Both quants resident at 32768; Q8 and MXFP4 n=3 each | §2.5 proves that both run and match ids, with Metal peaks 13.032 GiB Q8 and 7.317 GiB MXFP4. The reference run's swap grew by 596.87 MiB, so it does not pass. Require a controlled port run below the machine's limit, no swap growth, and exact ids |
-| 16 GB, Mac mini M1, `the Mac mini` | MXFP4 resident first; then Q8 streamed with `--ssd-streaming --ssd-streaming-cache-experts 6GB`. Copy only the quant currently tested; remove nothing else on the machine | MXFP4's 7.29 GiB reference peak fits below the estimated 10.67 GiB limit and is the resident choice. Q8's 12.78 GiB does not fit and needs streaming (`ROADMAP.md:181-191`). Require measured limit/peak/no swap and resident-vs-streamed exact ids. Do not intentionally run resident Q8 into swap |
+| 24 GB, MacBook Air M3 | Both quants resident at 32768; Q8 and MXFP4 n=3 each | §2.5 proves that both run and match ids, with Metal peaks 13.032 GiB Q8 and 7.317 GiB MXFP4. The reference run's swap grew by 596.87 MiB, so it does not pass. Require a controlled port run below the machine's limit, no swap growth, and exact ids |
+| 16 GB, Mac mini M1 | MXFP4 resident first; then Q8 streamed with `--ssd-streaming --ssd-streaming-cache-experts 6GB`. Copy only the quant currently tested; remove nothing else on the machine | MXFP4's 7.29 GiB reference peak fits below the estimated 10.67 GiB limit and is the resident choice. Q8's 12.78 GiB does not fit and needs streaming (`ROADMAP.md:181-191`). Require measured limit/peak/no swap and resident-vs-streamed exact ids. Do not intentionally run resident Q8 into swap |
 | 8 GB streaming case | MXFP4 only, `--ssd-streaming --ssd-streaming-cache-experts 2GB`, context 32768, apps closed | The reference is 5.85 t/s, 19.4 s first token, 3.86 GiB Metal peak, no swap growth, n=3 (`README.md:217`; `ROADMAP.md:323-327`). Require no swap, peak below the physical limit, exact resident/streamed ids, and generation at least 5.0 t/s. Do not use 2.5 GiB; it exceeds the measured limit by 68,976,640 bytes (`ROADMAP.md:331-332`) |
 
 The 16 GB build and baseline use the same commands as §2.3, MXFP4 first. Copy
@@ -629,9 +636,10 @@ the source or a bundle, build with `make all`, and copy only
 subsequently tested, copy only that file for that run. Keep every unrelated
 file on the Mac mini untouched.
 
-The 24 GB and 8 GB rows are required acceptance runs on their physical target
-class, not claims that this design session measured those machines. Existing
-reference numbers are cited as baselines only.
+The 24 GB reference baseline is complete in §2.5. Its controlled port no-swap
+acceptance remains pending after the reference run's swap growth. The 8 GB row
+is a required run on its physical target, not a claim that this design session
+measured that machine.
 
 ## 9. Small implementation tasks for Paul
 
@@ -687,8 +695,9 @@ test first for behavior changes, and run its check before starting the next.
     and Q8 non-regression.
 16. Engine patch 0006. SSD streaming. Check: scheduler unit tests, 3/3
     exact streamed runs, and physical 16/8 GB gates.
-17. Qwen prefix. Rebase/re-export qwen35. Check: `ds4-check --model qwen35
-    --build`, `ds4-check --build`, and Qwen kernel/DFlash live regressions.
+17. Qwen prefix. After #24 merges, rebase/re-export its complete qwen35
+    series, not only 0001-0008. Check: `ds4-check --model qwen35 --build`,
+    `ds4-check --build`, and Qwen kernel/DFlash live regressions.
 18. Harness pin and sampling. Pin the two ds4-py companion commits and add
     Satyrn's recommended-sampling layer. Check: precedence test and real native
     default report match §5.
@@ -705,15 +714,18 @@ test first for behavior changes, and run its check before starting the next.
 
 ## 10. PR sequence and how to work
 
-1. ds4-py companion A, generic Hermes support. Author: decision needed
-   from Koudai (Roché or Paul). Roché reviews/merges ds4-py.
-2. ds4-py companion B, generic tool profiles. Author: decision needed
-   from Koudai (Roché or Paul). Roché reviews/merges ds4-py.
-3. satyrn-agent `feat/mellum-support`. Paul ports the engine series,
+1. satyrn-agent PR #24 merges first. Roché owns that PR. Paul then owns the
+   rebase of the complete qwen35 series onto Mellum. Tell both owners before
+   implementation starts so they do not rebase the same series independently.
+2. ds4-py companion A, generic Hermes support. Koudai authors it. Roché
+   reviews and merges ds4-py.
+3. ds4-py companion B, generic tool profiles. Koudai authors it. Roché
+   reviews and merges ds4-py.
+4. satyrn-agent `feat/mellum-support`. Paul ports the engine series,
    rebases qwen35, pins the companion commits, integrates controls and runs
    acceptance. Koudai reviews. Keep engine patch commits separate from harness
    behavior commits.
-4. Open the ds4-mellum tracking issue "Port Mellum 2.1 to satyrn-agent"
+5. Open the ds4-mellum tracking issue "Port Mellum 2.1 to satyrn-agent"
    with the spec PR link. Paul tracks the work there; do not push to
    `pauleveritt/ds4-mellum`.
 
@@ -750,13 +762,13 @@ Implementation is also a satyrn-agent branch, `feat/mellum-support`, with
   push, and PR. The two ds4-py PRs are generic companions; this design's spec
   PR remains on satyrn-agent.
 
-## 11. Decisions needed
+## 11. Decisions
 
-1. Koudai/Roché: who authors generic ds4-py companion PRs A and B? Paul is
-   already the named owner for the satyrn-agent port; Roché reviews ds4-py.
-2. Koudai: after the n=30/profile/quant comparison, choose `auto -> pi` or
-   `auto -> native` for Mellum.
-3. Koudai: identify who supplies the physical 8 GB streaming acceptance run.
-   It remains pending, not silently waived. The 16 GB MXFP4 and 24 GB reference
-   baselines are complete in §2.4 and §2.5; the 24 GB port no-swap gate remains
-   open after the reference run's observed swap growth.
+1. Koudai authors generic ds4-py companion PRs A and B. Roché reviews and
+   merges them. Paul owns the satyrn-agent port.
+2. Koudai chooses `auto -> pi` or `auto -> native` only after the
+   n=30/profile/quant comparison. No default choice is needed before then.
+3. Paul owns the physical 8 GB streaming acceptance run. It remains pending,
+   not silently waived. The 16 GB MXFP4 and 24 GB reference baselines are
+   complete in §2.4 and §2.5. The 24 GB port no-swap gate remains open after
+   the reference run's observed swap growth.
