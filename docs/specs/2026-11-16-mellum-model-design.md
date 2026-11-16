@@ -458,8 +458,11 @@ atomicity, workspace/read-only enforcement, and unchanged `native` behavior.
 ### Required live comparison
 
 Run after the engine and both ds4-py companions work, on the 36 GB Mac Studio,
-with both quants resident, context 32768, recommended sampling, fresh session
-per task, and the same prompt+seed pairs in an A/B/B/A order.
+with both quants resident, context 32768, recommended sampling, and a fresh
+session per task. Use the same prompt+seed pairs in both profiles. For odd
+grader numbers, odd seeds run native then Pi and even seeds run Pi then native.
+For even grader numbers, reverse those orders. This gives 15 native-first and
+15 Pi-first starts for each quant and keeps every pair explicit.
 
 - n=30 independent tasks per profile per quant (six task types x five
   paired repetitions): read, write, edit, bash, read-edit-bash, and a small
@@ -474,7 +477,7 @@ per task, and the same prompt+seed pairs in an A/B/B/A order.
   test results determine success, not a model's self-report.
 - Run the comparison with
   `uv run --frozen python tests/e2e/live/mellum_tool_bakeoff.py --model "$Q8"
-  --profiles native,pi --order ABBA --repetitions 5 --out RESULTS_Q8`, then
+  --profiles native,pi --order alternating --repetitions 5 --out RESULTS_Q8`, then
   repeat with `--model "$MXFP4" --out RESULTS_MXFP4`. Keep every JSONL record
   and the summary in the implementation PR's evidence directory.
 - Primary measures: completed task rate and valid tool-call/schema rate.
