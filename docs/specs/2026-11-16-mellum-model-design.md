@@ -461,16 +461,18 @@ containment, read-only policy, events, retries, or output limits.
 | `read(path, offset?, limit?)` | Convert Pi's 1-indexed offset to the filesystem tool's zero-based offset (`0` and `1` both read the first line). Pass `limit=2000` when the caller omits it, which replaces the native profile's 160-line default. Use the existing read method (`FileSystemToolset.read_file`, installed harness 0.59.0 `filesystem/_toolset.py:901`) |
 | `write(path, content)` | Call the existing write method (installed harness 0.59.0 `filesystem/_toolset.py:1006`) with no optimistic hash argument |
 | `edit(path, edits[{oldText,newText}])` | Convert to the existing `Replacement` list and use one atomic edit operation; add a ds4-py batch wrapper around the existing edit tool rather than applying a sequence of public single-edit calls. Reject ambiguity/overlap before writing |
-| `bash(command, timeout?)` | Call `ShellToolset.run_command` (installed harness 0.59.0 `shell/_toolset.py:365`) with `timeout_seconds=timeout` when supplied. With no timeout retain ds4-py's configured default and document this difference from Pi's no-deadline behavior |
+| `bash(command, timeout?)` | Call `ShellToolset.run_command` (installed harness 0.59.0 `shell/_toolset.py:365`) with `timeout_seconds=timeout` when supplied. With no timeout use ds4-py's configured default of 30 seconds. Test both explicit forwarding and this omitted-timeout behavior |
 
 The Pi profile emits its own four definitions. It does not reuse
 `DS4FileSystem`'s prepared definitions, which rewrite the read-limit
 description for the native 160-line default
-(`capabilities/file_system.py:12-24`). Use the reference descriptions verbatim,
-except that the read description says `50,000 characters` instead of `50KB`.
-The Pi read budget is 2000 lines and 50,000 characters, replacing the native
-160-line budget. The output cap remains ds4-py's character-based cap, not Pi's
-byte-based 50 KiB cap.
+(`capabilities/file_system.py:12-24`). Use the reference descriptions verbatim
+except for two behavior-aligned changes. The read description says `50,000
+characters` instead of `50KB`. The bash timeout description says `optional,
+defaults to the configured ds4-py timeout of 30 seconds` instead of `optional,
+no default timeout`. The Pi read budget is 2000 lines and 50,000 characters,
+replacing the native 160-line budget. The output cap remains ds4-py's
+character-based cap, not Pi's byte-based 50 KiB cap.
 
 The initial adapter keeps ds4-py's result text, including numbered read
 output and labelled shell output. Do not claim byte-for-byte Pi result parity;
@@ -480,10 +482,10 @@ preamble so no `read_file`/`edit_file` instructions contradict the exposed
 schemas.
 
 Tests must prove the exact four definitions, including only the documented
-read-description change from `50KB` to `50,000 characters`. They must also
-prove offset and argument conversion, a real read/write/edit/bash round trip,
-multi-edit atomicity, workspace/read-only enforcement, and unchanged `native`
-behavior.
+read and bash description changes. They must also prove offset and argument
+conversion, explicit and omitted bash timeouts, a real read/write/edit/bash
+round trip, multi-edit atomicity, workspace/read-only enforcement, and
+unchanged `native` behavior.
 
 ### Required live comparison
 
