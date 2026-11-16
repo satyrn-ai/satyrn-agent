@@ -231,6 +231,20 @@ def test_cli_dflash_on_without_drafter_does_not_name_project_file(tmp_path: Path
     assert "pyproject.toml" not in str(caught.value)
 
 
+def test_project_empty_drafter_does_not_become_project_directory(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="non-empty") as caught:
+        resolved(tmp_path, [], toml='[tool.satyrn]\ndflash = "on"\ndrafter_path = ""\n')
+
+    assert str(caught.value).startswith(f"{tmp_path}/pyproject.toml: ")
+
+
+def test_cli_empty_drafter_does_not_become_project_directory(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="non-empty") as caught:
+        resolved(tmp_path, ["--dflash", "on", "--drafter", ""])
+
+    assert "pyproject.toml" not in str(caught.value)
+
+
 def test_project_dflash_on_without_drafter_names_project_file(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="drafter_path is required") as caught:
         resolved(tmp_path, [], toml='[tool.satyrn]\ndflash = "on"\n')

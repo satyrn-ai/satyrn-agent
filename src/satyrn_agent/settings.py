@@ -42,7 +42,7 @@ def _non_negative_int(value: str) -> int:
 
 def configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dflash", choices=("auto", "on", "off"))
-    parser.add_argument("--drafter", type=Path)
+    parser.add_argument("--drafter")
     parser.add_argument("--draft-tokens", type=_non_negative_int)
     parser.add_argument("--think-budget", type=_positive_int)
     parser.add_argument("--think-bias", type=float)
@@ -70,6 +70,8 @@ def _project_values(project_dir: Path) -> tuple[dict[str, object], Path]:
 def _resolve_path(value: object, project_dir: Path) -> object:
     if not isinstance(value, str):
         return value
+    if not value.strip():
+        return ""
     path = Path(value).expanduser()
     return str(path if path.is_absolute() else project_dir / path)
 
@@ -108,7 +110,7 @@ def resolve_settings(args: argparse.Namespace, project_dir: Path) -> ResolvedSet
     if args.dflash is not None:
         values["dflash"] = args.dflash
     if args.drafter is not None:
-        values["drafter_path"] = _resolve_path(str(args.drafter), project_dir)
+        values["drafter_path"] = _resolve_path(args.drafter, project_dir)
     if args.draft_tokens is not None:
         values["draft_tokens"] = args.draft_tokens
 
@@ -122,7 +124,7 @@ def resolve_settings(args: argparse.Namespace, project_dir: Path) -> ResolvedSet
             isinstance(error, MissingDrafterPath)
             and args.dflash == "on"
             and project_values.get("dflash") != "on"
-            and args.drafter is None
+            and (args.drafter is None or not args.drafter.strip())
             and "drafter_path" not in project_values
         )
         if missing_cli_drafter:
