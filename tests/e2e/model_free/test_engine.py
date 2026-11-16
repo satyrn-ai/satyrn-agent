@@ -7,7 +7,7 @@ import satyrn_agent
 from satyrn_agent._native import CtypesDFlashNative
 from satyrn_agent.config import DFlashMode, SatyrnConfig
 from satyrn_agent.dflash import DFlashMetrics, DFlashStep, Recorder
-from satyrn_agent.errors import DFlashError
+from satyrn_agent.errors import DFlashError, DFlashUnavailable
 from tests.e2e.model_free._harness import native_for_dflash
 from tests.e2e.model_free._native import ScenarioFakeNative
 
@@ -56,6 +56,20 @@ def test_close_preserves_last_resolved_step_and_metrics() -> None:
         replacement_anchors=0,
         discarded_tails=2,
     )
+
+
+def test_close_after_policy_failure_reports_no_resolved_step() -> None:
+    native = ScenarioFakeNative({"script": [10], "calls": [], "has_dflash": False})
+    wrapper = satyrn_agent.open(
+        "scenario.gguf",
+        config=SatyrnConfig(dflash=DFlashMode.ON, drafter_path=Path("drafter.gguf")),
+        native=native,
+    )
+
+    with pytest.raises(DFlashUnavailable, match="loaded drafter"):
+        wrapper.session()
+
+    assert wrapper.decode_step is None
 
 
 def test_first_only_session_close_and_closed_error() -> None:
