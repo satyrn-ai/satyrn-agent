@@ -252,8 +252,9 @@ at context 3072 on AC power with no thermal/performance warning.
 | Q8_0 | 409 t/s (402-412) | 31.32 t/s (30.66-31.65) | 12.41 GiB |
 
 A second run used context 32768 and a 2,727-token source-review prompt built
-from the reference checkout. Each quant generated 512 greedy tokens in three
-processes. The command per process was:
+from the reference checkout. `make all` does not include the measurement
+runner, so build it once with `make tools/mellum_s4_measure`. Each quant
+generated 512 greedy tokens in three processes. The command per process was:
 
 ```bash
 tools/mellum_s4_measure --model "$MODEL" --prompt "$OUT/prompt.txt" \
