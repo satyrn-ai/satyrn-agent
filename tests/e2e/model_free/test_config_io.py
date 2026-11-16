@@ -68,6 +68,7 @@ def test_external_full_config_converts_modes_paths_and_values() -> None:
         ({"think_budget": {"max_tokens": 1, "bias": float("inf")}}, ConfigurationError, "bias"),
         ({"dflash": "on"}, ConfigurationError, "drafter_path"),
         ({"dflash": "on", "drafter_path": ""}, ConfigurationError, "non-empty"),
+        ({"drafter_path": ""}, ConfigurationError, "drafter_path must be non-empty"),
         ({"sampling": {"temperature": True}}, TypeError, "temperature"),
         ({"sampling": {"temperature": 10**1000}}, ConfigurationError, "finite"),
         ({"draft_tokens": 1.5}, TypeError, "draft_tokens"),

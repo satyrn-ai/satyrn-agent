@@ -122,10 +122,12 @@ def resolve_settings(args: argparse.Namespace, project_dir: Path) -> ResolvedSet
     except (ConfigurationError, TypeError) as error:
         missing_cli_drafter = (
             isinstance(error, MissingDrafterPath)
-            and args.dflash == "on"
-            and project_values.get("dflash") != "on"
-            and (args.drafter is None or not args.drafter.strip())
+            and (project_values.get("dflash") != "on" or args.dflash not in {None, "on"})
             and "drafter_path" not in project_values
+            and (
+                (args.drafter is not None and not args.drafter.strip())
+                or (args.dflash == "on" and args.drafter is None)
+            )
         )
         if missing_cli_drafter:
             raise
