@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeIs, cast
 
 from .config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
-from .errors import ConfigurationError
+from .errors import ConfigurationError, MissingDrafterPath
 
 if TYPE_CHECKING:
     from ._generated.config import ConfigDocument, SamplingOverridesDocument, ThinkBudgetDocument
@@ -55,7 +55,7 @@ def _document(value: object) -> ConfigDocument:
     if path is not None and not isinstance(path, str):
         raise TypeError("drafter_path must be a string or None")
     if value.get("dflash") == "on" and (path is None or path == ""):
-        raise ConfigurationError("drafter_path is required and must be non-empty when dflash is on")
+        raise MissingDrafterPath("drafter_path is required and must be non-empty when dflash is on")
     if "sampling" in value:
         _sampling(value["sampling"])
     if (budget := value.get("think_budget")) is not None:

@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .config import ThinkBudgetConfig
+from .config import validate_integer, validate_think_bias
 from .config_io import config_from_dict, is_mapping, validate_think_budget_document
-from .errors import ConfigurationError
+from .errors import ConfigurationError, MissingDrafterPath
 
 if TYPE_CHECKING:
     from ds4py.agent_composition import EngineOpenOptions
@@ -78,10 +78,7 @@ def _merge_think_budget(args: argparse.Namespace, values: dict[str, object], sou
     if args.no_think_budget and (args.think_budget is not None or args.think_bias is not None):
         raise ConfigurationError("--no-think-budget conflicts with positive think-budget flags")
     if args.think_budget is not None:
-        bias = args.think_bias if args.think_bias is not None else 2.0
-        ThinkBudgetConfig(args.think_budget, bias)
-    elif args.think_bias is not None:
-        ThinkBudgetConfig(1, args.think_bias)
+        validate_integer(args.think_budget, "max_tokens", minimum=1)
     project_budget = values.get("think_budget")
     if project_budget is not None:
         try:
@@ -97,6 +94,7 @@ def _merge_think_budget(args: argparse.Namespace, values: dict[str, object], sou
         budget = values.get("think_budget")
         if not is_mapping(budget):
             raise ConfigurationError("--think-bias requires an effective think budget")
+        validate_think_bias(args.think_bias)
         values["think_budget"] = {**budget, "bias": args.think_bias}
 
 
@@ -115,14 +113,17 @@ def resolve_settings(args: argparse.Namespace, project_dir: Path) -> ResolvedSet
         values["draft_tokens"] = args.draft_tokens
 
     _merge_think_budget(args, values, source)
+    satyrn_values = dict(values)
+    satyrn_values.pop("sampling", None)
     try:
-        config_from_dict(values)
+        config_from_dict(satyrn_values)
     except (ConfigurationError, TypeError) as error:
         missing_cli_drafter = (
-            args.dflash == "on"
+            isinstance(error, MissingDrafterPath)
+            and args.dflash == "on"
+            and project_values.get("dflash") != "on"
             and args.drafter is None
             and "drafter_path" not in project_values
-            and str(error) == "drafter_path is required and must be non-empty when dflash is on"
         )
         if missing_cli_drafter:
             raise
@@ -134,16 +135,29 @@ def resolve_config(options: EngineOpenOptions, extension_config: object) -> Saty
     """Add typed generic sampling values and validate the final merged document."""
     if isinstance(extension_config, ResolvedSettings):
         values = dict(extension_config.values)
+        source: Path | None = extension_config.source
     elif is_mapping(extension_config):
         values = dict(extension_config)
+        source = None
     else:
         raise TypeError("Satyrn extension config must be a mapping")
+    generic_values: dict[str, object] = {}
+    for name in ("temperature", "top_k", "top_p", "min_p"):
+        value = getattr(options, name)
+        if value is not None:
+            generic_values[name] = value
+    generic = config_from_dict({"sampling": generic_values}).sampling
     raw_sampling = values.get("sampling", {})
     if is_mapping(raw_sampling):
         sampling = dict(raw_sampling)
         for name in ("temperature", "top_k", "top_p", "min_p"):
-            value = getattr(options, name)
+            value = getattr(generic, name)
             if value is not None:
                 sampling[name] = value
         values["sampling"] = sampling
-    return config_from_dict(values)
+    try:
+        return config_from_dict(values)
+    except (ConfigurationError, TypeError) as error:
+        if source is None:
+            raise
+        raise ConfigurationError(f"{source}: {error}") from error

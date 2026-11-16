@@ -238,6 +238,17 @@ def test_project_dflash_on_without_drafter_names_project_file(tmp_path: Path) ->
     assert str(caught.value).startswith(f"{tmp_path}/pyproject.toml: ")
 
 
+def test_project_and_cli_dflash_on_without_drafter_names_project_file(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="drafter_path is required") as caught:
+        resolved(
+            tmp_path,
+            ["--dflash", "on"],
+            toml='[tool.satyrn]\ndflash = "on"\n',
+        )
+
+    assert str(caught.value).startswith(f"{tmp_path}/pyproject.toml: ")
+
+
 def test_cli_dflash_on_uses_project_drafter(tmp_path: Path) -> None:
     config = resolved(
         tmp_path,
@@ -258,6 +269,29 @@ def test_cli_budget_inheriting_invalid_project_bias_names_project_file(tmp_path:
         )
 
     assert str(caught.value).startswith(f"{tmp_path}/pyproject.toml: ")
+
+
+def test_generic_sampling_cli_override_repairs_invalid_project_value(tmp_path: Path) -> None:
+    config = resolved(
+        tmp_path,
+        [],
+        toml="[tool.satyrn.sampling]\ntop_p = 2.0\n",
+        generic=["--top-p", "0.9"],
+    )
+
+    assert config.sampling.top_p == 0.9
+
+
+def test_invalid_project_sampling_names_project_file(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="top_p must be between 0 and 1") as caught:
+        resolved(tmp_path, [], toml="[tool.satyrn.sampling]\ntop_p = 2.0\n")
+
+    assert str(caught.value).startswith(f"{tmp_path}/pyproject.toml: ")
+
+
+def test_cli_think_bias_without_budget_checks_budget_before_bias_value(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="effective think budget"):
+        resolved(tmp_path, ["--think-bias=nan"])
 
 
 def test_non_finite_generic_sampling_cli_does_not_name_project_file(tmp_path: Path) -> None:
