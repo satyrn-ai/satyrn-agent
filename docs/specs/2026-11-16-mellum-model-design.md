@@ -234,6 +234,47 @@ The full generation range includes 13.85 and 13.98 t/s in the first block and
 run and does not substitute a steady-state subset. The representative startup
 log reports `resident model 6.54 GiB = 6.92 GiB planned` at context 3072.
 
+### 2.5 Measured MacBook Air baseline
+
+The MacBook Air is an Apple M3 with 25,769,803,776 bytes (24 GiB) of RAM
+running macOS 15.3.1 at `the MacBook Air`. A shallow clone contains the
+same `d2d9338` reference commit and built with `make all`. Both GGUFs were
+copied and passed the size and SHA-256 checks in §2.3. No model process was
+active before the build or runs. No unrelated file was removed.
+
+The commands are the four commands from §2.3 with
+`OUT="$HOME/ds4-runs/mellum-design-macbook-air-baseline"`. All cells have n=6
+at context 3072 on AC power with no thermal/performance warning.
+
+| Quant, resident | Prefill median (range) | Generation median (range) | Planned memory |
+| --- | ---: | ---: | ---: |
+| MXFP4_MOE | 406 t/s (398-408) | 36.08 t/s (35.97-36.82) | 6.92 GiB |
+| Q8_0 | 409 t/s (402-412) | 31.32 t/s (30.66-31.65) | 12.41 GiB |
+
+A second run used context 32768 and a 2,727-token source-review prompt built
+from the reference checkout. Each quant generated 512 greedy tokens in three
+processes. The command per process was:
+
+```bash
+tools/mellum_s4_measure --model "$MODEL" --prompt "$OUT/prompt.txt" \
+  --gen 512 --context 32768 --out "$OUT/QUANT-RUN.json"
+```
+
+The prompt SHA-256 is
+`e206b108c2ab379eb79b20ce61df051ee0fef34ba0dd0a592762518576f1ef27`.
+The results are in `~/ds4-runs/mellum-design-macbook-air-32k`.
+
+| Quant, resident, 32K | Generation from median per-run mean | First-token median | Metal peak median | Ids equal, n=3 |
+| --- | ---: | ---: | ---: | --- |
+| MXFP4_MOE | 36.107 t/s | 6.749 s | 7.317 GiB | yes |
+| Q8_0 | 31.036 t/s | 7.008 s | 13.032 GiB | yes |
+
+This reference run does not pass the no-swap criterion. `vm.swapusage` used
+6,812.94 MiB before and 7,409.81 MiB after, an increase of 596.87 MiB. Other
+application activity was not controlled. The values are still useful resident
+speed and Metal-allocation baselines, but the port's 24 GB no-swap gate remains
+open.
+
 ## 3. Selected architecture and ownership
 
 ```text
@@ -577,7 +618,7 @@ Never treat a startup plan alone as a peak measurement.
 | Target | Required configuration and test | Acceptance |
 | --- | --- | --- |
 | 36 GB, Mac Studio M4 Max (this machine) | Both quants resident. Repeat §2.3 at its measured context 3072 with prefill/decode n=6. On this same Mac Studio, measure ds4-mellum `d2d9338` and then the port at context 32768 with the 2,686-token coding request n=3 | Port medians are within 10% of the same-machine reference. Exact greedy ids match. Metal peak is no more than 5% above the same-machine reference, with no swap growth |
-| 24 GB, MacBook Air | Both quants resident at 32768; Q8 and MXFP4 n=3 each | Reference peaks are Q8 12.78 GiB and MXFP4 7.29 GiB (`README.md:143-144`), so both are candidates. Require measured peak below the machine's limit, no swap growth, and exact ids. No 24 GB measurement exists yet; mark the gate pending until run |
+| 24 GB, MacBook Air M3, `the MacBook Air` | Both quants resident at 32768; Q8 and MXFP4 n=3 each | §2.5 proves that both run and match ids, with Metal peaks 13.032 GiB Q8 and 7.317 GiB MXFP4. The reference run's swap grew by 596.87 MiB, so it does not pass. Require a controlled port run below the machine's limit, no swap growth, and exact ids |
 | 16 GB, Mac mini M1, `the Mac mini` | MXFP4 resident first; then Q8 streamed with `--ssd-streaming --ssd-streaming-cache-experts 6GB`. Copy only the quant currently tested; remove nothing else on the machine | MXFP4's 7.29 GiB reference peak fits below the estimated 10.67 GiB limit and is the resident choice. Q8's 12.78 GiB does not fit and needs streaming (`ROADMAP.md:181-191`). Require measured limit/peak/no swap and resident-vs-streamed exact ids. Do not intentionally run resident Q8 into swap |
 | 8 GB streaming case | MXFP4 only, `--ssd-streaming --ssd-streaming-cache-experts 2GB`, context 32768, apps closed | The reference is 5.85 t/s, 19.4 s first token, 3.86 GiB Metal peak, no swap growth, n=3 (`README.md:217`; `ROADMAP.md:323-327`). Require no swap, peak below the physical limit, exact resident/streamed ids, and generation at least 5.0 t/s. Do not use 2.5 GiB; it exceeds the measured limit by 68,976,640 bytes (`ROADMAP.md:331-332`) |
 
@@ -698,7 +739,7 @@ Implementation is also a satyrn-agent branch, `feat/mellum-support`, with
   is `ds4.o`.
 - Model locations: the 36 GB Mac Studio has both SHA-verified GGUFs in
   `~/models`; the 16 GB Mac mini has only the SHA-verified MXFP4 file; the
-  24 GB Air has no verified local copy yet; the 8 GB case uses MXFP4 only.
+  24 GB Air has both SHA-verified GGUFs; the 8 GB case uses MXFP4 only.
   Do not assume a model is present on another machine.
 - Run `pr-review-loop` before requesting human review and after pushing changes
   to a reviewed PR. Use fresh reviewers, alternating
@@ -714,6 +755,7 @@ Implementation is also a satyrn-agent branch, `feat/mellum-support`, with
    already the named owner for the satyrn-agent port; Roché reviews ds4-py.
 2. Koudai: after the n=30/profile/quant comparison, choose `auto -> pi` or
    `auto -> native` for Mellum.
-3. Koudai: identify who supplies the physical 24 GB MacBook Air and 8 GB
-   streaming acceptance runs. They remain pending, not silently waived. The
-   16 GB MXFP4 baseline is complete in §2.4.
+3. Koudai: identify who supplies the physical 8 GB streaming acceptance run.
+   It remains pending, not silently waived. The 16 GB MXFP4 and 24 GB reference
+   baselines are complete in §2.4 and §2.5; the 24 GB port no-swap gate remains
+   open after the reference run's observed swap growth.
