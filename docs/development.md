@@ -171,12 +171,17 @@ unzip -l dist/*.whl | grep 'satyrn_agent/'
 ```
 
 The package pins ds4-py companion commit
-`5c98c6ac86cafef56780c3bcbb87c3ecaef52aef`, including tentative decode
-transactions and fatal-state poisoning. Rebuild the ds4 ABI manifest after
+`95d52cbb9f189c9a940e777e9fab6baa15eac622` with the `agent` extra,
+including generic harness composition, file-payload guards, tentative decode
+transactions, and fatal-state poisoning. Rebuild the ds4 ABI manifest after
 installing or updating `satyrn_agent`; optional symbols still need a fresh probe
 record.
 
 The real patched-engine suite and its required model, drafter, library, and
-SHA-256 inputs are documented in `tests/e2e/README.md`. Run it before claiming
-native DFlash correctness or live parity. Its 100% coverage requirement is
-separate from the portable coverage result, even when both commands report 100%.
+SHA-256 inputs are documented in `tests/e2e/README.md`. It includes
+`test_harness_tui.py`, which drives the real `satyrn-agent` runtime and TUI
+through DFlash rounds, a real tool exchange, slash commands, footer checks,
+save/new/switch, and supported compaction while reconciling committed tokens
+and metrics. Run it before claiming native DFlash correctness, live parity, or
+harness acceptance. Its 100% coverage requirement is separate from the
+portable coverage result, even when both commands report 100%.

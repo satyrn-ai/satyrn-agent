@@ -9,6 +9,10 @@ class ConfigurationError(SatyrnError, ValueError):
     """A public configuration value is invalid or inconsistent."""
 
 
+class MissingDrafterPath(ConfigurationError):
+    """DFlash ON has no usable drafter path."""
+
+
 class DFlashUnavailable(SatyrnError):
     """The requested DFlash policy cannot be satisfied."""
 

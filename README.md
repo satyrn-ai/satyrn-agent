@@ -12,7 +12,9 @@ Current status: patch-series tooling and the initial typed `satyrn_agent`
 package. The package implements optional DFlash bindings, session policy,
 native sampling defaults, a soft think budget, and host-driven speculative
 decode. Real Metal/GGUF acceptance is a separate explicit gate; portable tests
-do not establish live parity.
+do not establish live parity. The `satyrn-agent` command reuses ds4-py's agent
+CLI, runtime, tools, persistence, and TUI with Satyrn's DFlash and soft
+think-budget controls.
 
 `ds4-sync`, `ds4-export`, and
 `ds4-check` are registered as devenv commands and also run standalone from
@@ -26,7 +28,7 @@ series in addition to the test suite.
 ## Agent package
 
 The package uses the ds4-py companion APIs at commit
-`5c98c6ac86cafef56780c3bcbb87c3ecaef52aef`. Installing it registers eight
+`95d52cbb9f189c9a940e777e9fab6baa15eac622` with the `agent` extra. Installing it registers eight
 optional bindings through `ds4py.bindings`. Rebuild the ds4 ABI manifest after
 installing or updating the package so the new probes are recorded.
 
@@ -57,8 +59,7 @@ with satyrn_agent.open(
 The first and only `session()` call applies native sampling defaults, explicit
 overrides, the optional think hook, and one resolved `auto`/`on`/`off` decode
 policy. It returns ds4-py's real `Session`. See `tests/e2e/README.md` for the
-real patched-engine environment and acceptance commands. M3 CLI, TUI, and
-persistence integration are not part of this package slice.
+real patched-engine environment and acceptance commands.
 
 For a JSON-shaped external configuration, use `config_from_dict(data)`. The
 versioned contract is `schemas/satyrn-config.schema.json`; datamodel-code-generator
@@ -88,6 +89,50 @@ records the 3.037x speedup and the test conditions.
 | Drafter | `ggml-org/Qwen3.8-27B-GGUF` | `dflash-Qwen3.8-27B-Q4_0.gguf` | `a316ea527fde32c12487be7574e2db5ac2ad2a7e` | `0a994382adf17c720c9e5d4292f57344f3b445f058d3e9d5b0f601ae7d6ca3c4` |
 
 The target is not the fine-tuned model in `satyrn-ai/Qwen3.8-27B-py3.15`.
+
+## Agent CLI and TUI
+
+Launch `satyrn-agent` from the project whose `pyproject.toml` contains
+`[tool.satyrn]`. Only the current directory is read. Project values override
+the domain defaults, and explicit CLI values override the project:
+
+```toml
+[tool.satyrn]
+dflash = "auto"
+drafter_path = "/absolute/path/dflash-Qwen3.8-27B-Q4_0.gguf"
+draft_tokens = 0
+think_budget = { max_tokens = 512, bias = 2.0 }
+
+[tool.satyrn.sampling]
+temperature = 0.0
+top_k = 0
+top_p = 1.0
+min_p = 0.0
+```
+
+```bash
+uv run satyrn-agent \
+  --model "$HOME/models/Qwen3.8-27B-Q4_K_M.gguf" \
+  --lib /absolute/path/to/libds4.dylib \
+  --metal --dflash on --think-budget 256 --seed 1 --read-only
+```
+
+The Satyrn options are `--dflash auto|on|off`, `--drafter PATH`,
+`--draft-tokens N`, `--think-budget N`, `--think-bias FLOAT`, and
+`--no-think-budget`. ds4-py owns the generic engine and sampling options,
+including `--top-k`. Explicit zero is preserved. Drafter path and draft count
+are fixed at native open. Native think-mode options remain independent of the
+soft think budget.
+
+Use `/dflash [auto|on|off]` to query or change DFlash between prompts. Use
+`/think-budget [<max_tokens> [bias]|off]` to query, replace, or disable the soft
+logit bias. The footer shows requested/resolved mode and committed acceptance,
+for example `dflash: auto/on, accept 62.5% (10/16)`. `/new` and `/switch`
+reset these controls and counters to startup values; fork retains them.
+Standard `/save`, `/compact`, and other ds4-py commands use the same runtime.
+
+There is no `--yolo` or tool-approval option. Tools execute under ds4-py's
+unchanged ADR 0002 policy, with `--read-only` available as a workspace limit.
 
 Download both files with the Hugging Face CLI. The `--revision` option selects
 the exact repository commit.

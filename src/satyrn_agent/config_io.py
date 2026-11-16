@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeIs, cast
 
 from .config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
-from .errors import ConfigurationError
+from .errors import ConfigurationError, MissingDrafterPath
 
 if TYPE_CHECKING:
     from ._generated.config import ConfigDocument, SamplingOverridesDocument, ThinkBudgetDocument
@@ -17,12 +17,12 @@ _SAMPLING_FIELDS = {"temperature", "top_k", "top_p", "min_p"}
 _DFLASH_MODES = {"auto", "on", "off"}
 
 
-def _mapping(value: object) -> TypeIs[Mapping[str, object]]:
+def is_mapping(value: object) -> TypeIs[Mapping[str, object]]:
     return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
 
 
 def _sampling(value: object) -> TypeIs[SamplingOverridesDocument]:
-    if not _mapping(value):
+    if not is_mapping(value):
         raise TypeError("sampling must be an object")
     if unknown := set(value) - _SAMPLING_FIELDS:
         raise ConfigurationError(f"unknown sampling fields: {', '.join(sorted(unknown))}")
@@ -32,8 +32,8 @@ def _sampling(value: object) -> TypeIs[SamplingOverridesDocument]:
     return True
 
 
-def _think_budget(value: object) -> TypeIs[ThinkBudgetDocument]:
-    if not _mapping(value):
+def validate_think_budget_document(value: object) -> TypeIs[ThinkBudgetDocument]:
+    if not is_mapping(value):
         raise TypeError("think_budget must be an object")
     if set(value) != {"max_tokens", "bias"}:
         raise ConfigurationError("think_budget requires max_tokens and bias")
@@ -41,7 +41,7 @@ def _think_budget(value: object) -> TypeIs[ThinkBudgetDocument]:
 
 
 def _document(value: object) -> ConfigDocument:
-    if not _mapping(value):
+    if not is_mapping(value):
         raise TypeError("config must be an object")
     if unknown := set(value) - _CONFIG_FIELDS:
         raise ConfigurationError(f"unknown config fields: {', '.join(sorted(unknown))}")
@@ -54,12 +54,14 @@ def _document(value: object) -> ConfigDocument:
     path = value.get("drafter_path")
     if path is not None and not isinstance(path, str):
         raise TypeError("drafter_path must be a string or None")
+    if path == "" and value.get("dflash") != "on":
+        raise MissingDrafterPath("drafter_path must be non-empty")
     if value.get("dflash") == "on" and (path is None or path == ""):
-        raise ConfigurationError("drafter_path is required and must be non-empty when dflash is on")
+        raise MissingDrafterPath("drafter_path is required and must be non-empty when dflash is on")
     if "sampling" in value:
         _sampling(value["sampling"])
     if (budget := value.get("think_budget")) is not None:
-        _think_budget(budget)
+        validate_think_budget_document(budget)
     return cast("ConfigDocument", value)
 
 

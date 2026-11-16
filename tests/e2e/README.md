@@ -33,6 +33,15 @@ ds4-py companion, a patched `libds4`, and real target/drafter GGUFs. They do not
 use `FakeNative` or scripted decode steps. Every round uses the shared
 token/transcript/native-position alignment assertion in `tests/conftest.py`.
 
+`test_harness_tui.py` uses the same real library and models through the
+installed `SatyrnAgentExtension`, ds4-py `DS4Model`, `AgentRuntime`, and TUI.
+It requires an initial DFlash footer, offered and accepted drafts, multiple
+user turns, a real `read_file` call/result, think-budget changes, off/on metric
+behavior, save/new/switch, and supported compaction. Each generation prompt
+checks committed token IDs against assistant segments and native position;
+DFlash spans also reconcile token count with committed blocks plus accepted
+drafts. A supplied live environment must not skip a required branch.
+
 ## Required identity and library inputs
 
 See [Models](../../README.md#models) for the pinned model sources, download
