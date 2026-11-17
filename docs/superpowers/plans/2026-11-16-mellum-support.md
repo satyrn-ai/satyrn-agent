@@ -373,7 +373,7 @@ Work in the task worktree on `feat/mellum-support`. Engine work happens in the d
 
 **Interfaces:**
 - Consumes: `.ds4/tree` at `refs/ds4/common` produced by `ds4-sync --common-only`.
-- Produces: `ds4_engine_is_mellum` returning true for `general.architecture = mellum2` while `ds4_engine_is_qwen4` stays true and payload support stays false; Q8 binding and memory plan; Mellum sampling defaults of 1.0/1.0/0/0; patch trailer `Upstream: not offered, fork only` / `Retire-when: upstream runs Mellum 2.1 with this host contract`.
+- Produces: `ds4_engine_is_mellum` returning true for `general.architecture = mellum` while `ds4_engine_is_qwen4` stays true and payload support stays false; Q8 binding and memory plan; Mellum sampling defaults of 1.0/1.0/0/0; patch trailer `Upstream: not offered, fork only` / `Retire-when: upstream runs Mellum 2.1 with this host contract`.
 
 - [ ] **Step 1: Bootstrap the scratch tree**
 
