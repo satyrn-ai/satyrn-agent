@@ -1,37 +1,42 @@
-From b280c2e4cf94a7e5bfbea244507e33ad34eb5d82 Mon Sep 17 00:00:00 2001
+From 1973b4438958454466cf3e8acd9380080fb682ed Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
-Date: Tue, 17 Nov 2026 07:19:48 -0500
-Subject: [PATCH 3/3] mellum: exact Q8 Metal graph
+Date: Tue, 17 Nov 2026 07:35:37 -0500
+Subject: [PATCH 3/3] mellum: exact q8 metal graph and rewind
 
 The Q8_0 Metal graph: q/k norm and RoPE with YaRN on the full layers only,
-the ring commit and sliding-window attention kernels, ungated full
-attention on the upstream qwen4 decode kernels, MoE with top-8 of 64 routed
-experts and no shared expert, the layer loop and logits, and the
-DS4_MELLUM_TRACE driver that writes per-position files.
+ring commit and sliding-window attention, ungated full attention on the
+upstream qwen4 decode kernels, MoE with top-8 of 64 routed experts and no
+shared expert, the layer loop and logits, and the DS4_MELLUM_TRACE driver.
 
-Lifts the forward-pass refusal so a Mellum chat runs end to end, while the
-exact rows kernel keeps one-row and multi-row arithmetic bit-identical.
+Rewind: one token back keeps both caches; at the last sync's end the
+frontier's rings and logits are restored; anywhere else the graph resets and
+the kept tokens are replayed. The exact rows kernel makes a replay equal the
+decode steps it replaces.
 
-Asserted by tests/test_mellum_kernels.c (509 checks) and the trace driver's
-untraced-versus-fully-traced logit equality at chunk 1024 and chunk 2. On the
-real Q8_0 GGUF, 64 greedy token ids match the fork's CLI at d2d9338.
+Asserted by tests/test_mellum_kernels.c (509 checks), the trace driver's
+untraced-versus-fully-traced logit equality, and ds4_test --mellum-rewind at
+500/1, 1100/1, 1100/3 and the 1100/40 frontier case: zero differing logit
+words, and the stale-frontier rewind resets. On the real Q8_0 GGUF, 64 greedy
+token ids match the fork's CLI at d2d9338.
 
 Upstream: not offered, fork only
 Retire-when: upstream runs an exact Mellum 2.1 Metal graph
-Carried-commits: 5c3b1173 d1c144df 9df140f1 c6cb6fb1 68f818ab e1885c76 0b7f707e
+Carried-commits: 5c3b1173 d1c144df 9df140f1 c6cb6fb1 68f818ab e1885c76 0b7f707e 36c8ea93 7280304a 61c9654d 181e3a7f
 ---
  Makefile                     |   28 +-
- ds4.c                        |  397 +++++-
+ ds4.c                        |  507 +++++++-
+ ds4.h                        |    5 +
  ds4_gpu.h                    |  141 +++
  ds4_metal.m                  |  361 +++++-
  metal/mellum.metal           |  202 ++++
  metal/qwen4.metal            |   20 +-
+ tests/ds4_test.c             |  384 ++++++
  tests/mellum_moe_ref.inc     |   85 ++
  tests/mellum_trace.c         |  321 +++++
  tests/mellum_trace_context.h |   21 +
  tests/test_mellum_kernels.c  | 2208 ++++++++++++++++++++++++++++++++++
  tests/test_mellum_trace.sh   |   92 ++
- 11 files changed, 3832 insertions(+), 44 deletions(-)
+ 13 files changed, 4329 insertions(+), 46 deletions(-)
  create mode 100644 metal/mellum.metal
  create mode 100644 tests/mellum_moe_ref.inc
  create mode 100644 tests/mellum_trace.c
@@ -107,10 +112,92 @@ index 15159fba..e769ef3a 100644
  	rm -f tests/test_qwen4_ngram_state
  	rm -f tests/test_web_recovery
 diff --git a/ds4.c b/ds4.c
-index 8d24cb43..2bdf242e 100644
+index 8d24cb43..05a3e37f 100644
 --- a/ds4.c
 +++ b/ds4.c
-@@ -60459,6 +60459,319 @@ static bool qwen4_graph_moe(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds
+@@ -17471,6 +17471,9 @@ typedef enum {
+     MELLUM_REQ_TAG,         /* index = sliding layer: int32 position tag per ring slot (K and V rows share it) */
+     MELLUM_REQ_SCRATCH,     /* index = mellum_scratch_id */
+     MELLUM_REQ_LOGITS,
++    MELLUM_REQ_FRONTIER_K,  /* index = sliding layer: the ring's K, V and tags as the last sync left them */
++    MELLUM_REQ_FRONTIER_V,
++    MELLUM_REQ_FRONTIER_TAG,
+ } mellum_req_kind;
+ 
+ typedef enum {
+@@ -17494,7 +17497,7 @@ typedef struct {
+     uint64_t bytes;
+ } mellum_req;
+ 
+-#define MELLUM_MAX_REQS (3u * DS4_MAX_LAYER + MELLUM_SCRATCH_COUNT + 1u)
++#define MELLUM_MAX_REQS (6u * DS4_MAX_LAYER + MELLUM_SCRATCH_COUNT + 1u)
+ 
+ /* Full attention's rows kernels work in slices of 64 rows and split each row's keys
+  * into at most 64 parts (QWEN4_ATTN_MAX_SPLITS, ds4_metal.m; mellum_graph_alloc checks
+@@ -17584,6 +17587,13 @@ static uint32_t mellum_requests(uint32_t ctx, uint32_t cap_tokens, mellum_req *o
+     MELLUM_SCRATCH(MELLUM_S_PARTIAL, MELLUM_CLASS_MOE, T * n_used * E * sizeof(float));
+ #undef MELLUM_SCRATCH
+     MELLUM_ADD(MELLUM_REQ_LOGITS, MELLUM_CLASS_LOGITS, 0, (uint64_t)DS4_N_VOCAB * sizeof(float));
++    /* the rewind frontier (mellum_graph_frontier_copy): a copy of every ring, KV state like the rings */
++    for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
++        if (!ds4_mellum_layer_is_sliding(il)) continue;
++        MELLUM_ADD(MELLUM_REQ_FRONTIER_K, MELLUM_CLASS_KV, il, window * kv_dim * sizeof(uint16_t));
++        MELLUM_ADD(MELLUM_REQ_FRONTIER_V, MELLUM_CLASS_KV, il, window * kv_dim * sizeof(uint16_t));
++        MELLUM_ADD(MELLUM_REQ_FRONTIER_TAG, MELLUM_CLASS_KV, il, window * sizeof(int32_t));
++    }
+ #undef MELLUM_ADD
+     return n;
+ }
+@@ -59280,6 +59290,14 @@ typedef struct ds4_qwen4_gpu_graph {
+      * transients, and the bytes the allocator took. */
+     ds4_gpu_tensor *mellum_tag[DS4_MAX_LAYER];
+     ds4_gpu_tensor *mellum_scratch[MELLUM_SCRATCH_COUNT];
++    /* The rewind frontier: the rings, their tags and the logits where the last sync ended (at
++     * mellum_frontier_pos).  A full layer's rows below it never change while it is valid, so a rewind to
++     * exactly there restores the session at any length; a reset or a rewind below it makes it stale. */
++    ds4_gpu_tensor *mellum_frontier_k[DS4_MAX_LAYER], *mellum_frontier_v[DS4_MAX_LAYER];
++    ds4_gpu_tensor *mellum_frontier_tag[DS4_MAX_LAYER];
++    float *mellum_frontier_logits;
++    uint32_t mellum_frontier_pos;
++    bool mellum_frontier_valid;
+     uint64_t mellum_allocated_bytes;
+     /* Arena only, grown on demand: one logit row per batch member, the
+      * attention rows' cache table (one entry per row and layer) and their
+@@ -59434,8 +59452,13 @@ static bool mellum_graph_alloc(ds4_qwen4_gpu_graph *g, uint32_t ctx_cap, uint32_
+         case MELLUM_REQ_TAG: g->mellum_tag[x] = t; break;
+         case MELLUM_REQ_SCRATCH: g->mellum_scratch[x] = t; break;
+         case MELLUM_REQ_LOGITS: g->logits = t; break;
++        case MELLUM_REQ_FRONTIER_K: g->mellum_frontier_k[x] = t; break;
++        case MELLUM_REQ_FRONTIER_V: g->mellum_frontier_v[x] = t; break;
++        case MELLUM_REQ_FRONTIER_TAG: g->mellum_frontier_tag[x] = t; break;
+         }
+     }
++    g->mellum_frontier_logits = ok ? malloc((size_t)DS4_N_VOCAB * sizeof(float)) : NULL;
++    ok = ok && g->mellum_frontier_logits;
+     ok = ok && mellum_graph_forget_ring(g);
+ #if defined(__APPLE__)
+     /* the table's partials are MELLUM_ATTN_MAX_SPLITS wide; the kernels' own count decides what they need */
+@@ -59584,7 +59607,11 @@ static void qwen4_graph_free(ds4_qwen4_gpu_graph *g) {
+         ds4_gpu_tensor_free(g->snap0_lin_state[il]);
+         ds4_gpu_tensor_free(g->snap0_lin_hist[il]);
+         ds4_gpu_tensor_free(g->mellum_tag[il]);
++        ds4_gpu_tensor_free(g->mellum_frontier_k[il]);
++        ds4_gpu_tensor_free(g->mellum_frontier_v[il]);
++        ds4_gpu_tensor_free(g->mellum_frontier_tag[il]);
+     }
++    free(g->mellum_frontier_logits);
+     for (uint32_t i = 0; i < MELLUM_SCRATCH_COUNT; i++) ds4_gpu_tensor_free(g->mellum_scratch[i]);
+     free(g->host_logits);
+     memset(g, 0, sizeof(*g));
+@@ -59924,6 +59951,7 @@ static void qwen4_graph_reset(ds4_qwen4_gpu_graph *g) {
+     g->snap0_valid = false;
+     g->snap_after_first = false;
+     g->snap_after_second = false;
++    g->mellum_frontier_valid = false;
+     if (ds4_model_is_mellum()) (void)mellum_graph_forget_ring(g);
+ }
+ 
+@@ -60459,6 +60487,319 @@ static bool qwen4_graph_moe(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds
      return ok;
  }
  
@@ -430,7 +517,7 @@ index 8d24cb43..2bdf242e 100644
  /* host side: embedding rows tiled into R and the PLE n-gram gather */
  static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds4_weights *w,
                                       const int *tokens, uint32_t T) {
-@@ -60512,19 +60825,15 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
+@@ -60512,19 +60853,15 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
  static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds4_weights *w,
                                         const int *tokens, uint32_t T, float *logits_out, bool all_rows) {
      if (!g || T == 0 || T > g->cap_tokens || g->pos + T > g->ctx_cap) return false;
@@ -453,7 +540,49 @@ index 8d24cb43..2bdf242e 100644
      const uint32_t pos0 = g->pos;
      const uint32_t n_trunk = DS4_N_LAYER - DS4_N_NEXTN_PREDICT;
      const uint32_t hc_dim = DS4_N_EMBD * DS4_N_HC;
-@@ -66500,21 +66809,10 @@ static bool ds4_session_greedy_splitkv_replay_exact(
+@@ -60737,6 +61074,33 @@ static bool qwen4_graph_state_copy0(ds4_qwen4_gpu_graph *g, bool save) {
+                                       &g->snap0_pos, &g->snap0_mrope_delta);
+ }
+ 
++/* Mellum's rewind frontier: save copies every ring (K, V and tags) to the frontier at the graph's position, restore
++ * copies them back and returns the graph there.  The logits are the session's, copied by the caller. */
++static bool mellum_graph_frontier_copy(ds4_qwen4_gpu_graph *g, bool save) {
++    const uint64_t ring_bytes = (uint64_t)DS4_N_SWA * DS4_N_HEAD_KV * DS4_N_HEAD_DIM * sizeof(uint16_t);
++    const uint64_t tag_bytes = (uint64_t)DS4_N_SWA * sizeof(int32_t);
++    if (!glm_graph_begin_commands_if_needed()) return false;
++    bool ok = true;
++    for (uint32_t il = 0; il < DS4_N_LAYER && ok; il++) {
++        if (!ds4_mellum_layer_is_sliding(il)) continue;
++        ds4_gpu_tensor *live[3] = { g->layer_k_cache[il], g->layer_v_cache[il], g->mellum_tag[il] };
++        ds4_gpu_tensor *copy[3] = { g->mellum_frontier_k[il], g->mellum_frontier_v[il], g->mellum_frontier_tag[il] };
++        for (int i = 0; i < 3 && ok; i++)
++            ok = ds4_gpu_tensor_copy(save ? copy[i] : live[i], 0, save ? live[i] : copy[i], 0,
++                                     i < 2 ? ring_bytes : tag_bytes) != 0;
++    }
++    if (!ds4_gpu_end_commands()) ok = false;
++    if (save) {
++        g->mellum_frontier_pos = g->pos;
++        g->mellum_frontier_valid = ok;
++    } else if (ok) {
++        g->pos = g->mellum_frontier_pos;
++    } else {
++        g->mellum_frontier_valid = false;
++    }
++    return ok;
++}
++
+ /* A rejected draft returns to the state the verify snapshotted after row 0,
+  * and that snapshot is a complete copy: swap the live and snapshot buffers
+  * instead of copying 36 layers of recurrent state back through the GPU.
+@@ -62077,6 +62441,7 @@ struct ds4_session {
+     token_vec checkpoint;
+     ds4_vision_identity *checkpoint_images;
+     size_t checkpoint_image_count;
++    int test_rewind_frontier;   /* ds4_session_set_test_rewind_frontier; 0 on a real session */
+     const ds4_vision_span *sync_images;
+     size_t sync_image_count;
+     token_vec greedy_splitkv_segment;
+@@ -66500,21 +66865,10 @@ static bool ds4_session_greedy_splitkv_replay_exact(
  }
  #endif
  
@@ -477,7 +606,7 @@ index 8d24cb43..2bdf242e 100644
          if (ds4_session_eval(s, token, err, errlen) != 0) return -1;
          return ds4_session_argmax(s);
      }
-@@ -77479,7 +77777,6 @@ static int ds4_session_sync_lockstep(ds4_session *s, const ds4_tokens *prompt,
+@@ -77479,7 +77833,6 @@ static int ds4_session_sync_lockstep(ds4_session *s, const ds4_tokens *prompt,
   * once its matching prefill completes, surfacing worker-side failures
   * here instead of as a gate timeout mid-decode. */
  int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t errlen) {
@@ -485,7 +614,7 @@ index 8d24cb43..2bdf242e 100644
  #ifndef DS4_NO_GPU
      if (s) s->dspark_rewind_end = 0;
  #endif
-@@ -77577,7 +77874,6 @@ int ds4_session_sync_multimodal(
+@@ -77577,7 +77930,6 @@ int ds4_session_sync_multimodal(
          size_t image_count,
          char *err,
          size_t errlen) {
@@ -493,7 +622,17 @@ index 8d24cb43..2bdf242e 100644
      if (!s || !prompt || (image_count != 0 && !images)) {
          snprintf(err, errlen, "invalid multimodal prompt");
          return 1;
-@@ -80095,7 +80391,6 @@ static int ds4_session_eval_probe_tp(ds4_session *s, int token, bool probe_mtp,
+@@ -77738,6 +78090,9 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
+         if (prefill_rc != 0) return prefill_rc;
+         s->checkpoint_valid = true;
+         s->mtp_draft_valid = false;
++        /* Mellum: where a sync ends is where a next request diverges from this one's answer */
++        if (ds4_model_is_mellum() && mellum_graph_frontier_copy(&s->qwen4_graph, true))
++            memcpy(s->qwen4_graph.mellum_frontier_logits, s->logits, (size_t)DS4_N_VOCAB * sizeof(float));
+         return 0;
+     }
+ #endif
+@@ -80095,7 +80450,6 @@ static int ds4_session_eval_probe_tp(ds4_session *s, int token, bool probe_mtp,
  }
  
  int ds4_session_eval(ds4_session *s, int token, char *err, size_t errlen) {
@@ -501,7 +640,7 @@ index 8d24cb43..2bdf242e 100644
      bool probe_mtp = true;
  #ifndef DS4_NO_GPU
      if (s && s->engine && s->engine->support_kind == DS4_SUPPORT_DSPARK) {
-@@ -82472,7 +82767,6 @@ static bool qwen4_batch_spec_next(const ds4_engine *e) {
+@@ -82472,7 +82826,6 @@ static bool qwen4_batch_spec_next(const ds4_engine *e) {
  int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count,
                                                 int (*accepted)[2], int *n_accepted,
                                                 char *err, size_t errlen) {
@@ -509,7 +648,7 @@ index 8d24cb43..2bdf242e 100644
      if (!items || count <= 0 || !accepted || !n_accepted) {
          if (err && errlen) snprintf(err, errlen, "empty speculative decode batch");
          return 1;
-@@ -82660,7 +82954,6 @@ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count
+@@ -82660,7 +83013,6 @@ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count
  
  int ds4_sessions_eval_batch(ds4_decode_item *items, int count,
                              char *err, size_t errlen) {
@@ -517,7 +656,7 @@ index 8d24cb43..2bdf242e 100644
      if (!items || count <= 0) {
          if (err && errlen) snprintf(err, errlen, "empty decode batch");
          return 1;
-@@ -82740,7 +83033,6 @@ int ds4_sessions_eval_batch_with_prefill(
+@@ -82740,7 +83092,6 @@ int ds4_sessions_eval_batch_with_prefill(
          const ds4_tokens *prefill_prompt,
          char *err,
          size_t errlen) {
@@ -525,7 +664,7 @@ index 8d24cb43..2bdf242e 100644
      if (!items || count <= 0 || !prefill_session || !prefill_prompt ||
          !prefill_session->engine) {
          if (err && errlen) snprintf(err, errlen, "invalid mixed model batch");
-@@ -87151,7 +87443,6 @@ static int ds4_session_eval_speculative_argmax_impl(
+@@ -87151,7 +87502,6 @@ static int ds4_session_eval_speculative_argmax_impl(
          bool ignore_eos, ds4_think_mode think_mode,
          int *accepted, int accepted_cap,
          char *err, size_t errlen) {
@@ -533,7 +672,7 @@ index 8d24cb43..2bdf242e 100644
      if (!s || max_tokens <= 0 || accepted_cap <= 0) return 0;
      if (!s->checkpoint_valid) {
          payload_set_err(err, errlen, "speculative decode requires a synchronized checkpoint");
-@@ -88027,7 +88318,6 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
+@@ -88027,7 +88377,6 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
                                   float top_p, float min_p, uint64_t *rng,
                                   int *accepted, int accepted_cap,
                                   char *err, size_t errlen) {
@@ -541,7 +680,64 @@ index 8d24cb43..2bdf242e 100644
      if (temperature <= 0.0f) {
          return ds4_session_eval_speculative_argmax(
              s, first_token, max_tokens, eos_token,
-@@ -88487,4 +88777,55 @@ bool ds4_test_dspark_prefix_capture(ds4_engine *engine, const ds4_tokens *prompt
+@@ -88345,7 +88694,33 @@ void ds4_session_rewind(ds4_session *s, int pos) {
+     bool state_ok = false;
+ #ifndef DS4_NO_GPU
+ #ifdef DS4_HAS_QWEN4_GPU
+-    if (s->checkpoint_valid && ds4_session_is_qwen4(s)) {
++    if (s->checkpoint_valid && ds4_model_is_mellum()) {
++        /* Mellum: one token back keeps both caches.  A full layer's rows past
++         * pos are simply rewritten by the next eval; a sliding layer's ring was
++         * read before the dropped row was committed to it, so the slot that row
++         * overwrote held position pos - window, which no query at pos or later
++         * reads.  Further back the ring has lost positions the next query needs:
++         * reset, and the next eval replays the kept tokens, which gives the same
++         * bytes because an exact prefill chunk equals its decode steps; where the
++         * last sync ended, the frontier's rings and logits are restored instead
++         * (tests/ds4_test.c --mellum-rewind). */
++        ds4_qwen4_gpu_graph *g = &s->qwen4_graph;
++        if (g->pos == (uint32_t)s->checkpoint.len && pos + 1 == s->checkpoint.len) {
++            g->pos = (uint32_t)pos;
++            s->qwen4_rewound = false;
++        } else if (g->pos == (uint32_t)s->checkpoint.len && g->mellum_frontier_valid &&
++                   (uint32_t)pos == g->mellum_frontier_pos && mellum_graph_frontier_copy(g, false)) {
++            /* where the last sync ended: the rings and logits saved there (mellum_graph_frontier_copy) */
++            memcpy(s->logits, g->mellum_frontier_logits, (size_t)DS4_N_VOCAB * sizeof(float));
++            s->qwen4_rewound = false;
++        } else {
++            qwen4_graph_reset(g);
++            s->qwen4_rewound = true;
++        }
++        /* below the frontier the kept rows may be replaced: its rings no longer describe them */
++        if ((uint32_t)pos < g->mellum_frontier_pos) g->mellum_frontier_valid = false;
++        state_ok = true;
++    } else if (s->checkpoint_valid && ds4_session_is_qwen4(s)) {
+         /* a verify snapshot can restore the verified block's start (the
+          * pre-verify snap0 set, kept for exact-sampling resample rewinds),
+          * its row-0 state (one token back), or its row-1 state (two back
+@@ -88408,6 +88783,21 @@ ds4_session *ds4_session_new_test_checkpoint(const int *tokens, int n) {
+     return s;
+ }
+ 
++void ds4_session_set_test_rewind_frontier(ds4_session *s, int pos) {
++    if (s) s->test_rewind_frontier = pos;
++}
++
++int ds4_session_rewind_frontier(const ds4_session *s) {
++    if (!s || !s->checkpoint_valid) return -1;
++    if (s->test_rewind_frontier > 0) return s->test_rewind_frontier;
++#ifdef DS4_HAS_QWEN4_GPU
++    const ds4_qwen4_gpu_graph *g = &s->qwen4_graph;
++    if (s->qwen4_graph_ready && g->mellum_frontier_valid && g->mellum_frontier_pos <= (uint32_t)s->checkpoint.len)
++        return (int)g->mellum_frontier_pos;
++#endif
++    return -1;
++}
++
+ void ds4_session_free_test_checkpoint(ds4_session *s) {
+     if (!s) return;
+     token_vec_free(&s->checkpoint);
+@@ -88487,4 +88877,61 @@ bool ds4_test_dspark_prefix_capture(ds4_engine *engine, const ds4_tokens *prompt
      ds4_session_free(ref);
      return ok;
  }
@@ -596,7 +792,36 @@ index 8d24cb43..2bdf242e 100644
 +    return false;
 +#endif
 +}
++/* For tests/ds4_test.c --mellum-rewind: where a qwen4-family session's graph stands (its next position). */
++bool ds4_test_session_graph_pos(ds4_session *s, uint32_t *pos) {
++    if (!s || !pos || !ds4_session_is_qwen4(s)) return false;
++    *pos = s->qwen4_graph.pos;
++    return true;
++}
  #endif
+diff --git a/ds4.h b/ds4.h
+index a0bcc2a3..a928e878 100644
+--- a/ds4.h
++++ b/ds4.h
+@@ -508,6 +508,8 @@ void ds4_session_free_test_checkpoint(ds4_session *s);
+  * token_start/row-count/fingerprint per span).  Not usable for inference. */
+ void ds4_session_set_test_images(ds4_session *s,
+                                  const ds4_vision_span *images, size_t n);
++/* Give a test checkpoint a rewind frontier (ds4_session_rewind_frontier). */
++void ds4_session_set_test_rewind_frontier(ds4_session *s, int pos);
+ int ds4_session_argmax(ds4_session *s);
+ int ds4_session_argmax_excluding(ds4_session *s, int excluded_id);
+ int ds4_session_argmax_ignoring_eos(ds4_session *s,
+@@ -630,6 +632,9 @@ bool ds4_session_rewind_speculative(ds4_session *s, int pos);
+  * Otherwise the checkpoint becomes invalid: sync the retained prefix before eval.
+  * Callers retaining images must use sync_multimodal for that rebuild. */
+ void ds4_session_rewind(ds4_session *s, int pos);
++/* The position a rewind to which restores the session exactly whatever its depth
++ * (Mellum: where the last sync ended), or -1 when there is none. */
++int ds4_session_rewind_frontier(const ds4_session *s);
+ int ds4_session_pos(ds4_session *s);
+ int ds4_session_ctx(ds4_session *s);
+ int ds4_session_prefill_cap(ds4_session *s);
 diff --git a/ds4_gpu.h b/ds4_gpu.h
 index 2965aef9..a3c25c38 100644
 --- a/ds4_gpu.h
@@ -1457,6 +1682,408 @@ index 8b375249..c4233285 100644
      out[at] = o * inv * qwen4_sigmoid(gate[at]);
  }
  
+diff --git a/tests/ds4_test.c b/tests/ds4_test.c
+index aed77309..c7f60e6b 100644
+--- a/tests/ds4_test.c
++++ b/tests/ds4_test.c
+@@ -442,6 +442,387 @@ cleanup:
+     test_restore_env("DS4_QWEN4_PREFILL_CHUNK", saved_chunk);
+ }
+ 
++/* Mellum's session allocation, on the real 2.1 GGUF (DS4_TEST_MELLUM_MODEL;
++ * skipped without it).  The allocator prints "mellum: session allocated N
++ * bytes, planned M bytes" at create; N is the sum of the bytes it requested,
++ * M the estimate the startup line reports.  They must be equal at every
++ * context, with the chunk the host passes clamped to the window, Metal's own
++ * tally of live tensors must move by N and come back, and the session must
++ * run: sync, eval and eval_argmax succeed and leave finite logits. */
++typedef struct { FILE *tmp; int saved; } test_stderr_capture;
++
++static test_stderr_capture test_stderr_begin(void) {
++    test_stderr_capture c = {0};
++    fflush(stderr);
++    c.tmp = tmpfile();
++    TEST_ASSERT(c.tmp != NULL);
++    c.saved = dup(2);
++    TEST_ASSERT(c.saved >= 0);
++    TEST_ASSERT(dup2(fileno(c.tmp), 2) >= 0);
++    return c;
++}
++
++/* Restores stderr and returns what was written (NUL-terminated, caller frees). */
++static char *test_stderr_end(test_stderr_capture c) {
++    fflush(stderr);
++    dup2(c.saved, 2);
++    close(c.saved);
++    const long n = ftell(c.tmp);
++    char *text = xmalloc((size_t)(n > 0 ? n : 0) + 1);
++    rewind(c.tmp);
++    const size_t got = n > 0 ? fread(text, 1, (size_t)n, c.tmp) : 0;
++    text[got] = '\0';
++    fclose(c.tmp);
++    return text;
++}
++
++/* Metal's own count of live tensor bytes (its allocator's tally, not the
++ * session's), through the memory report, at the report's 0.01 MiB resolution. */
++static double test_live_tensor_mib(void) {
++    test_stderr_capture c = test_stderr_begin();
++    ds4_gpu_print_memory_report("mellum-session");
++    char *text = test_stderr_end(c);
++    double mib = -1.0;
++    const char *p = strstr(text, "runtime tensors live ");
++    if (p) sscanf(p, "runtime tensors live %lf MiB", &mib);
++    free(text);
++    TEST_ASSERT(mib >= 0.0);
++    return mib;
++}
++
++int ds4_session_eval_argmax(ds4_session *s, int token, char *err, size_t errlen);   /* ds4.c, not in ds4.h */
++
++static bool test_capture_session_line(ds4_engine *engine, uint32_t ctx, uint64_t *allocated, uint64_t *planned) {
++    const double live0 = test_live_tensor_mib();
++    test_stderr_capture c = test_stderr_begin();
++    ds4_session *s = NULL;
++    const int rc = ds4_session_create(&s, engine, (int)ctx);
++    char *text = test_stderr_end(c);
++    TEST_ASSERT(rc == 0 && s != NULL);
++    unsigned long long a = 0, p = 0;
++    const char *line = strstr(text, "mellum: session allocated ");
++    const bool found = line && sscanf(line, "mellum: session allocated %llu bytes, planned %llu bytes", &a, &p) == 2;
++    free(text);
++    const double live1 = test_live_tensor_mib();
++    TEST_ASSERT(fabs((live1 - live0) - (double)a / 1048576.0) < 0.015);
++    /* the session runs: the first tokens of a chat prompt (<|im_start|>, "user", "\n") */
++    {
++        ds4_tokens prompt = {0};
++        static const int ids[] = {27, 1397, 233};
++        for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) ds4_tokens_push(&prompt, ids[i]);
++        char err[256] = {0};
++        float *logits = malloc(98304u * sizeof(float));
++        TEST_ASSERT(logits != NULL);
++        TEST_ASSERT(ds4_session_sync(s, &prompt, err, sizeof(err)) == 0);
++        TEST_ASSERT(logits && ds4_session_copy_logits(s, logits, 98304) == 98304);
++        for (uint32_t i = 0; logits && i < 98304u; i++) TEST_ASSERT(isfinite(logits[i]));
++        const int top = ds4_session_argmax(s);
++        TEST_ASSERT(top >= 0 && top < 98304);
++        TEST_ASSERT(ds4_session_eval(s, top, err, sizeof(err)) == 0);
++        TEST_ASSERT(ds4_session_pos(s) == 4);
++        TEST_ASSERT(logits && ds4_session_copy_logits(s, logits, 98304) == 98304);
++        for (uint32_t i = 0; logits && i < 98304u; i++) TEST_ASSERT(isfinite(logits[i]));
++        const int next = ds4_session_argmax(s);
++        const int via_argmax = ds4_session_eval_argmax(s, next, err, sizeof(err));
++        TEST_ASSERT(via_argmax >= 0 && via_argmax < 98304 && via_argmax == ds4_session_argmax(s));
++        TEST_ASSERT(ds4_session_pos(s) == 5);
++        free(logits);
++        ds4_tokens_free(&prompt);
++    }
++    ds4_session_free(s);
++    const double live2 = test_live_tensor_mib();
++    TEST_ASSERT(fabs(live2 - live0) < 0.015);
++    *allocated = a;
++    *planned = p;
++    return found;
++}
++
++static void test_mellum_session_allocation(void) {
++    const char *model = getenv("DS4_TEST_MELLUM_MODEL");
++    if (!model || !model[0]) {
++        puts("mellum-session: DS4_TEST_MELLUM_MODEL unset, skipped");
++        return;
++    }
++    static const uint32_t ctxs[] = {20000, 65536, 131072};
++    /* the chunk arrives three ways: the host's --prefill-chunk, DS4_QWEN4_PREFILL_CHUNK, neither */
++    static const struct { const char *name; uint32_t host; const char *env; uint32_t used; } arms[] = {
++        {"default", 0, NULL, 1024}, {"host 4096", 4096, NULL, 1024}, {"env 4096", 0, "4096", 1024},
++        {"host 512", 512, NULL, 512},
++    };
++    for (size_t a = 0; a < sizeof(arms) / sizeof(arms[0]); a++) {
++        for (size_t i = 0; i < sizeof(ctxs) / sizeof(ctxs[0]); i++) {
++            if (arms[a].env) setenv("DS4_QWEN4_PREFILL_CHUNK", arms[a].env, 1);
++            ds4_engine *engine = NULL;
++            ds4_engine_options opt = {
++                .model_path = model,
++                .backend = DS4_BACKEND_METAL,
++                .context_size = (int)ctxs[i],
++                .prefill_chunk = arms[a].host,
++            };
++            TEST_ASSERT(ds4_engine_open(&engine, &opt) == 0);
++            if (!engine) { unsetenv("DS4_QWEN4_PREFILL_CHUNK"); return; }
++            TEST_ASSERT(ds4_engine_prefill_chunk(engine) == (arms[a].host ? arms[a].used : 0u));
++            uint64_t allocated = 0, planned = 0;
++            TEST_ASSERT(test_capture_session_line(engine, ctxs[i], &allocated, &planned));
++            const ds4_context_memory plan = ds4_context_memory_estimate_with_prefill_mode(
++                DS4_BACKEND_METAL, (int)ctxs[i], ds4_engine_prefill_chunk(engine), false);
++            TEST_ASSERT(planned == plan.total_bytes);
++            TEST_ASSERT(allocated == planned);
++            TEST_ASSERT(plan.prefill_cap == arms[a].used);
++            printf("mellum-session: ctx %u chunk %s allocated %llu planned %llu\n", ctxs[i],
++                   arms[a].name, (unsigned long long)allocated, (unsigned long long)planned);
++            ds4_engine_close(engine);
++            unsetenv("DS4_QWEN4_PREFILL_CHUNK");
++        }
++    }
++}
++
++/* Session rewind (DS4_TEST_MELLUM_MODEL): after a prompt of `len` tokens, decode k tokens recording each step's
++ * logits, rewind k, decode the same k again; every step's logits must equal the first pass's, word for word.  One
++ * token back keeps both caches (the sliding ring is read before a chunk is committed, so the slot the dropped row
++ * overwrote held a position no later query reads).  Further back the ring has lost what the next query needs, but
++ * a rewind to where the last sync ended (here `len`) restores the rings saved there: the graph stays at the rewound
++ * position either way.  A deeper rewind anywhere else resets (test_mellum_rewind_fresh_case). */
++bool ds4_test_session_graph_pos(ds4_session *s, uint32_t *pos);   /* ds4.c test hook */
++
++static int test_mellum_token(int i) {
++    return 40 + (int)(((uint32_t)i * 7919u) % 90000u);   /* ordinary byte-level and merge ids */
++}
++
++static void test_mellum_rewind_case(ds4_engine *engine, int len, int k) {
++    ds4_session *s = NULL;
++    TEST_ASSERT(ds4_session_create(&s, engine, 4096) == 0 && s != NULL);
++    if (!s) return;
++    ds4_tokens prompt = {0};
++    for (int i = 0; i < len; i++) ds4_tokens_push(&prompt, test_mellum_token(i));
++    char err[256] = {0};
++    float *first = malloc((size_t)k * 98304u * sizeof(float)), *again = malloc(98304u * sizeof(float));
++    TEST_ASSERT(first && again);
++    TEST_ASSERT(ds4_session_sync(s, &prompt, err, sizeof(err)) == 0);
++    for (int j = 0; j < k; j++) {
++        TEST_ASSERT(ds4_session_eval(s, test_mellum_token(len + j), err, sizeof(err)) == 0);
++        TEST_ASSERT(ds4_session_copy_logits(s, first + (size_t)j * 98304u, 98304) == 98304);
++    }
++    ds4_session_rewind(s, len);
++    TEST_ASSERT(ds4_session_pos(s) == len);
++    uint32_t graph_pos = UINT32_MAX;
++    TEST_ASSERT(ds4_test_session_graph_pos(s, &graph_pos));
++    TEST_ASSERT(graph_pos == (uint32_t)len);   /* kept (k == 1) or restored from the sync's end, not reset */
++    uint64_t diff = 0;
++    for (int j = 0; j < k; j++) {
++        TEST_ASSERT(ds4_session_eval(s, test_mellum_token(len + j), err, sizeof(err)) == 0);
++        TEST_ASSERT(ds4_session_copy_logits(s, again, 98304) == 98304);
++        for (uint32_t i = 0; i < 98304u; i++) diff += memcmp(&again[i], &first[(size_t)j * 98304u + i], sizeof(float)) != 0;
++    }
++    TEST_ASSERT(diff == 0);
++    TEST_ASSERT(ds4_session_pos(s) == len + k);
++    printf("mellum-rewind: prompt %d, k %d: graph at %u after the rewind (%s); %llu of %d logit words differ from the "
++           "straight decode\n", len, k, graph_pos, k == 1 ? "both caches kept" : "rings restored from the sync's end",
++           (unsigned long long)diff, k * 98304);
++    free(first); free(again);
++    ds4_tokens_free(&prompt);
++    ds4_session_free(s);
++}
++
++static void test_mellum_frontier_case(ds4_engine *engine, int len, int k) {
++    float *at_sync = malloc(98304u * sizeof(float)), *rewound = malloc(98304u * sizeof(float));
++    float *next = malloc(98304u * sizeof(float)), *fresh = malloc(98304u * sizeof(float));
++    TEST_ASSERT(at_sync && rewound && next && fresh);
++    char err[256] = {0};
++    ds4_tokens prompt = {0}, ext = {0};
++    for (int i = 0; i < len; i++) ds4_tokens_push(&prompt, test_mellum_token(i));
++    for (int i = 0; i < len + 5; i++) ds4_tokens_push(&ext, i < len ? test_mellum_token(i) : test_mellum_token(50000 + i));
++    ds4_session *s = NULL;
++    TEST_ASSERT(ds4_session_create(&s, engine, 4096) == 0 && s != NULL);
++    if (!s || !at_sync || !rewound || !next || !fresh) return;
++    TEST_ASSERT(ds4_session_sync(s, &prompt, err, sizeof(err)) == 0);
++    TEST_ASSERT(ds4_session_copy_logits(s, at_sync, 98304) == 98304);
++    for (int j = 0; j < k; j++) TEST_ASSERT(ds4_session_eval(s, test_mellum_token(len + j), err, sizeof(err)) == 0);
++    ds4_session_rewind(s, len);
++    uint32_t graph_pos = UINT32_MAX;
++    TEST_ASSERT(ds4_test_session_graph_pos(s, &graph_pos) && graph_pos == (uint32_t)len);
++    TEST_ASSERT(ds4_session_copy_logits(s, rewound, 98304) == 98304);
++    TEST_ASSERT(ds4_session_sync(s, &ext, err, sizeof(err)) == 0);
++    TEST_ASSERT(ds4_session_copy_logits(s, next, 98304) == 98304);
++    /* the sibling: one back below the frontier at len + 5 keeps the caches, a different token goes there, and two
++     * more; the rewind to len + 5 is then two back from somewhere the frontier no longer describes */
++    ds4_session_rewind(s, len + 4);
++    TEST_ASSERT(ds4_session_eval(s, test_mellum_token(70000), err, sizeof(err)) == 0);
++    TEST_ASSERT(ds4_session_eval(s, test_mellum_token(70001), err, sizeof(err)) == 0);
++    TEST_ASSERT(ds4_session_eval(s, test_mellum_token(70002), err, sizeof(err)) == 0);
++    ds4_session_rewind(s, len + 5);
++    uint32_t stale_pos = UINT32_MAX;
++    TEST_ASSERT(ds4_test_session_graph_pos(s, &stale_pos) && stale_pos == 0);
++    ds4_session_free(s);
++    s = NULL;
++    TEST_ASSERT(ds4_session_create(&s, engine, 4096) == 0 && s != NULL);
++    if (!s) return;
++    TEST_ASSERT(ds4_session_sync(s, &prompt, err, sizeof(err)) == 0);
++    TEST_ASSERT(ds4_session_sync(s, &ext, err, sizeof(err)) == 0);
++    TEST_ASSERT(ds4_session_copy_logits(s, fresh, 98304) == 98304);
++    uint64_t d_sync = 0, d_next = 0;
++    for (uint32_t i = 0; i < 98304u; i++) {
++        d_sync += memcmp(&rewound[i], &at_sync[i], sizeof(float)) != 0;
++        d_next += memcmp(&next[i], &fresh[i], sizeof(float)) != 0;
++    }
++    printf("mellum-rewind: sync %d, eval %d, rewind to %d: graph at %u, %llu of 98304 logit words differ from the "
++           "sync's; the next sync of 5 differs in %llu from a fresh session's; a stale frontier resets (graph at %u)\n",
++           len, k, len, graph_pos, (unsigned long long)d_sync, (unsigned long long)d_next, stale_pos);
++    TEST_ASSERT(d_sync == 0);
++    TEST_ASSERT(d_next == 0);
++    free(at_sync); free(rewound); free(next); free(fresh);
++    ds4_tokens_free(&prompt); ds4_tokens_free(&ext);
++    ds4_session_free(s);
++}
++
++/* The exact-prefill diagnostic (DS4_TEST_MELLUM_MODEL): with DS4_MELLUM_EXACT_PREFILL=1 set when the session is
++ * created, a prefill of 1,100 tokens (chunks of 1,024 and 76 rows) runs the exact paths, so its logits equal those
++ * of the same tokens decoded one by one, byte for byte.  Without it the 1,024-row chunk takes the batched and tiled
++ * paths and they do not (the sibling, which shows the switch is what makes the difference). */
++static bool test_mellum_prefill_logits(ds4_engine *engine, bool exact, bool decode, float *logits) {
++    if (exact) setenv("DS4_MELLUM_EXACT_PREFILL", "1", 1);
++    else unsetenv("DS4_MELLUM_EXACT_PREFILL");
++    ds4_session *s = NULL;
++    const bool created = ds4_session_create(&s, engine, 4096) == 0 && s != NULL;
++    unsetenv("DS4_MELLUM_EXACT_PREFILL");   /* read once, at session start */
++    if (!created) return false;
++    ds4_tokens prompt = {0};
++    char err[256] = {0};
++    bool ok = true;
++    for (int i = 0; i < (decode ? 1 : 1100); i++) ds4_tokens_push(&prompt, test_mellum_token(i));
++    ok = ds4_session_sync(s, &prompt, err, sizeof(err)) == 0;
++    for (int i = 1; ok && decode && i < 1100; i++) ok = ds4_session_eval(s, test_mellum_token(i), err, sizeof(err)) == 0;
++    ok = ok && ds4_session_copy_logits(s, logits, 98304) == 98304;
++    ds4_tokens_free(&prompt);
++    ds4_session_free(s);
++    return ok;
++}
++
++static void test_mellum_exact_prefill(void) {
++    const char *model = getenv("DS4_TEST_MELLUM_MODEL");
++    if (!model || !model[0]) {
++        puts("mellum-exact-prefill: DS4_TEST_MELLUM_MODEL unset, skipped");
++        return;
++    }
++    ds4_engine *engine = NULL;
++    ds4_engine_options opt = { .model_path = model, .backend = DS4_BACKEND_METAL, .context_size = 4096 };
++    TEST_ASSERT(ds4_engine_open(&engine, &opt) == 0 && engine != NULL);
++    if (!engine) return;
++    float *dec = malloc(98304u * sizeof(float)), *exact = malloc(98304u * sizeof(float)), *fast = malloc(98304u * sizeof(float));
++    TEST_ASSERT(dec && exact && fast);
++    TEST_ASSERT(test_mellum_prefill_logits(engine, false, true, dec));
++    TEST_ASSERT(test_mellum_prefill_logits(engine, true, false, exact));
++    TEST_ASSERT(test_mellum_prefill_logits(engine, false, false, fast));
++    uint64_t d_exact = 0, d_fast = 0;
++    for (uint32_t i = 0; i < 98304u; i++) {
++        d_exact += memcmp(&exact[i], &dec[i], sizeof(float)) != 0;
++        d_fast += memcmp(&fast[i], &dec[i], sizeof(float)) != 0;
++    }
++    printf("mellum-exact-prefill: 1,100-token prefill vs decode: %llu of 98304 logit words differ with "
++           "DS4_MELLUM_EXACT_PREFILL=1, %llu without\n", (unsigned long long)d_exact, (unsigned long long)d_fast);
++    TEST_ASSERT(d_exact == 0);
++    TEST_ASSERT(d_fast > 0);
++    free(dec); free(exact); free(fast);
++    ds4_engine_close(engine);
++}
++
++static void test_mellum_rewind(void) {
++    const char *model = getenv("DS4_TEST_MELLUM_MODEL");
++    if (!model || !model[0]) {
++        puts("mellum-rewind: DS4_TEST_MELLUM_MODEL unset, skipped");
++        return;
++    }
++    ds4_engine *engine = NULL;
++    ds4_engine_options opt = { .model_path = model, .backend = DS4_BACKEND_METAL, .context_size = 4096 };
++    TEST_ASSERT(ds4_engine_open(&engine, &opt) == 0 && engine != NULL);
++    if (!engine) return;
++    test_mellum_rewind_case(engine, 500, 1);    /* inside the window */
++    test_mellum_rewind_case(engine, 1100, 1);   /* past it: the ring has wrapped */
++    test_mellum_rewind_case(engine, 1100, 3);   /* deeper than the ring allows: back to the sync's end */
++    test_mellum_frontier_case(engine, 1100, 40);
++    ds4_engine_close(engine);
++}
++
++#if defined(__APPLE__)
++#include "mellum_moe_ref.inc"
++
++bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void **map,
++                                 uint64_t *router, uint64_t *gate, uint64_t *up, uint64_t *down);
++bool ds4_test_mellum_moe(ds4_engine *engine, uint32_t layer, const float *x, uint32_t T,
++                         float *out, float *out1, int32_t *selected, float *weights);
++
++static float test_mellum_frand(uint32_t *state) {
++    *state ^= *state << 13;
++    *state ^= *state >> 17;
++    *state ^= *state << 5;
++    return ((float)(*state & 0xffffffu) / 8388608.0f) - 1.0f;
++}
++
++/* mellum_graph_moe on the real model's layers (DS4_TEST_MELLUM_MODEL): the same 64 rows through layers 0, 13 and
++ * 27 against the double reference (tests/mellum_moe_ref.inc), whose weights are found by their GGUF names and not
++ * through the layer struct the driver reads, so a swapped or misbound tensor shows.  Row 0 alone (T=1) must equal row 0 of the 64-row
++ * run bit for bit. */
++static void test_mellum_moe_real(void) {
++    const char *model = getenv("DS4_TEST_MELLUM_MODEL");
++    if (!model || !model[0]) {
++        puts("mellum-moe: DS4_TEST_MELLUM_MODEL unset, skipped");
++        return;
++    }
++    enum { T = 64 };
++    ds4_engine *engine = NULL;
++    ds4_engine_options opt = { .model_path = model, .backend = DS4_BACKEND_METAL, .context_size = 2048, .prefill_chunk = T };
++    TEST_ASSERT(ds4_engine_open(&engine, &opt) == 0 && engine != NULL);
++    if (!engine) return;
++    float *x = malloc((uint64_t)T * MREF_E * sizeof(float));
++    float *out = malloc((uint64_t)T * MREF_E * sizeof(float));
++    float *out1 = malloc((uint64_t)MREF_E * sizeof(float));
++    int32_t sel[T][MREF_USED];
++    float w[T][MREF_USED];
++    mref_t *ref = malloc(sizeof(*ref));
++    TEST_ASSERT(x && out && out1 && ref);
++    static const uint32_t layers[] = { 0, 13, 27 };
++    static const uint32_t rows[] = { 0, 7, 31, 63 };
++    uint32_t rng = 0x1234567u;
++    double worst_out = 0.0, worst_w = 0.0;
++    uint32_t sel_bad = 0;
++    for (size_t li = 0; x && li < sizeof(layers) / sizeof(layers[0]); li++) {
++        const uint32_t il = layers[li];
++        mref_weights mw = { 0 };
++        const void *map = NULL;
++        TEST_ASSERT(ds4_test_mellum_moe_weights(engine, il, &map, &mw.router, &mw.gate, &mw.up, &mw.down));
++        mw.base = map;
++        if (!map) break;
++        for (uint64_t i = 0; i < (uint64_t)T * MREF_E; i++) x[i] = 1.7f * test_mellum_frand(&rng);
++        TEST_ASSERT(ds4_test_mellum_moe(engine, il, x, T, out, out1, &sel[0][0], &w[0][0]));
++        for (size_t ri = 0; ri < sizeof(rows) / sizeof(rows[0]); ri++) {
++            const uint32_t r = rows[ri];
++            mref_moe_row(&mw, x + (uint64_t)r * MREF_E, ref);
++            double scale = 1e-30, d = 0.0;
++            for (uint32_t i = 0; i < MREF_E; i++) scale = fmax(scale, fabs(ref->out[i]));
++            for (uint32_t i = 0; i < MREF_E; i++) {
++                const double e = fabs((double)out[(uint64_t)r * MREF_E + i] - ref->out[i]);
++                d = isfinite(e) ? fmax(d, e) : 1e30;   /* a non-finite word fails the tolerance */
++            }
++            worst_out = fmax(worst_out, d / scale);
++            for (uint32_t k = 0; k < MREF_USED; k++) {
++                sel_bad += sel[r][k] != ref->sel[k];
++                worst_w = fmax(worst_w, fabs((double)w[r][k] - ref->w[k]));
++            }
++        }
++        TEST_ASSERT(memcmp(out1, out, MREF_E * sizeof(float)) == 0);
++    }
++    printf("mellum-moe: layers 0/13/27, 4 of 64 rows each vs double: selected differ %u, weights %.2e, output %.2e; "
++           "T=1 equals row 0 of T=64 bit for bit\n", sel_bad, worst_w, worst_out);
++    TEST_ASSERT(sel_bad == 0);
++    TEST_ASSERT(worst_w <= 2.5e-6);
++    TEST_ASSERT(worst_out <= 1e-5);
++    free(x); free(out); free(out1); free(ref);
++    ds4_engine_close(engine);
++}
++#else
++static void test_mellum_moe_real(void) { puts("mellum-moe: Metal only, skipped"); }
++#endif
++
+ static void test_qwen_restore_reused_session(void) {
+     ds4_engine *engine = test_get_engine(false);
+     if (!engine || !ds4_engine_is_qwen4(engine) || !test_env_bool("DS4_TEST_GLM_MTP")) {
+@@ -7324,6 +7705,9 @@ typedef struct {
+ static const ds4_test_entry test_entries[] = {
+ #ifndef DS4_NO_GPU
+     {"--qwen4-prefill-checkpoints", "qwen4-prefill-checkpoints", "Qwen chunk checkpoints restore matching logits and state", test_qwen_prefill_checkpoints},
++    {"--mellum-session", "mellum-session", "Mellum session allocation equals its plan (DS4_TEST_MELLUM_MODEL)", test_mellum_session_allocation},
++    {"--mellum-rewind", "mellum-rewind", "Mellum session rewind: one token or to the last sync's end keeps the caches, elsewhere deeper replays; logits equal a straight decode (DS4_TEST_MELLUM_MODEL)", test_mellum_rewind},
++    {"--mellum-moe", "mellum-moe", "Mellum MoE driver on the real model's layers against a double reference (DS4_TEST_MELLUM_MODEL)", test_mellum_moe_real},
+     {"--qwen4-restore-reuse", "qwen4-restore-reuse", "Qwen restore discards old verifier state and rejects truncated payloads", test_qwen_restore_reused_session},
+     {"--session-snapshot", "session-snapshot", "session snapshot and recurrent-state round trip", test_session_snapshot_roundtrip},
+     {"--session-rewind", "session-rewind", "Qwen3.8 rewind by snapshot restore and by replay", test_session_rewind_replay},
 diff --git a/tests/mellum_moe_ref.inc b/tests/mellum_moe_ref.inc
 new file mode 100644
 index 00000000..8fbcccff
