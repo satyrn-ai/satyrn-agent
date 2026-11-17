@@ -1,7 +1,7 @@
 From b9770115197cdfe806e804b28cdcd046bfc2fa51 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 17 Nov 2026 07:11:26 -0500
-Subject: [PATCH 2/2] mellum: tokenizer, chat and thinking
+Subject: [PATCH 2/3] mellum: tokenizer, chat and thinking
 
 The mellum2 pre-tokenizer and its generated Unicode classes, the corpus
 markers classed as content, <think> and </think> as the reasoning boundary,
