@@ -461,6 +461,7 @@ git add patches/mellum && git commit -m "feat(ds4): carry the Mellum tokenizer, 
 - Create: `patches/mellum/0003-mellum-exact-q8-metal-graph-and-rewind.patch`
 - Reference: `ds4_mellum_graph_alloc.inc`, `ds4_mellum_graph.inc`, `ds4_mellum_test_hooks.inc`, `metal/mellum.metal`, guarded hunks in `metal/qwen4.metal`, `ds4_gpu.h`, `ds4_metal.m`
 - Test: `tests/test_mellum_kernels.c`, `tests/mellum_trace`
+- Note: the `DS4_MELLUM_EXACT_PREFILL` diagnostic (`73544c91`) and its long-prefill test land with Task 14, because the diagnostic disables that task's fast-path thresholds and cannot exist before them.
 
 **Interfaces:**
 - Consumes: patch 0002.
@@ -491,11 +492,15 @@ git add patches/mellum && git commit -m "feat(ds4): run an exact Mellum Q8 Metal
 
 **Interfaces:**
 - Consumes: task 12 in `.ds4/tree`.
-- Produces: session rewind and frontier with zero differing logit words; stripped persistence behavior recorded for task 18.
+- Produces: session rewind and frontier with zero differing logit words; a deep rewind that cannot keep the caches resets and replays; stripped persistence behavior recorded for task 18.
 
 - [ ] **Step 1: Implement rewind and frontier**
 
 Add the hooks and host changes to `.ds4/tree`.
+
+- [ ] **Step 1b: Cover the replay path**
+
+Add `test_mellum_rewind_replay_case` to `tests/ds4_test.c` and call it with `(31, 3, 32)` and `(1100, 40, 1040)`: after a rewind that cannot keep the caches the graph resets, and the next eval equals a fresh session synced to the kept tokens. At this patch the straight-run comparison also holds; Task 14 keeps only the fresh equality.
 
 - [ ] **Step 2: Build and run the rewind check**
 

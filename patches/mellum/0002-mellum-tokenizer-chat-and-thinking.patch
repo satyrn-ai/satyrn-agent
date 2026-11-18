@@ -1,4 +1,4 @@
-From b9770115197cdfe806e804b28cdcd046bfc2fa51 Mon Sep 17 00:00:00 2001
+From 2cbece771faee76b182b29264d90c3ad1ba01f01 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 17 Nov 2026 07:11:26 -0500
 Subject: [PATCH 2/3] mellum: tokenizer, chat and thinking
@@ -20,13 +20,15 @@ DS4_TEST_MELLUM_MODEL.
 
 Upstream: not offered, fork only
 Retire-when: upstream renders and stops Mellum 2.1 chats
-Carried-commits: 70fb4d5b fd467521 b5f05300 5cdf14cd 835c6b08 d1a98ca5 0df16204 81050b37 05cddb2b 2eda52f8 88cb9ac2 d3566697 77b6ac83 c8f8198f aef990e9
+Carried-commits: 70fb4d5b fd467521 b5f05300 5cdf14cd 835c6b08 d1a98ca5 0df16204 81050b37 05cddb2b 2eda52f8 88cb9ac2 d3566697 77b6ac83 c8f8198f aef990e9 9710f503 006983dc 19054eb5 6b377f20 87c2b546 0d5f2e73
 ---
- Makefile                            |  17 +-
+ Makefile                            |  18 +-
  ds4.c                               | 317 +++++++++-
  ds4.h                               |  16 +
+ ds4_cli.c                           |  12 +
  ds4_mellum_unicode.inc              | 903 ++++++++++++++++++++++++++++
  ds4_prompt_prefix.h                 |  18 +-
+ tests/gen_mellum_chat_ids.py        |  96 +++
  tests/gen_mellum_tokenizer_cases.py | 138 +++++
  tests/gen_mellum_unicode.py         | 336 +++++++++++
  tests/mellum_chat_ids.inc           | 223 +++++++
@@ -34,8 +36,9 @@ Carried-commits: 70fb4d5b fd467521 b5f05300 5cdf14cd 835c6b08 d1a98ca5 0df16204 
  tests/mellum_tool_text.h            |  95 +++
  tests/test_mellum_config.c          | 471 +++++++++++++++
  tests/test_mellum_tokenizer.c       | 137 +++++
- 12 files changed, 2770 insertions(+), 32 deletions(-)
+ 14 files changed, 2879 insertions(+), 32 deletions(-)
  create mode 100644 ds4_mellum_unicode.inc
+ create mode 100644 tests/gen_mellum_chat_ids.py
  create mode 100644 tests/gen_mellum_tokenizer_cases.py
  create mode 100644 tests/gen_mellum_unicode.py
  create mode 100644 tests/mellum_chat_ids.inc
@@ -44,7 +47,7 @@ Carried-commits: 70fb4d5b fd467521 b5f05300 5cdf14cd 835c6b08 d1a98ca5 0df16204 
  create mode 100644 tests/test_mellum_tokenizer.c
 
 diff --git a/Makefile b/Makefile
-index 108f27e9..15159fba 100644
+index 108f27e9..ffc0cb4f 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -746,7 +746,7 @@ test-qwen4-cuda: tests/test_qwen4_cuda
@@ -65,12 +68,13 @@ index 108f27e9..15159fba 100644
  	$(CC) $(CFLAGS) -Wno-unused-function -DDS4_NO_GPU -c -o $@ ds4.c
  
  ds4_cli_cpu.o: ds4_cli.c ds4.h ds4_ssd.h ds4_distributed.h ds4_help.h ds4_prompt_prefix.h linenoise.h
-@@ -1015,15 +1015,22 @@ test-qwen4-ngrams: tests/test_qwen4_ngrams
+@@ -1015,15 +1015,23 @@ test-qwen4-ngrams: tests/test_qwen4_ngrams
  
  # Mellum 2.1, model-free: recognition, validation and binding on a sparse GGUF
  # (tests/mellum_fixture.h), and how the front ends treat a Mellum engine.
 -tests/test_mellum_config.o: tests/test_mellum_config.c tests/mellum_fixture.h ds4.c ds4.h
-+tests/test_mellum_config.o: tests/test_mellum_config.c tests/mellum_fixture.h tests/mellum_chat_ids.inc ds4.c ds4.h
++tests/test_mellum_config.o: tests/test_mellum_config.c tests/mellum_fixture.h tests/mellum_chat_ids.inc \
++	tests/mellum_tool_text.h ds4_prompt_prefix.h ds4.c ds4.h
  	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -DDS4_NO_GPU -I. -c -o $@ $<
  
  tests/test_mellum_config: tests/test_mellum_config.o $(filter-out ds4_cpu.o,$(CPU_CORE_OBJS))
@@ -90,7 +94,7 @@ index 108f27e9..15159fba 100644
  
  tests/test_qwen4_ngram_state.o: tests/test_qwen4_ngram_state.c ds4.c ds4.h
  	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -I. -c -o $@ $<
-@@ -1362,7 +1369,7 @@ tests/test_session_state_gpu.o: ds4_tool_text.h
+@@ -1362,7 +1370,7 @@ tests/test_session_state_gpu.o: ds4_tool_text.h
  clean:
  	rm -f tests/test_mmvq_cuda tests/test_mmvq_rocm
  	rm -f tests/test_qwen4_ngrams
@@ -593,7 +597,7 @@ index a6342c42..8d24cb43 100644
              return 1;
          }
 diff --git a/ds4.h b/ds4.h
-index d6403a2f..a0bcc2a3 100644
+index 0dd82239..e8c1e7fc 100644
 --- a/ds4.h
 +++ b/ds4.h
 @@ -388,10 +388,26 @@ void ds4_encode_chat_prompt(
@@ -623,6 +627,59 @@ index d6403a2f..a0bcc2a3 100644
  bool ds4_token_is_stop(ds4_engine *e, int token);
  bool ds4_token_is_thinking_control(ds4_engine *e, int token);
  bool ds4_token_is_stop_for_think_mode(ds4_engine *e,
+diff --git a/ds4_cli.c b/ds4_cli.c
+index c4529743..c28401b6 100644
+--- a/ds4_cli.c
++++ b/ds4_cli.c
+@@ -386,6 +386,7 @@ typedef struct {
+     bool last_output_newline;
+     char pending[16];
+     size_t pending_len;
++    int n_emitted;          /* tokens printed this turn (the greedy path counts them here) */
+ } token_printer;
+ 
+ static bool bytes_has_prefix(const char *p, size_t n, const char *prefix) {
+@@ -491,8 +492,16 @@ static void token_printer_write_text(token_printer *p, const char *text, size_t
+     }
+ }
+ 
++/* A turn that ran into -n says so: the text simply stops there, and a long
++ * reasoning block can use the whole budget before the answer starts. */
++static void cli_report_token_cap(int generated, int n_predict) {
++    if (n_predict > 0 && generated >= n_predict)
++        fprintf(stderr, "ds4: stopped at the -n cap of %d tokens\n", n_predict);
++}
++
+ static void print_generated_token(void *ud, int token) {
+     token_printer *p = ud;
++    p->n_emitted++;
+     size_t len = 0;
+     char *text = ds4_token_text(p->engine, token, &len);
+     token_printer_write_text(p, text, len);
+@@ -683,6 +692,7 @@ static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, con
+     generation_done(&printer);
+     if (cli_interrupt_requested()) cli_interrupt_clear();
+ 
++    cli_report_token_cap(generated, cfg->gen.n_predict);
+     const double prefill_s = t_prefill1 - t_prefill0;
+     const double decode_s = t_decode1 - t_decode0;
+     ds4_log(stderr,
+@@ -1279,6 +1289,7 @@ static int run_generation(ds4_engine *engine, const cli_config *cfg) {
+                                             &printer,
+                                             cli_prefill_progress_cb,
+                                             &progress);
++            if (rc == 0) cli_report_token_cap(printer.n_emitted, cfg->gen.n_predict);
+         }
+     }
+ 
+@@ -1696,6 +1707,7 @@ static int run_chat_turn(ds4_engine *engine, cli_config *cfg, repl_chat *chat,
+         ds4_tokens_push(&chat->transcript, ds4_token_eos(engine));
+     }
+ 
++    cli_report_token_cap(generated, cfg->gen.n_predict);
+     const double prefill_s = t_prefill1 - t_prefill0;
+     const double decode_s = t_decode1 - t_decode0;
+     if (interrupted) cli_interrupt_clear();
 diff --git a/ds4_mellum_unicode.inc b/ds4_mellum_unicode.inc
 new file mode 100644
 index 00000000..d79b7377
@@ -1570,6 +1627,108 @@ index ad439d44..1bd5932c 100644
              ds4_tokens_push(tokens, ds4_token_eos(engine));
      }
  }
+diff --git a/tests/gen_mellum_chat_ids.py b/tests/gen_mellum_chat_ids.py
+new file mode 100644
+index 00000000..c854f766
+--- /dev/null
++++ b/tests/gen_mellum_chat_ids.py
+@@ -0,0 +1,96 @@
++# /// script
++# requires-python = ">=3.10"
++# dependencies = ["jinja2", "tokenizers"]
++# ///
++"""Write tests/mellum_chat_ids.inc: the token ids Mellum 2.1's own chat template
++and tokenizer give for the conversations the engine's chat renderer is tested
++with.  The template and tokenizer.json are the model's; the template is rendered
++as transformers renders it (an ImmutableSandboxedEnvironment with trim_blocks
++and lstrip_blocks, the loopcontrols extension, tojson without ASCII escaping);
++the encoder is `tokenizers` with the file's own added tokens, so <|im_start|>,
++<think> and the rest encode as their ids.
++
++Usage (from the repository root; SNAP holds the model's chat_template.jinja and
++tokenizer.json, JetBrains/Mellum2.1-12B-A2.5B-Thinking)::
++
++    uv run --no-project --with jinja2==3.1.6 --with tokenizers==0.23.3 python -I \\
++        tests/gen_mellum_chat_ids.py $SNAP > tests/mellum_chat_ids.inc
++"""
++
++import hashlib
++import json
++import sys
++from importlib.metadata import version
++
++from jinja2.ext import loopcontrols
++from jinja2.sandbox import ImmutableSandboxedEnvironment
++from tokenizers import Tokenizer
++
++CASES = [
++    # (name, think, messages); think False renders with enable_thinking false
++    ("system+user, think on", True,
++     [("system", "You are a helpful assistant."), ("user", "Hello, world!")]),
++    ("system+user, think off", False,
++     [("system", "You are a helpful assistant."), ("user", "Hello, world!")]),
++    ("user only, think on", True, [("user", "Write a haiku about autumn.")]),
++]
++# the generation prompt alone, as the template's last block writes it
++PREFIXES = [
++    ("assistant prefix, think on", True, "<|im_start|>assistant\n"),
++    ("assistant prefix, think off", False, "<|im_start|>assistant\n<think>\n\n</think>\n\n"),
++]
++
++
++def cstr(s):
++    return json.dumps(s, ensure_ascii=True)
++
++
++def main(snap):
++    tpl_path = snap + "/chat_template.jinja"
++    tok_path = snap + "/tokenizer.json"
++    tpl_text = open(tpl_path, encoding="utf-8").read()
++    env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True,
++                                        extensions=[loopcontrols])
++    env.filters["tojson"] = lambda x, **kw: json.dumps(x, ensure_ascii=False)
++    tpl = env.from_string(tpl_text)
++    tok = Tokenizer.from_file(tok_path)
++
++    def ids(text):
++        return tok.encode(text, add_special_tokens=False).ids
++
++    out = []
++    p = out.append
++    p("/* Generated by tests/gen_mellum_chat_ids.py; do not edit.")
++    p(" * chat_template.jinja sha256 %s" % hashlib.sha256(tpl_text.encode()).hexdigest())
++    p(" * tokenizer.json sha256 %s" % hashlib.sha256(open(tok_path, "rb").read()).hexdigest())
++    p(" * jinja2 %s, tokenizers %s */" % (version("jinja2"), version("tokenizers")))
++    for i, (name, think, msgs) in enumerate(CASES):
++        messages = [{"role": r, "content": c} for r, c in msgs]
++        kw = {} if think else {"enable_thinking": False}
++        text = tpl.render(messages=messages, add_generation_prompt=True, **kw)
++        p("static const fx_msg fx_msgs_%d[] = {" % i)
++        for r, c in msgs:
++            p("    {%s, %s}," % (cstr(r), cstr(c)))
++        p("};")
++        p("static const int fx_ids_%d[] = {%s};" % (i, ", ".join(map(str, ids(text)))))
++    for j, (name, think, text) in enumerate(PREFIXES):
++        # the prefix must be what the template itself appends for the generation prompt
++        kw = {} if think else {"enable_thinking": False}
++        tail = tpl.render(messages=[{"role": "user", "content": "x"}], add_generation_prompt=True, **kw)
++        assert tail.endswith(text), name
++        p("static const int fx_prefix_ids_%d[] = {%s};" % (j, ", ".join(map(str, ids(text)))))
++    p("static const fx_case fx_cases[] = {")
++    for i, (name, think, msgs) in enumerate(CASES):
++        p("    {%s, %s, %d, fx_msgs_%d, (int)(sizeof(fx_ids_%d) / sizeof(int)), fx_ids_%d},"
++          % (cstr(name), "true" if think else "false", len(msgs), i, i, i))
++    p("};")
++    p("static const fx_prefix fx_prefixes[] = {")
++    for j, (name, think, text) in enumerate(PREFIXES):
++        p("    {%s, %s, (int)(sizeof(fx_prefix_ids_%d) / sizeof(int)), fx_prefix_ids_%d},"
++          % (cstr(name), "true" if think else "false", j, j))
++    p("};")
++    print("\n".join(out))
++
++
++if __name__ == "__main__":
++    main(sys.argv[1])
 diff --git a/tests/gen_mellum_tokenizer_cases.py b/tests/gen_mellum_tokenizer_cases.py
 new file mode 100644
 index 00000000..943d6add
