@@ -445,14 +445,12 @@ Bring in the tokenizer, Unicode tables, token/stop classes, native chat renderin
 
 - [ ] **Step 3: Confirm the pinned ids**
 
-Run: `DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_config` and require the `<think>=23`, `</think>=24`, EOS=28 assertions to run rather than skip.
+```bash
+DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_config > "$OUT/patch-0002-config.log" 2>&1
+DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_tokenizer > "$OUT/patch-0002-tokenizer.log" 2>&1
+```
 
-- [ ] **Step 3b: Port the measurement harness**
-
-The spec's §2.5 and §8 rows are produced by these files, and they land with the streaming commits, so they belong to this patch: the resident-versus-streamed measurement driver (`tools/mellum_s4_measure.c` with its `.py` summary driver and CPU-only contract test) and the two CLI A/B/B/A runners. Add the `tools/mellum_s4_measure` Makefile target; it is not part of `make all`.
-
-Run: `python3 -I tests/test_mellum_s4_measure.py` and `make tools/mellum_s4_measure`
-Expected: PASS, and the binary exists for Task 20.
+Require the `<think>=23`, `</think>=24`, EOS=28 assertions to run rather than skip, and neither log to contain a skip message.
 
 - [ ] **Step 4: Export, prove, commit**
 
@@ -537,7 +535,8 @@ git add patches/mellum && git commit -m "feat(ds4): rewind Mellum sessions to th
 **Files:**
 - Create: `patches/mellum/0004-mellum-optimized-q8-prefill-and-decode.patch`
 - Reference: tiled/batched/fused commits selected by the spec's `git log --grep` ledger
-- Test: `tests/test_mellum_fastpath.c`
+- Reference tools: `tests/mellum_cli_prefill_abba.sh`, `tests/mellum_cli_decode_abba.sh`, `tests/test_mellum_runners.sh`, `tests/mellum_prompts/prompt_2048.txt` (the prefill runner landed with T1 in `518ee06`, the decode runner in `385fbd2`, both before streaming)
+- Test: `tests/test_mellum_fastpath.c`, `tests/test_mellum_runners.sh`
 
 **Interfaces:**
 - Consumes: task 13.
@@ -551,16 +550,16 @@ git add patches/mellum && git commit -m "feat(ds4): rewind Mellum sessions to th
 
 Re-run: 45/45 pass and the numerical caps from `MELLUM.md` hold.
 
-- [ ] **Step 3: Measure on the 36 GB Mac Studio**
+- [ ] **Step 2b: Port the A/B/B/A CLI runners**
 
-`pgrep -fl "ds4|dogfood"` shows nothing. Repeat the §2.3 n=6 MXFP4 and Q8 pairs and require medians within 10% of 1,550/94.48 t/s and 1,515/88.19 t/s. Record command, commit, machine and raw output.
+The §2.3 and §8 rows are produced by `tests/mellum_cli_prefill_abba.sh` (108 lines) and `tests/mellum_cli_decode_abba.sh` (74), with `tests/test_mellum_runners.sh` as the model-free contract and `tests/mellum_prompts/prompt_2048.txt` as the decode input. Port them with this patch; they are the commands Task 20 runs. Do not port `tools/mellum_s4_measure.py` or its GGUF helpers — the spec's measurement command uses the C binary only.
 
-- [ ] **Step 3b: Port the measurement harness**
+Run: `bash tests/test_mellum_runners.sh`
+Expected: PASS model-free; the scripts accept `ARMS=AA … OUT MODEL 2048`.
 
-The spec's §2.5 and §8 rows are produced by these files, and they land with the streaming commits, so they belong to this patch: the resident-versus-streamed measurement driver (`tools/mellum_s4_measure.c` with its `.py` summary driver and CPU-only contract test) and the two CLI A/B/B/A runners. Add the `tools/mellum_s4_measure` Makefile target; it is not part of `make all`.
+- [ ] **Step 3: Measure the Q8 pair on the 36 GB Mac Studio**
 
-Run: `python3 -I tests/test_mellum_s4_measure.py` and `make tools/mellum_s4_measure`
-Expected: PASS, and the binary exists for Task 20.
+`pgrep -fl "ds4|dogfood"` shows nothing. Repeat the §2.3 n=6 **Q8** pair and require medians within 10% of 1,515 t/s prefill and 88.19 t/s generation. The MXFP4 baseline pair belongs to Task 15, whose loaders it needs. Record command, commit, machine and raw output.
 
 - [ ] **Step 4: Export, prove, commit**
 
@@ -588,16 +587,9 @@ Both SHA-verified files load; a mixed or unknown quant fails by name; MXFP4 refe
 
 Re-run until MXFP4 reference logits pass.
 
-- [ ] **Step 3: Prove Q8 did not regress**
+- [ ] **Step 3: Prove Q8 did not regress, and measure the MXFP4 pair**
 
-Repeat the §2.3 Q8 resident n=6 pair on the same machine: medians no worse than 10%.
-
-- [ ] **Step 3b: Port the measurement harness**
-
-The spec's §2.5 and §8 rows are produced by these files, and they land with the streaming commits, so they belong to this patch: the resident-versus-streamed measurement driver (`tools/mellum_s4_measure.c` with its `.py` summary driver and CPU-only contract test) and the two CLI A/B/B/A runners. Add the `tools/mellum_s4_measure` Makefile target; it is not part of `make all`.
-
-Run: `python3 -I tests/test_mellum_s4_measure.py` and `make tools/mellum_s4_measure`
-Expected: PASS, and the binary exists for Task 20.
+Repeat the §2.3 Q8 resident n=6 pair on the same machine: medians no worse than 10%. Then run the MXFP4 pair through the ported runners and require medians within 10% of 1,550 t/s prefill and 94.48 t/s generation.
 
 - [ ] **Step 4: Export, prove, commit**
 
@@ -611,7 +603,7 @@ git add patches/mellum && git commit -m "feat(ds4): load Mellum MXFP4_MOE expert
 **Files:**
 - Create: `patches/mellum/0006-mellum-ssd-expert-streaming.patch`
 - Reference: `ds4_mellum_stream.c`, `ds4_mellum_stream.h`, streaming hunks in `ds4.c`, `ds4.h`, `ds4_metal.m`, `ds4_mellum_graph.inc`
-- Reference tools: `tools/mellum_s4_measure.c`, `tools/mellum_s4_measure.py`, `tests/test_mellum_s4_measure.py`, `tests/mellum_cli_prefill_abba.sh`, `tests/mellum_cli_decode_abba.sh`
+- Reference tool: `tools/mellum_s4_measure.c`
 - Test: `make test-mellum-stream`
 
 **Interfaces:**
@@ -626,16 +618,16 @@ git add patches/mellum && git commit -m "feat(ds4): load Mellum MXFP4_MOE expert
 
 Streamed and resident greedy ids agree for 512 tokens in 3/3 runs per quant.
 
+- [ ] **Step 3b: Port the resident-versus-streamed measure driver**
+
+`tools/mellum_s4_measure.c` (237 lines) is what the spec's §2.5 and §8 32K rows are measured with, and it consumes the streaming and Metal-allocation hooks this patch adds. Add it and its `tools/mellum_s4_measure` Makefile target; it is not part of `make all`. The Python orchestrator (`mellum_s4_measure.py` and its GGUF helpers) is not required by the spec's command and stays out.
+
+Run: `make tools/mellum_s4_measure`
+Expected: the binary exists and accepts `--model … --prompt … --gen 512 --context 32768 --out …`.
+
 - [ ] **Step 3: Run the physical gates**
 
 16 GB Mac mini: MXFP4 resident first, then Q8 with `--ssd-streaming --ssd-streaming-cache-experts 6GB`. 8 GB case: MXFP4 with `--ssd-streaming --ssd-streaming-cache-experts 2GB`, context 32768. Record the Metal limit, planned bytes, Metal peak, host footprint, swap before/after, first token, prefill, generation, command, commit and `n`. No row passes with swap growth or 2.5 GiB.
-
-- [ ] **Step 3b: Port the measurement harness**
-
-The spec's §2.5 and §8 rows are produced by these files, and they land with the streaming commits, so they belong to this patch: the resident-versus-streamed measurement driver (`tools/mellum_s4_measure.c` with its `.py` summary driver and CPU-only contract test) and the two CLI A/B/B/A runners. Add the `tools/mellum_s4_measure` Makefile target; it is not part of `make all`.
-
-Run: `python3 -I tests/test_mellum_s4_measure.py` and `make tools/mellum_s4_measure`
-Expected: PASS, and the binary exists for Task 20.
 
 - [ ] **Step 4: Export, prove, commit**
 
@@ -652,7 +644,7 @@ git add patches/mellum && git commit -m "feat(ds4): stream Mellum experts from t
 **Interfaces:**
 - Consumes: patches 0001–0006 from tasks 10–16; satyrn-agent PR #24 merged.
 - Produces: the complete qwen35 series rebased after `mellum`, with unchanged Qwen behavior.
-- Note: per spec §2.2, #24 changes qwen35 0001–0008, adds 0009–0018, and changes `tools/ds4-check.sh`. The rebase therefore covers the then-current full series, not the eight files we have today, and the shell suite must be re-run against #24's check script before the boundaries are trusted.
+- Prerequisite: per spec §2.2 and §10, PR #24 merges **before** Mellum implementation and both owners are told. It changes qwen35 0001–0008, adds 0009–0018, and changes `tools/ds4-check.sh`, so the rebase covers the then-current 18-patch series, not the eight files we have today.
 
 - [ ] **Step 1: Confirm the qwen35 prefix breaks before the rebase**
 
@@ -665,6 +657,14 @@ Expected: FAIL — qwen35 patches still apply against the pre-Mellum tree.
 - [ ] **Step 2: Rebase and re-export the whole series**
 
 Re-materialize with `ds4-sync --model qwen35`, rebase its commits after the Mellum tip, and run `ds4-export`. Do not hand-edit patch files.
+
+- [ ] **Step 2b: Re-run the tooling against #24's check script**
+
+```bash
+bash tests/ds4_tools_test.sh
+```
+
+Expected: PASS with #24's `ds4-check.sh` in the tree, before any boundary result is trusted.
 
 - [ ] **Step 3: Prove every boundary**
 
@@ -754,7 +754,7 @@ devenv shell -- uv run --frozen python tests/e2e/live/mellum_tool_bakeoff.py --m
 devenv shell -- uv run --frozen python tests/e2e/live/mellum_tool_bakeoff.py --model "$MXFP4" --profiles native,pi --order alternating --repetitions 5 --out RESULTS_MXFP4
 ```
 
-15 native-first and 15 Pi-first starts per quant; odd grader numbers run native then Pi, even numbers the reverse.
+15 native-first and 15 Pi-first starts per quant. The order alternates on **grader parity**: odd grader numbers run native then Pi, even numbers the reverse. It also alternates on **seed parity**, so `--order alternating` must implement both and the aggregate must come out 15/15 for each quant. Add a model-free test over seeds 1–5 that asserts each pair's order from the JSONL records and the 15/15 split.
 
 - [ ] **Step 4: Report and record the ruling**
 
@@ -778,7 +778,7 @@ git commit -m "test(e2e): compare native and pi tool profiles on Mellum"
 
 - [ ] **Step 0: Pin the inputs**
 
-The 2,686-token coding request is named but not pinned by file or SHA in §8. Store it as `tests/mellum_prompts/prompt_2686.txt` with its SHA-256 and token count recorded in the report before measuring; the same file feeds the `ds4-mellum` reference and the port runs.
+The 2,686-token request is pinned in the fork's evidence, not in §8: `workload-request.json` (`73cd5f77…`), flattened by `flatten.py` into `workload-prompt.txt` (`2f34a817…`, 8,770 B, 2,686 rendered tokens) on branch `mellum-evidence-2026-10-31` (`docs/superpowers/research/2026-10-28-mellum-s6-c-preregistration.md:70-75`). Vendor that exact artifact as `tests/mellum_prompts/prompt_2686.txt`, verify its full SHA-256 and rendered token count, and feed the same file to the `ds4-mellum` reference and the port runs. Do not write a new request and name it after the count.
 
 - [ ] **Step 1: 36 GB Mac Studio**
 
@@ -800,11 +800,11 @@ Port medians within 10%, exact greedy ids, peak no more than 5% above the same-m
 
 - [ ] **Step 2: 24 GB MacBook Air**
 
-Both quants resident at 32768, n=3 each. Require peak 13.032 GiB Q8 / 7.317 GiB MXFP4, exact ids, and no swap growth; the reference's 596.87 MiB swap growth is not a pass.
+Both quants resident at 32768, n=3 each. 13.032 GiB Q8 and 7.317 GiB MXFP4 are the reference observations, not the requirement: record the port's measured Metal limit, planned bytes and peak, require the peak below the machine's actual limit with no swap growth and exact ids. The reference run's 596.87 MiB swap growth is not a pass.
 
 - [ ] **Step 3: 16 GB Mac mini**
 
-MXFP4 resident first, then Q8 streamed with a 6GB expert cache. Copy only the quant under test; touch nothing else. Require measured limit below/above recorded, no swap, resident-vs-streamed exact ids.
+MXFP4 resident first, then Q8 streamed with a 6GB expert cache. Copy only the quant under test; touch nothing else. Record the measured Metal limit, planned bytes and peak, require the peak below that limit, no swap growth, and resident-versus-streamed exact ids.
 
 - [ ] **Step 4: 8 GB streaming case**
 
