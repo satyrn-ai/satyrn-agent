@@ -1,4 +1,4 @@
-From b7174a7bff2d8022d336fa720c3e649fbe8288ae Mon Sep 17 00:00:00 2001
+From b8fe767c6ba15616fea820aca31f516cea41c812 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 17 Nov 2026 07:04:18 -0500
 Subject: [PATCH 1/3] mellum: model config, memory and host contract
@@ -19,7 +19,7 @@ later "move the front ends to .inc files" refactor commits are not carried.
 
 Upstream: not offered, fork only
 Retire-when: upstream runs Mellum 2.1 with this host contract
-Carried-commits: 83e39b63 0428a4c6 06b13f83 5b6758e0 1d9b6284 d3892ee1 7eef70be c9d63e08
+Carried-commits: 83e39b632296bd4c26b4c6b38a638dd5d2df8aa9 0428a4c65b7695c9d947cc557e5569cd733f480b 06b13f83a673b176cef474935d66c5bbfe334d77 5b6758e09ab685dd4cf4ff08e0ba9a5db433e372 1d9b628457b5ca6b6f70d04586fa1c15553d3d4e d3892ee140ef56cd44a430c064cb99a52eb4c7a4 7eef70be896e9e97d2345f0668fe98dc5a05ec3e c9d63e080c8e25b549202cf2b6dd4c028f517deb
 ---
  Makefile                   |  14 +
  ds4.c                      | 697 ++++++++++++++++++++++++++++++++++++-

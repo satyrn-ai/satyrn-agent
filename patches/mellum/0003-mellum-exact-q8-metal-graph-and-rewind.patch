@@ -1,4 +1,4 @@
-From 243d2588fea991db4add0d576764dc1f0352572d Mon Sep 17 00:00:00 2001
+From f12cfc563abdc65204af4cf6fd96bed595fa3335 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 17 Nov 2026 07:35:37 -0500
 Subject: [PATCH 3/3] mellum: exact q8 metal graph and rewind
@@ -21,7 +21,7 @@ token ids match the fork's CLI at d2d9338.
 
 Upstream: not offered, fork only
 Retire-when: upstream runs an exact Mellum 2.1 Metal graph
-Carried-commits: 5c3b1173 d1c144df 9df140f1 c6cb6fb1 68f818ab e1885c76 0b7f707e 322cb527 36c8ea93 7280304a 61c9654d 181e3a7f fbd4ec43
+Carried-commits: 5c3b117390a2cb8bb9aa28b78707dcb3b222ba7e d1c144df01cdfa72f0a737ad6fe1c2b781745750 9df140f14e79085a72fba34b1b4c4cd4c4cb26f8 c6cb6fb190f183f0b271d7581a00df20ccc08a1d 68f818abf576ccd6c6db959d31fe989eda19de74 e1885c7695c69453ae06d225ce386d8c89456cd1 0b7f707ecccd71801403e05f0f7cdc372c3a8078 322cb527cef658ea49e969ed04fd9c9d9a9c149e 36c8ea931e7dfaffadd974d88a3e32fe121af3b5 7280304ae35cec30bc64788aa2f413f92665abb1 61c9654dcba1075488137f8fcdd7492d29a40468 181e3a7f94509174f2c021633f632d06d49bba9a fbd4ec4306bd8aa5f7f57dbe0420c38019783cd7
 ---
  Makefile                     |   28 +-
  ds4.c                        |  507 +++++++-
@@ -32,12 +32,12 @@ Carried-commits: 5c3b1173 d1c144df 9df140f1 c6cb6fb1 68f818ab e1885c76 0b7f707e 
  metal/qwen4.metal            |   20 +-
  tests/ds4_test.c             |  382 ++++++
  tests/mellum_moe_ref.inc     |   85 ++
- tests/mellum_trace.c         |  321 +++++
+ tests/mellum_trace.c         |  322 +++++
  tests/mellum_trace_context.h |   21 +
  tests/test_mellum_config.c   |   23 +-
  tests/test_mellum_kernels.c  | 2208 ++++++++++++++++++++++++++++++++++
  tests/test_mellum_trace.sh   |   92 ++
- 14 files changed, 4341 insertions(+), 55 deletions(-)
+ 14 files changed, 4342 insertions(+), 55 deletions(-)
  create mode 100644 metal/mellum.metal
  create mode 100644 tests/mellum_moe_ref.inc
  create mode 100644 tests/mellum_trace.c
@@ -2176,10 +2176,10 @@ index 00000000..8fbcccff
 +}
 diff --git a/tests/mellum_trace.c b/tests/mellum_trace.c
 new file mode 100644
-index 00000000..f3581a93
+index 00000000..c7088308
 --- /dev/null
 +++ b/tests/mellum_trace.c
-@@ -0,0 +1,321 @@
+@@ -0,0 +1,322 @@
 +/* mellum_trace -- run Mellum 2.1's forward pass over a token file and let the
 + * engine write its trace.  The engine does the writing: with
 + * DS4_MELLUM_TRACE=<prefix> and DS4_MELLUM_TRACE_AT=<pos,pos,...> set, every
@@ -2490,12 +2490,13 @@ index 00000000..f3581a93
 +            rc = 1;
 +        }
 +    }
-+    if (rc == 0 && n_pos > 0) {
-+        unsigned last = pos[0];
-+        for (int i = 1; i < n_pos; i++) if (pos[i] > last) last = pos[i];
-+        if (!report_logits(prefix, last)) {
-+            fprintf(stderr, "mellum_trace: the logits at position %u are not finite\n", last);
-+            rc = 1;
++    if (rc == 0) {
++        for (int i = 0; i < n_pos; i++) {
++            if (!report_logits(prefix, pos[i])) {
++                fprintf(stderr, "mellum_trace: the logits at position %u are not finite\n", pos[i]);
++                rc = 1;
++            }
++
 +        }
 +    }
 +    ds4_tokens_free(&toks);

@@ -385,7 +385,7 @@ git -C .ds4/tree fetch --quiet fork
 git -C .ds4/tree checkout fork/mellum -- ds4_mellum_config.inc ds4_mellum_plan.inc
 ```
 
-Select host hunks by hand from `git -C .ds4/tree show fork/mellum -- ds4.c ds4.h`.
+Select host hunks by hand from immutable reads only: `git -C .ds4/tree show d2d9338:ds4.c`, `git diff c97964b..d2d9338 -- <paths>`, and `git show <commit>`. Never read the moving `fork/mellum` branch, which has advanced past `d2d9338`.
 
 - [ ] **Step 2: Port the model-free test first**
 
@@ -561,6 +561,16 @@ Expected: PASS model-free; the scripts accept `ARMS=AA … OUT MODEL 2048`.
 
 `pgrep -fl "ds4|dogfood"` shows nothing. Repeat the §2.3 n=6 **Q8** pair and require medians within 10% of 1,515 t/s prefill and 88.19 t/s generation. The MXFP4 baseline pair belongs to Task 15, whose loaders it needs. Record command, commit, machine and raw output.
 
+- [ ] **Step 3b: Qwen kernel regression**
+
+The fast paths touch shared attention and projection kernels. Before exporting:
+
+```bash
+make test-qwen4-kernels
+```
+
+Expected: PASS. A failure here means a Mellum path changed Qwen arithmetic, not just speed.
+
 - [ ] **Step 4: Export, prove, commit**
 
 ```bash
@@ -656,7 +666,17 @@ Expected: FAIL — qwen35 patches still apply against the pre-Mellum tree.
 
 - [ ] **Step 2: Rebase and re-export the whole series**
 
-Re-materialize with `ds4-sync --model qwen35`, rebase its commits after the Mellum tip, and run `ds4-export`. Do not hand-edit patch files.
+`ds4-sync --model qwen35` cannot be the first move: it applies the whole prefix, and Qwen's first patch already fails after Mellum. Instead:
+
+```bash
+# 1. materialize the *old* common+qwen stack on its own, and keep its boundary refs
+devenv shell -- ds4-sync --model qwen35        # on a tree without the mellum directory
+git -C .ds4/tree update-ref refs/port/qwen-old refs/ds4/model/qwen35
+# 2. in the current tree (common+mellum), cherry-pick that qwen commit range onto the Mellum tip
+git -C .ds4/tree cherry-pick refs/ds4/common..refs/port/qwen-old
+```
+
+Resolve textual and semantic conflicts, then export the candidate series and prove pristine reconstruction before replacing `patches/qwen35/`. Do not hand-edit patch files.
 
 - [ ] **Step 2b: Re-run the tooling against #24's check script**
 
@@ -707,6 +727,10 @@ Run: `devenv shell -- uv run --frozen pytest tests/e2e/model_free/test_engine.py
 
 Insert the recommendation between native defaults and overrides in `SatyrnEngine.session()`, and update the `ds4py[agent]` pin to the two companion commits.
 
+- [ ] **Step 3b: Define the no-drafter fixture and corpus**
+
+The live fixture requires and validates `SATYRN_TEST_DRAFTER`, and `corpus.json` always supplies a drafter path, so "run the live controls without a drafter" is not executable as written. Add an explicit no-drafter contract: a `tests/e2e/corpus-mellum.json` target with no drafter block, a live fixture that accepts a missing drafter for a hermes engine, and the control cases (`/dflash` off/auto/on, think budget on/off/off-then-reset, stripped save/switch). Changing only the corpus filename does not deliver this gate.
+
 - [ ] **Step 4: Write the four failing scenario tests**
 
 `mellum-plain-footer` (hermes `EngineInfo` records with scripted no-drafter config → `dflash: auto/off, accept — (0/0)` and no offered/accepted drafts), `mellum-drafter-rejected` (drafter path plus hermes family → Mellum error, history and footer unchanged), `mellum-nothink-budget` (reasoning outside a think block is not biased), `mellum-stripped-persistence` (`payload_bytes=0`, no KV file; `/compact` reports its existing unsupported error).
@@ -754,7 +778,7 @@ devenv shell -- uv run --frozen python tests/e2e/live/mellum_tool_bakeoff.py --m
 devenv shell -- uv run --frozen python tests/e2e/live/mellum_tool_bakeoff.py --model "$MXFP4" --profiles native,pi --order alternating --repetitions 5 --out RESULTS_MXFP4
 ```
 
-15 native-first and 15 Pi-first starts per quant. The order alternates on **grader parity**: odd grader numbers run native then Pi, even numbers the reverse. It also alternates on **seed parity**, so `--order alternating` must implement both and the aggregate must come out 15/15 for each quant. Add a model-free test over seeds 1–5 that asserts each pair's order from the JSONL records and the 15/15 split.
+Every run pins context 32768, the recommended sampling (0.6 / 0.95 / 20), resident execution with both quants, a fresh session per task, and records all required metrics (completed-task rate, valid-call rate, malformed calls, retries, wrong-tool calls, turns, generated tokens, wall time). 15 native-first and 15 Pi-first starts per quant. The order alternates on **grader parity**: odd grader numbers run native then Pi, even numbers the reverse. It also alternates on **seed parity**, so `--order alternating` must implement both and the aggregate must come out 15/15 for each quant. Add a model-free test over seeds 1–5 that asserts each pair's order from the JSONL records and the 15/15 split.
 
 - [ ] **Step 4: Report and record the ruling**
 
