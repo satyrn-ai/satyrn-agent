@@ -447,6 +447,13 @@ Bring in the tokenizer, Unicode tables, token/stop classes, native chat renderin
 
 Run: `DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_config` and require the `<think>=23`, `</think>=24`, EOS=28 assertions to run rather than skip.
 
+- [ ] **Step 3b: Port the measurement harness**
+
+The spec's §2.5 and §8 rows are produced by these files, and they land with the streaming commits, so they belong to this patch: the resident-versus-streamed measurement driver (`tools/mellum_s4_measure.c` with its `.py` summary driver and CPU-only contract test) and the two CLI A/B/B/A runners. Add the `tools/mellum_s4_measure` Makefile target; it is not part of `make all`.
+
+Run: `python3 -I tests/test_mellum_s4_measure.py` and `make tools/mellum_s4_measure`
+Expected: PASS, and the binary exists for Task 20.
+
 - [ ] **Step 4: Export, prove, commit**
 
 ```bash
@@ -548,6 +555,13 @@ Re-run: 45/45 pass and the numerical caps from `MELLUM.md` hold.
 
 `pgrep -fl "ds4|dogfood"` shows nothing. Repeat the §2.3 n=6 MXFP4 and Q8 pairs and require medians within 10% of 1,550/94.48 t/s and 1,515/88.19 t/s. Record command, commit, machine and raw output.
 
+- [ ] **Step 3b: Port the measurement harness**
+
+The spec's §2.5 and §8 rows are produced by these files, and they land with the streaming commits, so they belong to this patch: the resident-versus-streamed measurement driver (`tools/mellum_s4_measure.c` with its `.py` summary driver and CPU-only contract test) and the two CLI A/B/B/A runners. Add the `tools/mellum_s4_measure` Makefile target; it is not part of `make all`.
+
+Run: `python3 -I tests/test_mellum_s4_measure.py` and `make tools/mellum_s4_measure`
+Expected: PASS, and the binary exists for Task 20.
+
 - [ ] **Step 4: Export, prove, commit**
 
 ```bash
@@ -578,6 +592,13 @@ Re-run until MXFP4 reference logits pass.
 
 Repeat the §2.3 Q8 resident n=6 pair on the same machine: medians no worse than 10%.
 
+- [ ] **Step 3b: Port the measurement harness**
+
+The spec's §2.5 and §8 rows are produced by these files, and they land with the streaming commits, so they belong to this patch: the resident-versus-streamed measurement driver (`tools/mellum_s4_measure.c` with its `.py` summary driver and CPU-only contract test) and the two CLI A/B/B/A runners. Add the `tools/mellum_s4_measure` Makefile target; it is not part of `make all`.
+
+Run: `python3 -I tests/test_mellum_s4_measure.py` and `make tools/mellum_s4_measure`
+Expected: PASS, and the binary exists for Task 20.
+
 - [ ] **Step 4: Export, prove, commit**
 
 ```bash
@@ -590,6 +611,7 @@ git add patches/mellum && git commit -m "feat(ds4): load Mellum MXFP4_MOE expert
 **Files:**
 - Create: `patches/mellum/0006-mellum-ssd-expert-streaming.patch`
 - Reference: `ds4_mellum_stream.c`, `ds4_mellum_stream.h`, streaming hunks in `ds4.c`, `ds4.h`, `ds4_metal.m`, `ds4_mellum_graph.inc`
+- Reference tools: `tools/mellum_s4_measure.c`, `tools/mellum_s4_measure.py`, `tests/test_mellum_s4_measure.py`, `tests/mellum_cli_prefill_abba.sh`, `tests/mellum_cli_decode_abba.sh`
 - Test: `make test-mellum-stream`
 
 **Interfaces:**
@@ -608,6 +630,13 @@ Streamed and resident greedy ids agree for 512 tokens in 3/3 runs per quant.
 
 16 GB Mac mini: MXFP4 resident first, then Q8 with `--ssd-streaming --ssd-streaming-cache-experts 6GB`. 8 GB case: MXFP4 with `--ssd-streaming --ssd-streaming-cache-experts 2GB`, context 32768. Record the Metal limit, planned bytes, Metal peak, host footprint, swap before/after, first token, prefill, generation, command, commit and `n`. No row passes with swap growth or 2.5 GiB.
 
+- [ ] **Step 3b: Port the measurement harness**
+
+The spec's §2.5 and §8 rows are produced by these files, and they land with the streaming commits, so they belong to this patch: the resident-versus-streamed measurement driver (`tools/mellum_s4_measure.c` with its `.py` summary driver and CPU-only contract test) and the two CLI A/B/B/A runners. Add the `tools/mellum_s4_measure` Makefile target; it is not part of `make all`.
+
+Run: `python3 -I tests/test_mellum_s4_measure.py` and `make tools/mellum_s4_measure`
+Expected: PASS, and the binary exists for Task 20.
+
 - [ ] **Step 4: Export, prove, commit**
 
 ```bash
@@ -623,6 +652,7 @@ git add patches/mellum && git commit -m "feat(ds4): stream Mellum experts from t
 **Interfaces:**
 - Consumes: patches 0001–0006 from tasks 10–16; satyrn-agent PR #24 merged.
 - Produces: the complete qwen35 series rebased after `mellum`, with unchanged Qwen behavior.
+- Note: per spec §2.2, #24 changes qwen35 0001–0008, adds 0009–0018, and changes `tools/ds4-check.sh`. The rebase therefore covers the then-current full series, not the eight files we have today, and the shell suite must be re-run against #24's check script before the boundaries are trusted.
 
 - [ ] **Step 1: Confirm the qwen35 prefix breaks before the rebase**
 
@@ -746,9 +776,27 @@ git commit -m "test(e2e): compare native and pi tool profiles on Mellum"
 - Consumes: patches 0001–0006 and a built `libds4`.
 - Produces: one row per target with command, commit, machine, `n`, Metal limit, planned bytes, Metal peak, host footprint, swap before/after, first token, prefill and generation.
 
+- [ ] **Step 0: Pin the inputs**
+
+The 2,686-token coding request is named but not pinned by file or SHA in §8. Store it as `tests/mellum_prompts/prompt_2686.txt` with its SHA-256 and token count recorded in the report before measuring; the same file feeds the `ds4-mellum` reference and the port runs.
+
 - [ ] **Step 1: 36 GB Mac Studio**
 
-Both quants resident at context 32768; repeat §2.3 at context 3072 with n=6; then measure `ds4-mellum` `d2d9338` and the port at 32768 with the 2,686-token coding request, n=3. Port medians within 10%, exact greedy ids, peak no more than 5% above the same-machine reference, no swap growth.
+Both quants resident at context 32768. Repeat §2.3 at context 3072 with n=6 through the ported runners:
+
+```bash
+ARMS=AA tests/mellum_cli_prefill_abba.sh "$OUT/mxfp4-prefill" "$MXFP4" 2048
+ARMS=AA tests/mellum_cli_decode_abba.sh "$OUT/mxfp4-decode" "$MXFP4" tests/mellum_prompts 2048
+```
+
+Then measure `ds4-mellum` `d2d9338` and the port at 32768 with the pinned request, n=3 per quant:
+
+```bash
+tools/mellum_s4_measure --model "$MODEL" --prompt tests/mellum_prompts/prompt_2686.txt \
+  --gen 512 --context 32768 --out "$OUT/QUANT-RUN.json"
+```
+
+Port medians within 10%, exact greedy ids, peak no more than 5% above the same-machine reference, no swap growth.
 
 - [ ] **Step 2: 24 GB MacBook Air**
 
