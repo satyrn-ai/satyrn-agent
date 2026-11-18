@@ -1,7 +1,7 @@
 From 8fc2ac54acb19aa7fa34aa09811f2a794b6eecd5 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 18 Nov 2026 15:36:37 -0500
-Subject: [PATCH 4/4] mellum: optimized q8 prefill and decode
+Subject: [PATCH 4/5] mellum: optimized q8 prefill and decode
 
 Tiled expert GEMMs from 32 rows and batched Q8_0 projections, Metal 4
 tensor-tile experts (E1), prefill attention tiles with half operands, and the

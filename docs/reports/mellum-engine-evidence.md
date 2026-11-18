@@ -53,5 +53,20 @@ The reference binary is built from the immutable commit (`git -C ~/projects/paul
 | Decode, port | 6 | 125.08 t/s | 123.46–125.21 |
 | Decode, `d2d9338` reference | 6 | 124.67 t/s | 122.99–124.81 |
 
-Both pairs are within 0.5% of the same-machine reference. These are M5 Max numbers; the spec's §2.3 figures
+Both pairs are within 0.5% of the same-machine reference.
+
+## MXFP4 (0005), same machine, n=6, context 3072
+
+| Run | Median | Range |
+|---|---|---|
+| Prefill, port | 4,038 t/s | 3,870–4,053 |
+| Prefill, `d2d9338` reference | 3,996 t/s | 3,892–4,035 |
+| Decode, port | 143.39 t/s | 139.83–144.16 |
+| Decode, `d2d9338` reference | 143.31 t/s | 140.59–143.91 |
+
+Q8 non-regression after 0005: prefill 3,814 t/s and decode 118.75 t/s against 3,987 / 125.08 before the MXFP4
+loaders — 4.3% and 5.1% down, inside the 10% cap. `ds4_test --mellum-moe` on the MXFP4 file passes (weights,
+selection and the staged double reference), and `tests/test_mellum_config` opens it, refusing every mixture.
+
+Both files verify: MXFP4 sha256 `cf09584a…8166`, 7,029,537,056 bytes. These are M5 Max numbers; the spec's §2.3 figures
 (1,515 / 88.19 t/s) are the M4 Max Mac Studio baseline, so the acceptance is the same-machine comparison.
