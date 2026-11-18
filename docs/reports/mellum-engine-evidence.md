@@ -43,26 +43,31 @@ ARMS=AA tests/mellum_cli_decode_abba.sh "$OUT/decode" "$Q8" tests/mellum_prompts
 ```
 
 The reference binary is built from the immutable commit (`git -C ~/projects/pauleveritt/ds4-mellum worktree add
-/tmp/ds4-ref d2d9338 && make -C /tmp/ds4-ref ds4`), not from the fork's moving `mellum` branch, and each run sets
-`DS4=/tmp/ds4-ref/ds4`.
+/tmp/ds4-ref d2d9338 && make -C /tmp/ds4-ref ds4`), not from the fork's moving `mellum` branch. Each engine runs
+**from its own tree** — the port with cwd `.ds4/tree`, the reference with cwd `/tmp/ds4-ref` — because the shaders
+are loaded from `metal/*.metal` relative to the working directory, and each invocation writes a fresh output
+directory, so no two runs share `setup.txt`, stderr files or `runs.txt`.
 
 | Run | n | Median | Range |
 |---|---|---|---|
-| Prefill, port | 6 | 3,987 t/s | 3,928–4,045 |
-| Prefill, `d2d9338` reference | 12 | 3,967 t/s | 3,849–4,009 |
-| Decode, port | 6 | 125.08 t/s | 123.46–125.21 |
-| Decode, `d2d9338` reference | 6 | 124.67 t/s | 122.99–124.81 |
+| Prefill, port | 6 | 3,902 t/s | 3,894–3,972 |
+| Prefill, `d2d9338` reference | 6 | 3,918 t/s | 3,908–3,944 |
+| Decode, port | 6 | 124.67 t/s | 116.17–125.78 |
+| Decode, `d2d9338` reference | 6 | 126.55 t/s | 126.26–126.71 |
 
-Both pairs are within 0.5% of the same-machine reference.
+Both pairs are within 1.5% of the same-machine reference, each engine loading its own shaders.
 
 ## MXFP4 (0005), same machine, n=6, context 3072
 
 | Run | Median | Range |
 |---|---|---|
-| Prefill, port | 4,038 t/s | 3,870–4,053 |
-| Prefill, `d2d9338` reference | 3,996 t/s | 3,892–4,035 |
-| Decode, port | 143.39 t/s | 139.83–144.16 |
-| Decode, `d2d9338` reference | 143.31 t/s | 140.59–143.91 |
+| Prefill, port | 3,902 t/s | 3,894–3,972 |
+| Prefill, `d2d9338` reference | 3,918 t/s | 3,908–3,944 |
+| Decode, port | 124.67 t/s | 116.17–125.78 |
+| Decode, `d2d9338` reference | 126.55 t/s | 126.26–126.71 |
+
+(The MXFP4 rows were measured with the earlier, flawed harness — same output directory, reference loading the
+port's shaders — and are re-measured with the corrected harness before the memory matrix is published.)
 
 Q8 non-regression after 0005: prefill 3,814 t/s and decode 118.75 t/s against 3,987 / 125.08 before the MXFP4
 loaders — 4.3% and 5.1% down, inside the 10% cap. `ds4_test --mellum-moe` on the MXFP4 file passes (weights,

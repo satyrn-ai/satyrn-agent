@@ -382,7 +382,7 @@ devenv shell -- ds4-sync --common-only
 git -C .ds4/tree switch -c mellum-port
 git -C .ds4/tree remote add fork "$HOME/projects/pauleveritt/ds4-mellum"
 git -C .ds4/tree fetch --quiet fork
-git -C .ds4/tree checkout fork/mellum -- ds4_mellum_config.inc ds4_mellum_plan.inc
+git -C .ds4/tree checkout d2d9338 -- <the files this patch carries>
 ```
 
 Select host hunks by hand from immutable reads only: `git -C .ds4/tree show d2d9338:ds4.c`, `git diff c97964b..d2d9338 -- <paths>`, and `git show <commit>`. Never read the moving `fork/mellum` branch, which has advanced past `d2d9338`.
@@ -415,7 +415,7 @@ devenv shell -- ds4-sync --model mellum --force
 devenv shell -- ds4-check --model mellum --build
 ```
 
-Expected: `ds4-check` reports matching tree ids and a successful build. Commit the patch file with its trailers.
+Expected: `ds4-check` reports matching tree ids and a successful build. Then build and run the patch's own tests — `make tests/test_mellum_config ds4_test && ./tests/test_mellum_config` — because `--build` links `libds4` and never compiles the test sources. Commit the patch file with its trailers.
 
 - [ ] **Step 6: Commit**
 
@@ -669,10 +669,11 @@ Expected: FAIL — qwen35 patches still apply against the pre-Mellum tree.
 `ds4-sync --model qwen35` cannot be the first move: it applies the whole prefix, and Qwen's first patch already fails after Mellum. Instead:
 
 ```bash
-# 1. materialize the *old* common+qwen stack on its own, and keep its boundary refs
-devenv shell -- ds4-sync --model qwen35        # on a tree without the mellum directory
-git -C .ds4/tree update-ref refs/port/qwen-old refs/ds4/model/qwen35
-# 2. in the current tree (common+mellum), cherry-pick that qwen commit range onto the Mellum tip
+# 1. in ONE scratch repository, materialize the old common+qwen stack and keep its refs
+DS4_PATCHES_DIR=<patches without mellum> DS4_TREE_DIR=.ds4/qwen-old devenv shell -- ds4-sync --model qwen35
+git -C .ds4/qwen-old update-ref refs/port/qwen-old refs/ds4/model/qwen35
+# 2. fetch that ref into the Mellum tree, and cherry-pick the range onto the Mellum tip
+git -C .ds4/tree fetch ../qwen-old refs/port/qwen-old:refs/port/qwen-old
 git -C .ds4/tree cherry-pick refs/ds4/common..refs/port/qwen-old
 ```
 
