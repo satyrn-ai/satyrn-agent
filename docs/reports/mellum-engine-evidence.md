@@ -42,6 +42,16 @@ ARMS=AA tests/mellum_cli_prefill_abba.sh "$OUT/prefill" "$Q8" 2048
 ARMS=AA tests/mellum_cli_decode_abba.sh "$OUT/decode" "$Q8" tests/mellum_prompts 2048
 ```
 
-Port: prefill median 3,963 t/s (range 3,110–4,038). The same-machine `ds4-mellum` reference run and the
-decode pair are recorded with the Task 20 matrix, since the spec compares the port against the fork on the
-same machine, not against the M4 Max figures in §2.3.
+The reference binary is built from the immutable commit (`git -C ~/projects/pauleveritt/ds4-mellum worktree add
+/tmp/ds4-ref d2d9338 && make -C /tmp/ds4-ref ds4`), not from the fork's moving `mellum` branch, and each run sets
+`DS4=/tmp/ds4-ref/ds4`.
+
+| Run | n | Median | Range |
+|---|---|---|---|
+| Prefill, port | 6 | 3,987 t/s | 3,928–4,045 |
+| Prefill, `d2d9338` reference | 12 | 3,967 t/s | 3,849–4,009 |
+| Decode, port | 6 | 125.08 t/s | 123.46–125.21 |
+| Decode, `d2d9338` reference | 6 | 124.67 t/s | 122.99–124.81 |
+
+Both pairs are within 0.5% of the same-machine reference. These are M5 Max numbers; the spec's §2.3 figures
+(1,515 / 88.19 t/s) are the M4 Max Mac Studio baseline, so the acceptance is the same-machine comparison.
