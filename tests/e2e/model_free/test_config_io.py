@@ -1,14 +1,27 @@
 from pathlib import Path
 from types import MappingProxyType
+from typing import cast
 
 import pytest
 
 import satyrn_agent
 from satyrn_agent import config_from_dict
-from satyrn_agent.config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
+from satyrn_agent.config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig, ThinkCloseMode
 from satyrn_agent.errors import ConfigurationError
 from tests.e2e.model_free._runner import run_scenario
 from tests.e2e.scenarios._generated.scenario_types import Scenario
+
+
+@pytest.mark.parametrize("value", ["soft", "", None, 1])
+def test_think_budget_rejects_invalid_close(value: object) -> None:
+    with pytest.raises((TypeError, ValueError), match="close"):
+        ThinkBudgetConfig(max_tokens=10, bias=1.0, close=cast("ThinkCloseMode", value))
+
+
+@pytest.mark.parametrize("value", [1, 0, "true", None])
+def test_think_budget_rejects_non_boolean_first_write(value: object) -> None:
+    with pytest.raises(TypeError, match="until_first_write"):
+        ThinkBudgetConfig(max_tokens=10, bias=1.0, until_first_write=cast("bool", value))
 
 
 def test_external_defaults_convert_to_domain_config() -> None:
@@ -29,7 +42,7 @@ def test_external_full_config_converts_modes_paths_and_values() -> None:
             "drafter_path": "drafter.gguf",
             "draft_tokens": 7,
             "sampling": {"temperature": 0.0, "top_k": 0, "top_p": 0.0, "min_p": 0.0},
-            "think_budget": {"max_tokens": 20, "bias": 2.5},
+            "think_budget": {"max_tokens": 20, "bias": 2.5, "close": "force", "until_first_write": True},
         }
     )
 
@@ -38,7 +51,12 @@ def test_external_full_config_converts_modes_paths_and_values() -> None:
         drafter_path=Path("drafter.gguf"),
         draft_tokens=7,
         sampling=SamplingOverrides(temperature=0.0, top_k=0, top_p=0.0, min_p=0.0),
-        think_budget=ThinkBudgetConfig(max_tokens=20, bias=2.5),
+        think_budget=ThinkBudgetConfig(
+            max_tokens=20,
+            bias=2.5,
+            close=ThinkCloseMode.FORCE,
+            until_first_write=True,
+        ),
     )
 
 
@@ -57,6 +75,10 @@ def test_external_full_config_converts_modes_paths_and_values() -> None:
         ({"sampling": {"temperature": -1}}, ConfigurationError, "non-negative"),
         ({"think_budget": []}, TypeError, "think_budget"),
         ({"think_budget": {}}, ConfigurationError, "max_tokens"),
+        ({"think_budget": {"max_tokens": 1, "bias": 1, "unknown": 1}}, ConfigurationError, "unknown think_budget"),
+        ({"think_budget": {"max_tokens": 1, "bias": 1, "close": "soft"}}, ConfigurationError, "close"),
+        ({"think_budget": {"max_tokens": 1, "bias": 1, "close": 1}}, TypeError, "close"),
+        ({"think_budget": {"max_tokens": 1, "bias": 1, "until_first_write": 1}}, TypeError, "until_first_write"),
         ({"sampling": {"temperature": None}}, TypeError, "temperature"),
         ({"sampling": {"top_k": True}}, TypeError, "top_k"),
         ({"sampling": {"temperature": float("nan")}}, ConfigurationError, "finite"),

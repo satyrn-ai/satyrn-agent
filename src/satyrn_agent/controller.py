@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Never
 
 from ds4py.engine.decode import PlainStep
 from ds4py.tui_commands import CommandError
+from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
 
 from .capabilities.think_budget import ThinkBudgetHook
-from .config import DFlashMode, ThinkBudgetConfig
+from .config import DFlashMode, ThinkBudgetConfig, ThinkCloseMode
 from .dflash import DFlashStep, Recorder
 from .errors import DFlashUnavailable
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from ds4py import Session
     from ds4py.engine.decode import DecodeStep
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
 _STATE_KEY = "satyrn.runtime"
 _DFLASH_USAGE = "/dflash [auto|on|off]"
-_THINK_USAGE = "/think-budget [<max_tokens> [bias]|off]"
+_THINK_USAGE = "/think-budget [<max_tokens> [bias]|off|close <bias|force>|until-first-write <on|off>]"
 
 
 @dataclass(slots=True)
@@ -42,6 +43,37 @@ class RuntimeState:
 
 def _verify_off(native: DFlashPolicyNative) -> int | None:
     return 0 if native.verify_mode_available else None
+
+
+def _parse_think_budget(
+    current: ThinkBudgetConfig | None,
+    args: tuple[str, ...],
+) -> ThinkBudgetConfig | None:
+    match args:
+        case ("off",):
+            return None
+        case ("close", mode):
+            if current is None:
+                raise CommandError(f"usage: {_THINK_USAGE}")
+            try:
+                close = ThinkCloseMode(mode)
+            except ValueError as error:
+                raise CommandError(f"usage: {_THINK_USAGE}") from error
+            return replace(current, close=close)
+        case ("until-first-write", enabled):
+            if current is None or enabled not in {"on", "off"}:
+                raise CommandError(f"usage: {_THINK_USAGE}")
+            return replace(current, until_first_write=enabled == "on")
+        case (("close" | "until-first-write"),):
+            raise CommandError(f"usage: {_THINK_USAGE}")
+        case _ if len(args) not in {1, 2}:
+            raise CommandError(f"usage: {_THINK_USAGE}")
+    try:
+        maximum = int(args[0])
+        bias = (current.bias if current is not None else 2.0) if len(args) == 1 else float(args[1])
+        return ThinkBudgetConfig(maximum, bias) if current is None else replace(current, max_tokens=maximum, bias=bias)
+    except (TypeError, ValueError) as error:
+        raise CommandError(f"usage: {_THINK_USAGE}") from error
 
 
 def select_step(  # noqa: PLR0913 - The policy needs native handles, configuration, and request context.
@@ -93,6 +125,8 @@ class RuntimeController:
         *,
         interactive: bool,
         end_think_token: int,
+        closing_tokens: Sequence[int],
+        vocab_size: int,
     ) -> None:
         self._session = session
         self._native = native
@@ -100,15 +134,20 @@ class RuntimeController:
         self._backend = backend
         self._interactive = interactive
         self._closed = False
-        self.think_hook = ThinkBudgetHook(config.think_budget, end_think_token)
+        self.think_hook = ThinkBudgetHook(config.think_budget, end_think_token, closing_tokens, vocab_size)
         self._live_state = session.state(_STATE_KEY, lambda: RuntimeState(config.dflash, PlainStep(), Recorder()))
         self._resolved = False
-        self._unsubscribes: list[Callable[[], None]] = []
+        self._unsubscribes: list[Callable[[], None]] = [
+            session.on_event(self._run_start, kinds={"run_start"}),
+            session.on_event(self._agent_event, kinds={"agent_event"}),
+        ]
         if interactive:
-            self._unsubscribes = [
-                session.on_event(self._session_start, kinds={"session_start"}),
-                session.on_event(self._run_end, kinds={"run_end"}),
-            ]
+            self._unsubscribes.extend(
+                [
+                    session.on_event(self._session_start, kinds={"session_start"}),
+                    session.on_event(self._run_end, kinds={"run_end"}),
+                ]
+            )
 
     @property
     def state(self) -> RuntimeState:
@@ -181,6 +220,21 @@ class RuntimeController:
     def after_identity_change(self) -> None:
         self._change(self._config.dflash, publish=True)
 
+    def _run_start(self, event: SessionEvent) -> None:
+        self.think_hook.start_run()
+
+    def _agent_event(self, event: SessionEvent) -> None:
+        inner = event.payload.get("event")
+        if not isinstance(inner, FunctionToolResultEvent):
+            return
+        part = inner.part
+        if (
+            isinstance(part, ToolReturnPart)
+            and part.outcome == "success"
+            and part.tool_name in {"write_file", "edit_file"}
+        ):
+            self.think_hook.suppress_thinking()
+
     def _session_start(self, event: SessionEvent) -> None:
         self.think_hook.set(self._config.think_budget)
         self.publish_status(resolved="off")
@@ -218,24 +272,16 @@ class RuntimeController:
         setting = self.think_hook.snapshot()
         if setting is None:
             return "think budget off"
-        return f"think budget {setting.max_tokens} tokens, bias {setting.bias}"
+        first_write = "on" if setting.until_first_write else "off"
+        return (
+            f"think budget {setting.max_tokens} tokens, bias {setting.bias}, "
+            f"close {setting.close}, until first write {first_write}"
+        )
 
     def set_think_budget(self, *args: str) -> str:
         if not args:
             return self._think_text()
-        if args == ("off",):
-            self._session.set_decode_step(self.state.step)
-            self.think_hook.set(None)
-            return self._think_text()
-        if len(args) not in {1, 2}:
-            raise CommandError(f"usage: {_THINK_USAGE}")
-        current = self.think_hook.snapshot()
-        try:
-            maximum = int(args[0])
-            bias = (current.bias if current is not None else 2.0) if len(args) == 1 else float(args[1])
-            setting = ThinkBudgetConfig(maximum, bias)
-        except (TypeError, ValueError) as error:
-            raise CommandError(f"usage: {_THINK_USAGE}") from error
+        setting = _parse_think_budget(self.think_hook.snapshot(), args)
         self._session.set_decode_step(self.state.step)
         self.think_hook.set(setting)
         return self._think_text()

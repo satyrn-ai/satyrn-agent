@@ -178,10 +178,28 @@ def test_real_metal_satyrn_harness_tui(
             assert tool_results > 0
             await prompt("Which file did you just read, and what identifying text did it contain?", max_tokens=256)
 
-            assert await command("/think-budget 2 32") == "think budget 2 tokens, bias 32.0"
-            assert await command("/think-budget") == "think budget 2 tokens, bias 32.0"
+            assert await command("/think-budget 2 32") == (
+                "think budget 2 tokens, bias 32.0, close bias, until first write off"
+            )
+            assert await command("/think-budget") == (
+                "think budget 2 tokens, bias 32.0, close bias, until first write off"
+            )
+            assert await command("/think-budget close force") == (
+                "think budget 2 tokens, bias 32.0, close force, until first write off"
+            )
+            assert await command("/think-budget until-first-write on") == (
+                "think budget 2 tokens, bias 32.0, close force, until first write on"
+            )
             await prompt(corpus["think-budget"]["prompt"], max_tokens=256)
-            assert await command("/think-budget 256 2") == "think budget 256 tokens, bias 2.0"
+            assert await command("/think-budget close bias") == (
+                "think budget 2 tokens, bias 32.0, close bias, until first write on"
+            )
+            assert await command("/think-budget until-first-write off") == (
+                "think budget 2 tokens, bias 32.0, close bias, until first write off"
+            )
+            assert await command("/think-budget 256 2") == (
+                "think budget 256 tokens, bias 2.0, close bias, until first write off"
+            )
             assert await command("/think-budget off") == "think budget off"
             assert await command("/think-budget") == "think budget off"
             await prompt("Give one concise sentence about durable agent state.", max_tokens=256)
@@ -203,11 +221,15 @@ def test_real_metal_satyrn_harness_tui(
             assert saved_record.payload_bytes > 0
             await command("/new")
             assert tui.footer.custom["dflash"] == "dflash: on, accept — (0/0)"
-            assert await command("/think-budget") == "think budget 64 tokens, bias 2.0"
+            assert await command("/think-budget") == (
+                "think budget 64 tokens, bias 2.0, close bias, until first write off"
+            )
             await command(f"/switch {saved_id}")
             assert runtime.messages == saved_messages
             assert tui.footer.custom["dflash"] == "dflash: on, accept — (0/0)"
-            assert await command("/think-budget") == "think budget 64 tokens, bias 2.0"
+            assert await command("/think-budget") == (
+                "think budget 64 tokens, bias 2.0, close bias, until first write off"
+            )
             await prompt("Confirm the README identifying text is still in our history.", max_tokens=256)
 
             before_compact = controller.state.recorder.snapshot()

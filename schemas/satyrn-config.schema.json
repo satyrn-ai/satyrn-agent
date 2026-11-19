@@ -105,6 +105,18 @@
         "bias": {
           "type": "number",
           "exclusiveMinimum": 0
+        },
+        "close": {
+          "type": "string",
+          "enum": [
+            "bias",
+            "force"
+          ],
+          "default": "bias"
+        },
+        "until_first_write": {
+          "type": "boolean",
+          "default": false
         }
       }
     }

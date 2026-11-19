@@ -9,7 +9,7 @@ from ds4py import EngineError, ThinkMode
 
 from ._native import CtypesDFlashNative
 from .capabilities.sampling import merge_sampling
-from .capabilities.think_budget import resolve_end_think
+from .capabilities.think_budget import THINKING_BUDGET_CLOSE, resolve_end_think
 from .config import SatyrnConfig
 from .controller import RuntimeController
 from .dflash import DFlashMetrics, DFlashStep
@@ -60,6 +60,8 @@ class SatyrnEngine:
                 self._engine.native.backend,
                 interactive=self._interactive,
                 end_think_token=resolve_end_think(self._engine),
+                closing_tokens=self._engine.tokenize(THINKING_BUDGET_CLOSE, rendered=True),
+                vocab_size=self._engine.info.vocab_size,
             )
             session.add_logits_hook(self._controller.think_hook)
             self._controller.initialize()

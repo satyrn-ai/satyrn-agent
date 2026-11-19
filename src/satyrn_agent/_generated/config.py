@@ -16,6 +16,8 @@ class SamplingOverridesDocument(TypedDict, closed=True):
 class ThinkBudgetDocument(TypedDict, closed=True):
     max_tokens: int
     bias: float
+    close: NotRequired[Literal["bias", "force"]]
+    until_first_write: NotRequired[bool]
 
 
 class ConfigDocument(TypedDict, closed=True):

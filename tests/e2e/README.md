@@ -5,7 +5,11 @@
 `tests/e2e/model_free` is the primary suite. JSON scenarios in
 `tests/e2e/scenarios/` drive public `satyrn_agent.open()` through real ds4-py
 workers and sessions. Only the external native library is replaced by ds4-py's
-deterministic `FakeNative` and scripted optional DFlash bindings.
+deterministic `FakeNative` and scripted optional DFlash bindings. The
+`capability-think-budget_forced` scenario proves the exact forced closing
+sequence. `test_think_budget.py` covers staged-token rewinds, reopened think
+blocks, reply reset, and immediate close. Harness tests cover successful and
+failed writes, non-success tool outcomes, shell-result exclusion, and run reset.
 
 `tests/e2e/schema/scenario.schema.json` is the external contract. Generate
 TypedDicts with `uv run --frozen datamodel-codegen` after schema edits. The
@@ -37,7 +41,9 @@ token/transcript/native-position alignment assertion in `tests/conftest.py`.
 installed `SatyrnAgentExtension`, ds4-py `DS4Model`, `AgentRuntime`, and TUI.
 It requires an initial DFlash footer, offered and accepted drafts, multiple
 user turns, a real `read_file` call/result, think-budget changes, off/on metric
-behavior, save/new/switch, and supported compaction. Each generation prompt
+behavior, save/new/switch, and supported compaction. The live think-capability
+tests also compare soft and forced closing. The live first-write case records
+thinking before and after a real write, then checks the next user run. Each generation prompt
 checks committed token IDs against assistant segments and native position;
 DFlash spans also reconcile token count with committed blocks plus accepted
 drafts. A supplied live environment must not skip a required branch.

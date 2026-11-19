@@ -3,7 +3,8 @@ from dataclasses import replace
 
 import pytest
 
-from satyrn_agent.config import SatyrnConfig, ThinkBudgetConfig
+from satyrn_agent.capabilities.think_budget import THINKING_BUDGET_CLOSE
+from satyrn_agent.config import SatyrnConfig, ThinkBudgetConfig, ThinkCloseMode
 from tests.conftest import (
     LiveSettings,
     MetadataRecorder,
@@ -55,3 +56,43 @@ def test_soft_think_budget_changes_real_decode_without_injection(live_settings: 
     assert budgeted.token_ids != baseline.token_ids
     assert len(recorder.calls) >= len(budgeted.token_ids)
     require_branches(case, {"think-budget-every-row", "soft-bias-without-injection"})
+
+
+def test_forced_think_budget_emits_exact_close(live_settings: LiveSettings) -> None:
+    case = corpus_cases()["think-budget"]
+    base = corpus_config(live_settings, case)
+    observations = {}
+    recorders = {}
+    for mode in (ThinkCloseMode.BIAS, ThinkCloseMode.FORCE):
+        config = replace(
+            base,
+            think_budget=ThinkBudgetConfig(
+                max_tokens=case["think_budget"]["max_tokens"],
+                bias=case["think_budget"]["bias"],
+                close=mode,
+            ),
+        )
+        recorder = MetadataRecorder()
+        with configured_session(live_settings, config, seed=case["seed"]) as (_, session):
+            prepare_chat(session, case["prompt"])
+            session.add_logits_hook(recorder)
+            observed = observe_round(session, max_tokens=case["max_tokens"], started=time.perf_counter())
+            assert_alignment(session, observed)
+            closing_tokens = tuple(session.engine.tokenize(THINKING_BUDGET_CLOSE, rendered=True))
+        observations[mode] = observed
+        recorders[mode] = recorder
+
+    forced_tokens = observations[ThinkCloseMode.FORCE].token_ids
+    close_length = len(closing_tokens)
+    close_positions = [
+        index for index in range(len(forced_tokens)) if forced_tokens[index : index + close_length] == closing_tokens
+    ]
+    assert close_positions
+    assert observations[ThinkCloseMode.BIAS].token_ids != forced_tokens
+    assert all(
+        observations[ThinkCloseMode.BIAS].token_ids[index : index + close_length] != closing_tokens
+        for index in range(len(observations[ThinkCloseMode.BIAS].token_ids))
+    )
+    for mode in (ThinkCloseMode.BIAS, ThinkCloseMode.FORCE):
+        thinking = max((call.think_tokens for call in recorders[mode].calls), default=0)
+        print(f"{mode} think budget: max thinking tokens={thinking}, generated={len(observations[mode].token_ids)}")

@@ -46,6 +46,8 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--draft-tokens", type=_non_negative_int)
     parser.add_argument("--think-budget", type=_positive_int)
     parser.add_argument("--think-bias", type=float)
+    parser.add_argument("--think-close", choices=("bias", "force"))
+    parser.add_argument("--think-until-first-write", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--no-think-budget", action="store_true")
 
 
@@ -81,8 +83,11 @@ def _resolve_path(value: object, project_dir: Path) -> object:
 
 
 def _merge_think_budget(args: argparse.Namespace, values: dict[str, object], source: Path) -> None:
-    if args.no_think_budget and (args.think_budget is not None or args.think_bias is not None):
-        raise ConfigurationError("--no-think-budget conflicts with positive think-budget flags")
+    if args.no_think_budget and any(
+        value is not None
+        for value in (args.think_budget, args.think_bias, args.think_close, args.think_until_first_write)
+    ):
+        raise ConfigurationError("--no-think-budget conflicts with other think-budget flags")
     if args.think_budget is not None:
         validate_integer(args.think_budget, "max_tokens", minimum=1)
     project_budget = values.get("think_budget")
@@ -94,14 +99,24 @@ def _merge_think_budget(args: argparse.Namespace, values: dict[str, object], sou
     if args.no_think_budget:
         values.pop("think_budget", None)
     elif args.think_budget is not None:
-        bias = project_budget["bias"] if is_mapping(project_budget) else 2.0
-        values["think_budget"] = {"max_tokens": args.think_budget, "bias": bias}
-    if args.think_bias is not None:
+        budget = dict(project_budget) if is_mapping(project_budget) else {"bias": 2.0}
+        values["think_budget"] = {**budget, "max_tokens": args.think_budget}
+    overrides = {
+        name: value
+        for name, value in (
+            ("bias", args.think_bias),
+            ("close", args.think_close),
+            ("until_first_write", args.think_until_first_write),
+        )
+        if value is not None
+    }
+    if overrides:
         budget = values.get("think_budget")
         if not is_mapping(budget):
-            raise ConfigurationError("--think-bias requires an effective think budget")
-        validate_think_bias(args.think_bias)
-        values["think_budget"] = {**budget, "bias": args.think_bias}
+            raise ConfigurationError("think-budget flags require an effective think budget")
+        if args.think_bias is not None:
+            validate_think_bias(args.think_bias)
+        values["think_budget"] = {**budget, **overrides}
 
 
 def resolve_settings(args: argparse.Namespace, project_dir: Path) -> ResolvedSettings:

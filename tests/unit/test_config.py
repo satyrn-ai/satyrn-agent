@@ -4,7 +4,7 @@ from typing import cast
 
 import pytest
 
-from satyrn_agent.config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
+from satyrn_agent.config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig, ThinkCloseMode
 
 
 def test_config_defaults_are_immutable_and_slotted() -> None:
@@ -18,6 +18,13 @@ def test_config_defaults_are_immutable_and_slotted() -> None:
     assert not hasattr(config, "__dict__")
     with pytest.raises(FrozenInstanceError):
         config.__setattr__("draft_tokens", 7)
+
+
+def test_think_budget_close_and_first_write_defaults() -> None:
+    config = ThinkBudgetConfig(max_tokens=10, bias=2.0)
+
+    assert config.close is ThinkCloseMode.BIAS
+    assert config.until_first_write is False
 
 
 def test_explicit_zero_sampling_overrides_are_values() -> None:
