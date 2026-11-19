@@ -1,6 +1,6 @@
-From 7cc0da00cbdf40623e43648d987bfca74d2aa244 Mon Sep 17 00:00:00 2001
+From 84723274b1bd4d2ae4ad6e97e3ad8413366f523e Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
-Date: Thu, 19 Nov 2026 07:24:04 -0500
+Date: Thu, 19 Nov 2026 07:29:28 -0500
 Subject: [PATCH 4/6] mellum: optimized q8 prefill and decode
 
 Tiled expert GEMMs from 32 rows, batched Q8_0 projections, Metal 4

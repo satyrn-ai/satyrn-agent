@@ -1,6 +1,6 @@
-From 6ae7a89a35ebaafb784c70fee45b0fa78e5a7c71 Mon Sep 17 00:00:00 2001
+From 69641c01b97960ba687d2fb18336dc6ef14c83ce Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
-Date: Thu, 19 Nov 2026 07:24:08 -0500
+Date: Thu, 19 Nov 2026 07:29:32 -0500
 Subject: [PATCH 6/6] mellum: ssd expert streaming
 
 SSD expert streaming: expert address tables for decode and tiled prefill,
@@ -25,12 +25,12 @@ Carried-commits: 2bb8f7fcec1c4bc691046d00d406e9d4fc68b868 1268d49811528be618590e
  tests/mellum_trace_context.h       |  19 +
  tests/test_mellum_config.c         |  21 +-
  tests/test_mellum_kernels.c        | 769 ++++++++++++++++++++++++--
- tests/test_mellum_s4_driver.py     | 117 ++++
+ tests/test_mellum_s4_driver.py     | 122 +++++
  tests/test_mellum_stream.c         | 415 ++++++++++++++
  tests/test_mellum_trace_stream.c   |  34 ++
  tests/test_metal_tensor_lifetime.m |  47 ++
  tools/mellum_s4_measure.c          | 237 ++++++++
- 18 files changed, 4196 insertions(+), 168 deletions(-)
+ 18 files changed, 4201 insertions(+), 168 deletions(-)
  create mode 100644 ds4_mellum_stream.c
  create mode 100644 ds4_mellum_stream.h
  create mode 100644 tests/test_mellum_s4_driver.py
@@ -4693,10 +4693,10 @@ index 60f957a..9b10856 100644
  }
 diff --git a/tests/test_mellum_s4_driver.py b/tests/test_mellum_s4_driver.py
 new file mode 100644
-index 0000000..23b0c2b
+index 0000000..5c3f454
 --- /dev/null
 +++ b/tests/test_mellum_s4_driver.py
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,122 @@
 +"""Live smoke for tools/mellum_s4_measure (DS4_TEST_MELLUM_MODEL): resident and streamed runs of a short chat
 +prompt report every field the S4 measurement reads, and greedy decode gives the same token ids; the append
 +phase extends the warm session.  Skipped without the model."""
@@ -4800,11 +4800,16 @@ index 0000000..23b0c2b
 +        self.assertTrue(b['streaming'] and b['slots'] == 64)
 +        # the engine's effective slot count, not the flag as given
 +        # the engine's effective slot count is the 6 GiB budget floored to whole experts of the file's quant
++        # the engine's effective slot count is the 6 GiB budget floored to whole experts of the file's quant:
++        # 6 GiB / 6,580,224 B = 979 for Q8_0, 6 GiB / 3,290,112 B = 1,958 for MXFP4_MOE.  The model path may be
++        # a Hugging Face blob named by its hash, so the count itself is the check: it must be one of the known
++        # quants' counts, and the name settles which when it names a quant.
 +        expected = {'Q8_0': 979, 'MXFP4_MOE': 1958}
-+        quant = next((q for q in expected if q in os.path.basename(model)), None)
-+        self.assertIsNotNone(quant, 'the smoke test knows no slot count for this quant')
 +        self.assertTrue(c['streaming'])
-+        self.assertEqual(c['slots'], expected[quant])
++        self.assertIn(c['slots'], set(expected.values()))
++        named = next((q for q in expected if q in os.path.basename(model)), None)
++        if named:
++            self.assertEqual(c['slots'], expected[named])
 +        self.assertEqual([t['id'] for t in a['tokens']], [t['id'] for t in c['tokens']])
 +        self.assertEqual([t['id'] for t in a['tokens']], [t['id'] for t in b['tokens']])
 +        self.assertGreater(b['stops'], 0)

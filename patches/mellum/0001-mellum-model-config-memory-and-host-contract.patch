@@ -1,6 +1,6 @@
-From e79da846ca7cde8db19a29912b19f952c151d620 Mon Sep 17 00:00:00 2001
+From 2ccfb39576ec20a5562453d2a0f3a641c5c20dff Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
-Date: Thu, 19 Nov 2026 07:23:58 -0500
+Date: Thu, 19 Nov 2026 07:29:21 -0500
 Subject: [PATCH 1/6] mellum: model config, memory and host contract
 
 Recognition of general.architecture = mellum inside the QWEN4_EXP family,

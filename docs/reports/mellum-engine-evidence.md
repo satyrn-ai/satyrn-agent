@@ -106,11 +106,11 @@ then built and tested. Model: the SHA-verified Q8_0 file (`69e0ac02…6841f`, 12
 | 0003 | `ffaffa3f` | ok | 509 | `ds4_test --mellum-rewind`: OK |
 | 0004 | `76aadc28` | ok | 662 | `make test-mellum-fastpath`: 45/45 |
 | 0005 | `c22290b3` | ok | 662 | MXFP4 config accepted; mixtures refused by name |
-| 0006 | `cd3911c3` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
+| 0006 | `ece0d5fe` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
 
 The check counts belong to their prefix: 0003 is 509, 0004 and 0005 are 662, 0006 is 992. `ds4-check --build`
 links `libds4` only and never compiles the test sources, which is why each prefix above was also built and run
-as a suite. The six patches applied in order reconstruct to tree `cd3911c3` from a pristine clone (`ds4-check --model mellum --build`).
+as a suite. The six patches applied in order reconstruct to tree `ece0d5fe` from a pristine clone (`ds4-check --model mellum --build`).
 
 ## Oracle against an immutable `d2d9338` build
 

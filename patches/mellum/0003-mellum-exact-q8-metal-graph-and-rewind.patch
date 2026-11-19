@@ -1,6 +1,6 @@
-From e88621e82aa5fdd0df0ac220940bf4c130ad26fa Mon Sep 17 00:00:00 2001
+From 0beb0d2767ad415bae98057d7e7a175f551a8bf0 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
-Date: Thu, 19 Nov 2026 07:24:02 -0500
+Date: Thu, 19 Nov 2026 07:29:26 -0500
 Subject: [PATCH 3/6] mellum: exact q8 metal graph and rewind
 
 An exact Q8_0 Metal graph: q/k norm and RoPE, ring commit and sliding-window

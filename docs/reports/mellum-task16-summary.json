@@ -1,7 +1,7 @@
 {
   "context": 32768,
   "cwd": "/private/tmp/mellum-task16-final-check/mellum",
-  "engine_tree": "cd3911c3",
+  "engine_tree": "ece0d5fe",
   "generated_tokens": 512,
   "hardware": "Apple M5 Max",
   "memory_bytes": 137438953472,
@@ -3163,7 +3163,7 @@
     "0003": "ffaffa3f",
     "0004": "76aadc28",
     "0005": "c22290b3",
-    "0006": "cd3911c3"
+    "0006": "ece0d5fe"
   },
   "resident_streamed_parity": {
     "runs_per_mode": 3,

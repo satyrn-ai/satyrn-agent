@@ -1,6 +1,6 @@
-From bedec5f5dafaea679e1e84a9699e1a802b13a3fb Mon Sep 17 00:00:00 2001
+From 6cd2f4d047c5a88a706bf06575c866d21aed7d74 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
-Date: Thu, 19 Nov 2026 07:24:00 -0500
+Date: Thu, 19 Nov 2026 07:29:23 -0500
 Subject: [PATCH 2/6] mellum: tokenizer, chat and thinking
 
 The mellum2 pre-tokenizer and its generated Unicode classes, the corpus

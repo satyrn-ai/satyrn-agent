@@ -1,6 +1,6 @@
-From 3786a2eccc17a66110c94b2925fffd1f76d5ea9b Mon Sep 17 00:00:00 2001
+From 3f04b4a9a57af4cab9a6a75198121b6127075ae6 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
-Date: Thu, 19 Nov 2026 07:24:06 -0500
+Date: Thu, 19 Nov 2026 07:29:30 -0500
 Subject: [PATCH 5/6] mellum: mxfp4 moe experts
 
 Resident MXFP4_MOE experts: loading and validation, the expert index and pack
