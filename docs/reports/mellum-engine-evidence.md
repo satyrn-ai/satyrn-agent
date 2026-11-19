@@ -97,10 +97,10 @@ directory, so no two runs share `setup.txt`, stderr files or `runs.txt`.
 
 | Run | n | Median | Range |
 |---|---|---|---|
-| Prefill, port | 6 | 3,902 t/s | 3,894–3,972 |
-| Prefill, `d2d9338` reference | 6 | 3,918 t/s | 3,908–3,944 |
-| Decode, port | 6 | 124.67 t/s | 116.17–125.78 |
-| Decode, `d2d9338` reference | 6 | 126.55 t/s | 126.26–126.71 |
+| Prefill, port | 6 | 3,960 t/s | 3,885–3,968 |
+| Prefill, `d2d9338` reference | 6 | 3,978 t/s | 3,939–4,010 |
+| Decode, port | 6 | 127.45 t/s | 120.41–127.92 |
+| Decode, `d2d9338` reference | 6 | 128.32 t/s | 126.64–128.87 |
 
 These historical pairs are within 1.5% of the same-machine reference, each engine loading its own
 shaders. The different Q8 hash and the M5 Max host mean they do not establish the published-model
@@ -164,3 +164,22 @@ complete native logs, the frozen prompt and validation scripts remain in
 `.superpowers/sdd/2026-11-16-mellum-support/task16-evidence/` (ignored build/diagnostic evidence).
 
 **Acceptance still pending:** physical 16 GB / 8 GB rows and their no-swap/working-set/speed requirements remain Task 20 gates. These 128 GiB host runs establish local exactness, not target memory fit. Historical Q8 oracle/performance and the invalid MXFP4 timing rows above also need rerunning. Task 17 cannot begin its Qwen rebase until PR [#24](https://github.com/satyrn-ai/satyrn-agent/pull/24) merges; it was OPEN when checked.
+
+## Per-patch acceptance on the published Q8 model
+
+Run against the exported patches (`patches/mellum/0001`–`0005`) with the SHA-verified Q8_0 file:
+
+| Gate | Result |
+|---|---|
+| `tests/test_mellum_config`, model-free | pass |
+| `tests/test_mellum_config` with `DS4_TEST_MELLUM_MODEL` | pass — keys validated, every tensor bound |
+| `tests/test_mellum_tokenizer` with the model | 30/30 ids equal the reference encode |
+| `tests/test_mellum_kernels` | 992 checks, 0 failures |
+| `ds4_test --mellum-rewind` | OK — 5 cases plus the frontier k=1 and replay cases |
+| `make test-mellum-fastpath` | 45/45 |
+| `tests/mellum_oracle_compare.sh` against a `d2d9338` build | PASS — 2,200-token token files byte-identical at every position, 64/64 greedy ids equal |
+
+The oracle's cross-engine "exact prefill" comparison now uses the near-tie rule rather than byte equality: at
+`d2d9338` the reference's `DS4_MELLUM_EXACT_PREFILL` does not disable its attention tiles, so its own exact prefill
+is not byte-equal to its decode at 2,200 tokens. Our port's exact prefill *is* byte-equal to its decode, checked in
+the same run. That is a difference in the reference, not in the port, and the script says so in its comment.
