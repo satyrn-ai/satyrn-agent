@@ -4,13 +4,17 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 from ds4py.agent_composition import EngineOpenOptions
+from ds4py.engine.lifecycle import SessionEvent
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
+    PartStartEvent,
+    RetryPromptPart,
+    ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
 )
@@ -18,7 +22,12 @@ from pydantic_ai.messages import (
 from satyrn_agent.cli import SatyrnAgentExtension, main, resolve_config
 from satyrn_agent.config import DFlashMode, SatyrnConfig, ThinkCloseMode
 from satyrn_agent.errors import ConfigurationError
-from tests.e2e.model_free._harness import native_for, open_harness, scripted_tool_exchange
+from tests.e2e.model_free._harness import (
+    native_for,
+    native_for_thinking_tool_exchange,
+    open_harness,
+    scripted_tool_exchange,
+)
 from tests.e2e.model_free._native import ScenarioFakeNative
 
 
@@ -535,6 +544,115 @@ def test_real_runtime_executes_tool_call_and_result(
     agent_events = [event.payload["event"] for event in events]
     assert any(isinstance(event, FunctionToolCallEvent) for event in agent_events)
     assert any(isinstance(event, FunctionToolResultEvent) for event in agent_events)
+
+
+def _thinking_starts(events: list[SessionEvent]) -> list[ThinkingPart]:
+    parts = []
+    for event in events:
+        inner = event.payload["event"]
+        if isinstance(inner, PartStartEvent) and isinstance(inner.part, ThinkingPart):
+            parts.append(inner.part)
+    return parts
+
+
+def _tool_result_index(events: list[SessionEvent], tool_name: str) -> int:
+    for index, event in enumerate(events):
+        inner = event.payload["event"]
+        if isinstance(inner, FunctionToolResultEvent) and inner.part.tool_name == tool_name:
+            return index
+    raise AssertionError(f"missing {tool_name} result")
+
+
+@pytest.mark.parametrize("tool_name", ["write_file", "edit_file"])
+def test_successful_file_write_suppresses_thinking_until_the_next_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+) -> None:
+    if tool_name == "edit_file":
+        (tmp_path / "existing.txt").write_text("old text")
+        parameters = {"path": "existing.txt", "old_text": "old", "new_text": "new"}
+    else:
+        parameters = {"path": "created.txt", "content": "new text"}
+    native = native_for_thinking_tool_exchange(tool_name, parameters)
+    argv = ["--dflash", "off", "--think-budget", "4096", "--think-until-first-write"]
+
+    with open_harness(tmp_path, native, argv, monkeypatch) as harness:
+        events: list[SessionEvent] = []
+        harness.runtime.on_event(events.append, kinds={"agent_event"})
+        asyncio.run(harness.runtime.run("write"))
+
+        result_index = _tool_result_index(events, tool_name)
+        assert _thinking_starts(events[:result_index])
+        assert not _thinking_starts(events[result_index:])
+        if tool_name == "edit_file":
+            assert (tmp_path / "existing.txt").read_text() == "new text"
+        else:
+            assert (tmp_path / "created.txt").read_text() == "new text"
+
+        events.clear()
+        asyncio.run(harness.runtime.run("think again"))
+        assert _thinking_starts(events)
+
+
+def test_failed_write_does_not_suppress_thinking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native = native_for_thinking_tool_exchange("write_file", {"path": ".", "content": "no"})
+    argv = ["--dflash", "off", "--think-budget", "4096", "--think-until-first-write"]
+
+    with open_harness(tmp_path, native, argv, monkeypatch) as harness:
+        events: list[SessionEvent] = []
+        harness.runtime.on_event(events.append, kinds={"agent_event"})
+        asyncio.run(harness.runtime.run("write"))
+
+        result_index = _tool_result_index(events, "write_file")
+        result = events[result_index].payload["event"]
+        assert isinstance(result, FunctionToolResultEvent)
+        assert isinstance(result.part, RetryPromptPart)
+        assert _thinking_starts(events[result_index:])
+        assert (tmp_path / ".").is_dir()
+
+
+@pytest.mark.parametrize("outcome", ["failed", "denied", "interrupted"])
+def test_non_success_write_outcomes_do_not_suppress_thinking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: Literal["failed", "denied", "interrupted"],
+) -> None:
+    native = native_for_thinking_tool_exchange("read_file", {"path": "README.md"})
+    (tmp_path / "README.md").write_text("contents")
+    argv = ["--dflash", "off", "--think-budget", "4096", "--think-until-first-write"]
+
+    with open_harness(tmp_path, native, argv, monkeypatch) as harness:
+        events: list[SessionEvent] = []
+        harness.runtime.on_event(events.append, kinds={"agent_event"})
+        part = ToolReturnPart("write_file", "not written", tool_call_id="synthetic", outcome=outcome)
+        harness.runtime.model.session.emit("agent_event", event=FunctionToolResultEvent(part=part))
+        asyncio.run(harness.runtime.run("read"))
+
+        result_index = _tool_result_index(events, "read_file")
+        assert _thinking_starts(events[result_index:])
+
+
+def test_successful_shell_result_does_not_suppress_thinking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native = native_for_thinking_tool_exchange("read_file", {"path": "README.md"})
+    (tmp_path / "README.md").write_text("contents")
+    argv = ["--dflash", "off", "--think-budget", "4096", "--think-until-first-write"]
+
+    with open_harness(tmp_path, native, argv, monkeypatch) as harness:
+        events: list[SessionEvent] = []
+        harness.runtime.on_event(events.append, kinds={"agent_event"})
+        part = ToolReturnPart("run_command", "wrote shell.txt", tool_call_id="shell", outcome="success")
+        harness.runtime.model.session.emit("agent_event", event=FunctionToolResultEvent(part=part))
+        asyncio.run(harness.runtime.run("read"))
+
+        result_index = _tool_result_index(events, "read_file")
+        assert _thinking_starts(events[result_index:])
 
 
 def test_noninteractive_main_runs_and_saves_without_status_events(

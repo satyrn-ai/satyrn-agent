@@ -10,10 +10,10 @@ decode).
 
 Current status: patch-series tooling and the initial typed `satyrn_agent`
 package. The package implements optional DFlash bindings, session policy,
-native sampling defaults, a soft think budget, and host-driven speculative
+native sampling defaults, optional soft or forced think-budget closing, and host-driven speculative
 decode. Real Metal/GGUF acceptance is a separate explicit gate; portable tests
 do not establish live parity. The `satyrn-agent` command reuses ds4-py's agent
-CLI, runtime, tools, persistence, and TUI with Satyrn's DFlash and soft
+CLI, runtime, tools, persistence, and TUI with Satyrn's DFlash and
 think-budget controls.
 
 `ds4-sync`, `ds4-export`, and
@@ -101,7 +101,7 @@ the domain defaults, and explicit CLI values override the project:
 dflash = "auto"
 drafter_path = "/absolute/path/dflash-Qwen3.8-27B-Q4_0.gguf"
 draft_tokens = 0
-think_budget = { max_tokens = 512, bias = 2.0 }
+think_budget = { max_tokens = 512, bias = 2.0, close = "bias", until_first_write = false }
 
 [tool.satyrn.sampling]
 temperature = 0.0
@@ -118,15 +118,36 @@ uv run satyrn-agent \
 ```
 
 The Satyrn options are `--dflash auto|on|off`, `--drafter PATH`,
-`--draft-tokens N`, `--think-budget N`, `--think-bias FLOAT`, and
-`--no-think-budget`. ds4-py owns the generic engine and sampling options,
-including `--top-k`. Explicit zero is preserved. Drafter path and draft count
-are fixed at native open. Native think-mode options remain independent of the
-soft think budget.
+`--draft-tokens N`, `--think-budget N`, `--think-bias FLOAT`,
+`--think-close bias|force`, `--think-until-first-write`,
+`--no-think-until-first-write`, and `--no-think-budget`. ds4-py owns the generic
+engine and sampling options, including `--top-k`. Explicit zero is preserved.
+Drafter path and draft count are fixed at native open. Native think-mode options
+remain independent of the think budget.
+
+The `close` field defaults to `bias`, which keeps the existing soft logit bias.
+Set `close = "force"` to force this closing sequence one token at a time after
+the reply reaches `max_tokens` thinking tokens:
+
+```text
+
+Considering the limited time by the user, I have to give the solution based on the thinking directly now.
+</think>
+```
+
+The `bias` value is unused when `close` is `force`. The `until_first_write`
+field defaults to `false`. If it is `true`, a successful `write_file` or
+`edit_file` call forces `</think>` as the first token of every later thought in
+that agent run. The next user message starts with thinking allowed again. A
+failed write does not trigger this behavior. Shell commands that write files
+do not trigger it.
 
 Use `/dflash [auto|on|off]` to query or change DFlash between prompts. Use
-`/think-budget [<max_tokens> [bias]|off]` to query, replace, or disable the soft
-logit bias. The footer shows requested/resolved mode and committed acceptance,
+`/think-budget [<max_tokens> [bias]|off]` to query, replace, or disable the
+budget. Use `/think-budget close bias|force` to change the close mode. Use
+`/think-budget until-first-write on|off` to change first-write suppression. The
+last two forms require an active budget. The query response shows both values.
+The footer shows requested/resolved mode and committed acceptance,
 for example `dflash: auto/on, accept 62.5% (10/16)`. `/new` and `/switch`
 reset these controls and counters to startup values; fork retains them.
 Standard `/save`, `/compact`, and other ds4-py commands use the same runtime.

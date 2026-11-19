@@ -10,6 +10,7 @@ from ds4py.model import ResponseTerminalError
 from ds4py.tui import TUI
 from prompt_toolkit.output import DummyOutput
 
+from satyrn_agent.config import ThinkCloseMode
 from satyrn_agent.errors import DFlashError
 from tests.e2e.model_free._harness import Harness, native_for, native_for_dflash, native_for_rounds, open_harness
 
@@ -23,13 +24,25 @@ def test_new_orders_safe_native_selection_and_python_only_reset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     native = native_for_dflash("alpha beta")
-    argv = ["--dflash", "on", "--drafter", "drafter.gguf", "--think-budget", "10"]
+    argv = [
+        "--dflash",
+        "on",
+        "--drafter",
+        "drafter.gguf",
+        "--think-budget",
+        "10",
+        "--think-close",
+        "force",
+        "--think-until-first-write",
+    ]
     with open_harness(tmp_path, native, argv, monkeypatch, interactive=True) as harness:
         tui = make_tui(harness)
         controller = harness.wrappers[0].controller
         old_state = controller.state
         old_state.recorder.committed(4, 2, replacement=False, discarded=2)
         asyncio.run(tui.commands.execute("/think-budget 99 8"))
+        asyncio.run(tui.commands.execute("/think-budget close bias"))
+        asyncio.run(tui.commands.execute("/think-budget until-first-write off"))
         statuses = []
         listener_counts = []
         native_before_start = []
@@ -51,6 +64,8 @@ def test_new_orders_safe_native_selection_and_python_only_reset(
             setting = controller.think_hook.snapshot()
             assert setting is not None
             assert setting.max_tokens == 10
+            assert setting.close is ThinkCloseMode.FORCE
+            assert setting.until_first_write is True
             assert [event.payload["text"] for event in statuses] == [
                 "dflash: on/off, accept — (0/0)",
                 "dflash: on, accept — (0/0)",
@@ -84,7 +99,18 @@ def test_switch_resets_state_and_restores_saved_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     native = native_for_dflash("alpha beta gamma")
-    argv = ["--dflash", "on", "--drafter", "drafter.gguf", "--think-budget", "10", "--nothink"]
+    argv = [
+        "--dflash",
+        "on",
+        "--drafter",
+        "drafter.gguf",
+        "--think-budget",
+        "10",
+        "--think-close",
+        "force",
+        "--think-until-first-write",
+        "--nothink",
+    ]
     with open_harness(tmp_path, native, argv, monkeypatch, interactive=True) as harness:
         tui = make_tui(harness)
         controller = harness.wrappers[0].controller
@@ -94,6 +120,8 @@ def test_switch_resets_state_and_restores_saved_history(
             saved = await harness.runtime.save()
             saved_messages = harness.runtime.messages
             await tui.commands.execute("/think-budget 99 8")
+            await tui.commands.execute("/think-budget close bias")
+            await tui.commands.execute("/think-budget until-first-write off")
             old_state = controller.state
             statuses = []
             harness.runtime.on_event(statuses.append, kinds={"status"})
@@ -114,6 +142,8 @@ def test_switch_resets_state_and_restores_saved_history(
             setting = controller.think_hook.snapshot()
             assert setting is not None
             assert setting.max_tokens == 10
+            assert setting.close is ThinkCloseMode.FORCE
+            assert setting.until_first_write is True
             assert harness.runtime.messages == saved_messages
             assert switching == [0]
             assert [event.payload["text"] for event in statuses] == [
@@ -143,6 +173,8 @@ def test_fork_retains_state_think_metrics_and_native_mode(
         state = controller.state
         state.recorder.committed(4, 2, replacement=False, discarded=2)
         controller.set_think_budget("99", "8")
+        controller.set_think_budget("close", "force")
+        controller.set_think_budget("until-first-write", "on")
         modes = list(native.verify_modes)
         starts = []
         harness.runtime.on_event(starts.append, kinds={"session_start"})
@@ -154,6 +186,8 @@ def test_fork_retains_state_think_metrics_and_native_mode(
         setting = controller.think_hook.snapshot()
         assert setting is not None
         assert setting.max_tokens == 99
+        assert setting.close is ThinkCloseMode.FORCE
+        assert setting.until_first_write is True
         assert native.verify_modes == modes
         assert starts == []
 

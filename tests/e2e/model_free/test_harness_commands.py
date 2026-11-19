@@ -12,7 +12,7 @@ from ds4py.tui_commands import CommandError
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from satyrn_agent.config import DFlashMode
+from satyrn_agent.config import DFlashMode, ThinkCloseMode
 from satyrn_agent.dflash import DFlashStep
 from satyrn_agent.errors import DFlashError, DFlashUnavailable
 from tests.e2e.model_free._harness import Harness, native_for, native_for_dflash, open_harness
@@ -49,18 +49,44 @@ def test_initial_footer_and_think_budget_query_set_forms(
             assert tui.footer.custom["dflash"] == expected
             assert len(events) == 1
             assert asyncio.run(tui.commands.execute("/dflash")) == expected
-            assert asyncio.run(tui.commands.execute("/think-budget")) == "think budget 10 tokens, bias 2.0"
+            assert asyncio.run(tui.commands.execute("/think-budget")) == (
+                "think budget 10 tokens, bias 2.0, close bias, until first write off"
+            )
             hook = controller.think_hook
 
-            assert asyncio.run(tui.commands.execute("/think-budget 20")) == "think budget 20 tokens, bias 2.0"
+            assert asyncio.run(tui.commands.execute("/think-budget 20")) == (
+                "think budget 20 tokens, bias 2.0, close bias, until first write off"
+            )
             assert controller.think_hook is hook
             setting = hook.snapshot()
             assert setting is not None
             assert (setting.max_tokens, setting.bias) == (20, 2.0)
-            assert asyncio.run(tui.commands.execute("/think-budget 30 4.5")) == ("think budget 30 tokens, bias 4.5")
+            assert asyncio.run(tui.commands.execute("/think-budget 30 4.5")) == (
+                "think budget 30 tokens, bias 4.5, close bias, until first write off"
+            )
+            assert asyncio.run(tui.commands.execute("/think-budget close force")) == (
+                "think budget 30 tokens, bias 4.5, close force, until first write off"
+            )
+            assert asyncio.run(tui.commands.execute("/think-budget until-first-write on")) == (
+                "think budget 30 tokens, bias 4.5, close force, until first write on"
+            )
+            with pytest.raises(CommandError, match="usage: /think-budget"):
+                asyncio.run(tui.commands.execute("/think-budget close soft"))
+            with pytest.raises(CommandError, match="usage: /think-budget"):
+                asyncio.run(tui.commands.execute("/think-budget until-first-write perhaps"))
+            assert asyncio.run(tui.commands.execute("/think-budget 40")) == (
+                "think budget 40 tokens, bias 4.5, close force, until first write on"
+            )
+            changed = hook.snapshot()
+            assert changed is not None
+            assert changed.close is ThinkCloseMode.FORCE
+            assert changed.until_first_write is True
             assert asyncio.run(tui.commands.execute("/think-budget off")) == "think budget off"
             assert hook.snapshot() is None
-            assert asyncio.run(tui.commands.execute("/think-budget 12")) == "think budget 12 tokens, bias 2.0"
+            assert asyncio.run(tui.commands.execute("/think-budget 12")) == (
+                "think budget 12 tokens, bias 2.0, close bias, until first write off"
+            )
+            assert tui.footer.custom["dflash"] == expected
             assert not hasattr(controller, "_current")
         finally:
             tui.close()
@@ -80,6 +106,12 @@ def test_initial_footer_and_think_budget_query_set_forms(
         ("/think-budget 2 inf", "/think-budget [<max_tokens> [bias]|off]"),
         ("/think-budget 2 3 extra", "/think-budget [<max_tokens> [bias]|off]"),
         ("/think-budget off extra", "/think-budget [<max_tokens> [bias]|off]"),
+        ("/think-budget close soft", "/think-budget [<max_tokens> [bias]|off]"),
+        ("/think-budget close force extra", "/think-budget [<max_tokens> [bias]|off]"),
+        ("/think-budget until-first-write perhaps", "/think-budget [<max_tokens> [bias]|off]"),
+        ("/think-budget until-first-write on extra", "/think-budget [<max_tokens> [bias]|off]"),
+        ("/think-budget close force", "/think-budget [<max_tokens> [bias]|off]"),
+        ("/think-budget until-first-write on", "/think-budget [<max_tokens> [bias]|off]"),
     ],
 )
 def test_command_usage_errors(
@@ -90,6 +122,8 @@ def test_command_usage_errors(
 ) -> None:
     with open_harness(tmp_path, native_for("answer"), ["--dflash", "off"], monkeypatch, interactive=True) as harness:
         tui = make_tui(harness)
+        if command.startswith("/think-budget"):
+            usage = "/think-budget [<max_tokens> [bias]|off|close <bias|force>|until-first-write <on|off>]"
         try:
             with pytest.raises(CommandError, match=f"usage: {re.escape(usage)}"):
                 asyncio.run(tui.commands.execute(command))
@@ -352,7 +386,7 @@ def test_slash_mode_change_waits_for_active_native_round(
         open_harness(
             tmp_path,
             native,
-            ["--dflash", "on", "--drafter", "drafter.gguf", "--nothink"],
+            ["--dflash", "on", "--drafter", "drafter.gguf", "--think-budget", "10", "--nothink"],
             monkeypatch,
             interactive=True,
         ) as harness,
@@ -370,12 +404,18 @@ def test_slash_mode_change_waits_for_active_native_round(
             async def run() -> None:
                 task = asyncio.create_task(tui.run("hello"))
                 await asyncio.wait_for(asyncio.to_thread(started.wait), 2)
-                input_.send_text("/dflash off\n/exit\n")
+                input_.send_text("/dflash off\n/think-budget close force\n/exit\n")
                 await asyncio.sleep(0.02)
                 assert native.verify_modes[-1] == 1
+                setting = harness.wrappers[0].controller.think_hook.snapshot()
+                assert setting is not None
+                assert setting.close is ThinkCloseMode.BIAS
                 release.set()
                 await asyncio.wait_for(task, 2)
                 assert native.verify_modes[-1] == 0
+                setting = harness.wrappers[0].controller.think_hook.snapshot()
+                assert setting is not None
+                assert setting.close is ThinkCloseMode.FORCE
 
             asyncio.run(run())
         finally:

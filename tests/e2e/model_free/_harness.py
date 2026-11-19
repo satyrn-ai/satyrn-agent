@@ -71,6 +71,25 @@ def scripted_tool_exchange() -> list[int]:
     ]
 
 
+def scripted_thinking_tool_exchange(tool_name: str, parameters: dict[str, str]) -> list[int]:
+    arguments = "".join(f"<parameter={name}>{value}</parameter>" for name, value in parameters.items())
+    call = f"<tool_call><function={tool_name}>{arguments}</function></tool_call>"
+    return [
+        *tokenize_rendered("before</think>" + call),
+        FAKE_EOS,
+        *tokenize_rendered("after</think>done"),
+        FAKE_EOS,
+        *tokenize_rendered("next</think>again"),
+        FAKE_EOS,
+    ]
+
+
+def native_for_thinking_tool_exchange(tool_name: str, parameters: dict[str, str]) -> ScenarioFakeNative:
+    native = native_for(scripted_thinking_tool_exchange(tool_name, parameters))
+    native.config["end_think_tokens"] = [267]
+    return native
+
+
 @contextmanager
 def open_harness(
     project_dir: Path,
