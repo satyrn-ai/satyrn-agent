@@ -87,7 +87,7 @@ def _merge_think_budget(args: argparse.Namespace, values: dict[str, object], sou
         value is not None
         for value in (args.think_budget, args.think_bias, args.think_close, args.think_until_first_write)
     ):
-        raise ConfigurationError("--no-think-budget conflicts with positive think-budget flags")
+        raise ConfigurationError("--no-think-budget conflicts with other think-budget flags")
     if args.think_budget is not None:
         validate_integer(args.think_budget, "max_tokens", minimum=1)
     project_budget = values.get("think_budget")
