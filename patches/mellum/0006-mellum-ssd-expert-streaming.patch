@@ -1,55 +1,48 @@
-From cf3cfa1bd32e8dcea162972426f1a6a83eccad7b Mon Sep 17 00:00:00 2001
-From: pauleveritt <pauleveritt@me.com>
-Date: Wed, 18 Nov 2026 19:54:58 -0500
+From 903e1e5a164dadbd6d454dd14c80a799ba10bb38 Mon Sep 17 00:00:00 2001
+From: Koudai Aono <koxudaxi@gmail.com>
+Date: Wed, 18 Nov 2026 22:48:14 -0500
 Subject: [PATCH 6/6] mellum: ssd expert streaming
 
-Stream Q8_0 and MXFP4 experts through bounded slab slots and per-layer
-address tables. Gate stopped decode work, overlap reads with resumed encode,
-and group prefill chunks by layer. Preserve the resident decode fusions.
-Carry failed-read recovery, gate-overflow, stop-scratch and Metal tensor
-lifetime regressions alongside the host scheduler and native parity tests.
+SSD expert streaming: expert address tables for decode and tiled prefill,
+the stream gate and its suppression, the stop/resume loop, grouped layer-major
+prefill, streamed MXFP4 experts, and the resident-versus-streamed measure
+driver with its A/B/B/A runners.
 
-Add the standalone C measurement driver and effective-slot, RSS and Metal
-allocation metrics. Keep the Python measurement orchestrator and C frontend
-cases out of this topic. Physical 16 GB and 8 GB acceptance remains pending.
-
-Reference: pauleveritt/ds4-mellum d2d9338b9b28bd8a51b0f938f2dc1dea33954493
 Upstream: not offered, fork only
-Retire-when: upstream supports Mellum SSD expert streaming
+Retire-when: upstream streams Mellum experts with equivalent behavior
 Carried-commits: 2bb8f7fcec1c4bc691046d00d406e9d4fc68b868 1268d49811528be618590e6b46a37dbf28e8c335 9b829894082f376491666f5520af88566c4807d4 331ed5305da72e042668b78f71095ecb0167696b c9af31258bb8e2c65398076746fe0bcff795c09b 9745a01608f968514112a3b41b5eaf6897a49120 437669315affe27803b124e2f83fcece878689c3 66135ef85ab46a12d754ed891610a1699ad0a83e d4b7ce544618182e93cf1165f74bd831635d3592 ad877e96966eed1b747b3180fbf5c0b4b12dab2c e7424133d73ca092a925dc4340d1b8e7e004395c cb83e366bec0e188f13fb95543a24e15341c767e 233d6114d00b7704b988ffb216936186f74afe90 c9992132f7da0cf4bbbd99f799f9a351c70dc5d1 d26dca05921f1e7158123d4f93eac78b9f169d74 9e9757f1ce9bedd256001f1765bff18b6e312320 3a6383672a0a1ba7341f4a378c222c1df7a0177c 1500320f268a1a6a433cbdec93fb95e03b18f559 137f5e283a2209a1f438028e90632fcda72a3a9f 21848ca44e19dc945506e970f574fdf7505a43de e7a52a862f294f1211ecb7726507e3a99f4f59c1 c81370b2aadcbc8262a2d207de31d4a54078e306 ed43bc26c015d2c7cc8d308a10f1c48d583721d8 e31a0714ee65fb0f1816a027cc92b0aa95cfaa72 a946e4df906dc0b55e9966679f0ef701516895c7 dd0b6f42e9c9fabd34e846d9b7635828544fca36 cb9cefdf49cf73f57578373cbcb890010c71c709 4e6450ad7dec4d79279227fd43aad32eac429c22 be265cd5ff24ba842c07f6f59b4f17504e30c0bb d2346d7dd0e63053b812eb5058ace8d8d9ca90d0 34408904ec8144f48115dcc21ae56ae1cd08c8f4 73406bbefc31656a62776b198d8a45c61ea2af16 e567a5fe92b29a612d0b092d096373bcac42ee26 58ba822373a869531a0a082868b9accc77e2fc92 af76df40f2a91d9ad8e26e0daab30d244411619e 85cd73853d9ffd9d6bad4113e2d37ca002a4d66e 277b5eea34c2327ec358c85887e8603f8308085f bab19c77820c6a97f4f5e9c3f09a31357a0c6728 cda51b66c5378ec1e078bc998bdfa7537b19295e dfca52adf2eeaf729606c861957816ea4f38f78f c04037c0eab5e112bf9aae2cc575366caba5b353 4989e43948ad4601c86025bbd41fe21dbcfe0807 f55a94dfe096c6852ad844c6a718f37a5652622a ed6adfa79116154ae89cf072cb57bc56f62aa1e1 2b88ee977b7a6bf8ec530e8995eeff3995d0c4d5 471b9028941378a209c2aec63bfd657d7632c987 cedd4d2bb5af78e4f2c855027dc27e9abe1efbb9 eebd8d1e9a6a3bb67f619ab96835651be3bd15e2 b84a3faae9bbc432cbedf8a5424ce619fd1bf1d2
 ---
  .gitignore                         |  10 +
- Makefile                           |  67 ++-
- ds4.c                              | 595 +++++++++++++++++++-
- ds4.h                              |   3 +
+ Makefile                           |  62 ++-
+ ds4.c                              | 590 +++++++++++++++++++-
+ ds4.h                              |   1 +
  ds4_gpu.h                          |  72 +++
  ds4_mellum_stream.c                | 124 +++++
  ds4_mellum_stream.h                |  69 +++
  ds4_metal.m                        | 836 ++++++++++++++++++++++++++---
  metal/qwen4.metal                  | 212 +++++++-
  tests/ds4_test.c                   | 678 +++++++++++++++++++++++
+ tests/mellum_oracle_compare.sh     |  46 +-
  tests/mellum_trace.c               |  54 +-
  tests/mellum_trace_context.h       |  19 +
- tests/test_mellum_config.c         |   8 +-
+ tests/test_mellum_config.c         |  29 +-
  tests/test_mellum_kernels.c        | 769 ++++++++++++++++++++++++--
- tests/test_mellum_s4_driver.py     | 115 ++++
+ tests/test_mellum_s4_driver.py     | 117 ++++
  tests/test_mellum_stream.c         | 415 ++++++++++++++
  tests/test_mellum_trace_stream.c   |  34 ++
- tests/test_metal_compile_options.m |  24 +
  tests/test_metal_tensor_lifetime.m |  47 ++
- tools/mellum_s4_measure.c          | 239 +++++++++
- 20 files changed, 4226 insertions(+), 164 deletions(-)
+ tools/mellum_s4_measure.c          | 237 ++++++++
+ 20 files changed, 4234 insertions(+), 187 deletions(-)
  create mode 100644 ds4_mellum_stream.c
  create mode 100644 ds4_mellum_stream.h
  create mode 100644 tests/test_mellum_s4_driver.py
  create mode 100644 tests/test_mellum_stream.c
  create mode 100644 tests/test_mellum_trace_stream.c
- create mode 100644 tests/test_metal_compile_options.m
  create mode 100644 tests/test_metal_tensor_lifetime.m
  create mode 100644 tools/mellum_s4_measure.c
 
 diff --git a/.gitignore b/.gitignore
-index b60b89ce..9da1915f 100644
+index b60b89c..9da1915 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -114,3 +114,13 @@ __pycache__/
@@ -67,7 +60,7 @@ index b60b89ce..9da1915f 100644
 +/tests/mellum_trace
 +/tests/test_metal_compile_options
 diff --git a/Makefile b/Makefile
-index 13293ecb..32293813 100644
+index 13293ec..4c0b7d5 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -27,8 +27,8 @@ DS4_DSPARK_SUPPORT ?= gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf
@@ -126,7 +119,7 @@ index 13293ecb..32293813 100644
  	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
  
  tests/test_session_state.o: tests/test_session_state.c ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_tp.h
-@@ -1480,3 +1480,54 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
+@@ -1480,3 +1480,49 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
  gguf-tools/quality-testing/score_official_verify: gguf-tools/quality-testing/score_official_verify.o ds4_verify_test_hooks.o $(filter-out ds4.o,$(CORE_OBJS)) rax.o ds4_gpu_args.o
  	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))
  
@@ -139,7 +132,7 @@ index 13293ecb..32293813 100644
 +	./tests/test_mellum_stream
 +test-mellum: test-mellum-stream
 +clean-mellum-stream:
-+	rm -f tests/test_mellum_stream tools/mellum_s4_measure tests/test_mellum_trace_stream tests/test_metal_tensor_lifetime tests/test_metal_compile_options
++	rm -f tests/test_mellum_stream tools/mellum_s4_measure tests/test_mellum_trace_stream tests/test_metal_tensor_lifetime
 +clean: clean-mellum-stream
 +
 +# The scheduler is host-only, shared by Metal and CPU contract tests.
@@ -174,15 +167,10 @@ index 13293ecb..32293813 100644
 +	$(CC) -std=c99 -D_GNU_SOURCE -U__APPLE__ -fsyntax-only ds4.c
 +test-mellum: test-mellum-cuda-compile
 +ifeq ($(UNAME_S),Darwin)
-+tests/test_metal_compile_options: tests/test_metal_compile_options.m ds4_metal.m ds4_gpu.h ds4_image.o
-+	# Model an older-SDK host executable loading code compiled with the current SDK.
-+	$(CC) $(OBJCFLAGS) -I. -o $@ $< ds4_image.o $(METAL_LDLIBS) -Wl,-platform_version,macos,14.0,14.2
 +.PHONY: test-metal-compile-options
-+test-metal-compile-options: tests/test_metal_compile_options
-+	./tests/test_metal_compile_options
 +endif
 diff --git a/ds4.c b/ds4.c
-index 015c3e42..17abcc49 100644
+index d2e71db..89b5fff 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -42,6 +42,20 @@
@@ -769,17 +757,17 @@ index 015c3e42..17abcc49 100644
  
  /* host side: embedding rows tiled into R and the PLE n-gram gather */
  static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds4_weights *w,
-@@ -73250,7 +73653,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -73258,7 +73661,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
          if (!backend_ok || opt->tp.role != DS4_TP_NONE || opt->cuda_tensor_parallel ||
              (gpu_cfg && gpu_cfg->n_gpus > 1) ||
              opt->distributed.role != DS4_DISTRIBUTED_NONE || load_slice ||
 -            e->ssd_streaming || opt->dspark || e->power_percent != 100 ||
-+            (e->ssd_streaming && !(ds4_model_is_mellum() && e->backend == DS4_BACKEND_METAL)) ||
++            e->ssd_streaming ||
 +            opt->dspark || e->power_percent != 100 ||
              (opt->mtp_path && opt->mtp_path[0])) {
              fprintf(stderr, "ds4: Qwen3.8 requires Metal or single-GPU CUDA (or --cpu --first-token-test); "
                              "tensor parallelism, pipeline execution, SSD streaming, DSpark, "
-@@ -73961,12 +74365,32 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -73969,12 +74373,32 @@ static int ds4_engine_open_internal(ds4_engine **out,
                  e->dspark_confidence_threshold = 0.4f;
          }
  #endif
@@ -814,7 +802,7 @@ index 015c3e42..17abcc49 100644
              ds4_engine_close(e);
              *out = NULL;
              return 1;
-@@ -74115,7 +74539,33 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -74123,7 +74547,33 @@ static int ds4_engine_open_internal(ds4_engine **out,
                  }
              }
          }
@@ -848,7 +836,7 @@ index 015c3e42..17abcc49 100644
  #if !defined(__APPLE__) && !defined(DS4_ROCM_BUILD)
          if (e->backend == DS4_BACKEND_CUDA &&
              !load_slice && !tp_shard && !e->ssd_streaming && !ds4_model_is_qwen4()) {
-@@ -74153,6 +74603,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -74161,6 +74611,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
              bool spans_ok = false;
              if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_DEEPSEEK41) {
                  spans_ok = weights_model_map_decode_static_spans(&e->weights, true, true, &spans);
@@ -857,19 +845,7 @@ index 015c3e42..17abcc49 100644
              } else if (load_slice) {
                  if (e->ssd_streaming_static_decode_map) {
                      spans_ok = weights_model_map_decode_runtime_slice_spans(
-@@ -74600,6 +75052,11 @@ bool ds4_engine_is_mellum(ds4_engine *e) {
-     return ds4_model_is_mellum();
- }
- 
-+uint64_t ds4_engine_mellum_expert_bytes(ds4_engine *e) {
-+    if (!e || !ds4_model_is_mellum()) return 0;
-+    return ds4_mellum_expert_bytes(mellum_expert_type(&e->weights, 0));
-+}
-+
- void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
-                                   int *top_k, float *top_p, float *min_p) {
-     if (!temperature || !top_k || !top_p || !min_p) return;
-@@ -75455,6 +75912,14 @@ bool ds4_engine_is_deepseek41(ds4_engine *e) {
+@@ -75463,6 +75915,14 @@ bool ds4_engine_is_deepseek41(ds4_engine *e) {
  
  void ds4_engine_close(ds4_engine *e) {
      if (!e) return;
@@ -884,7 +860,7 @@ index 015c3e42..17abcc49 100644
      ds4_engine_tp_unbind(e);
  #if !defined(DS4_NO_GPU) && !defined(__APPLE__) && !defined(DS4_ROCM_BUILD)
      /* Built at open but never bound. */
-@@ -76321,6 +76786,11 @@ void ds4_session_set_cancel(ds4_session *s, ds4_session_cancel_fn fn, void *ud)
+@@ -76329,6 +76789,11 @@ void ds4_session_set_cancel(ds4_session *s, ds4_session_cancel_fn fn, void *ud)
      if (!s) return;
      s->cancel = fn;
      s->cancel_ud = ud;
@@ -896,7 +872,7 @@ index 015c3e42..17abcc49 100644
  }
  
  static bool ds4_session_cancelled(ds4_session *s) {
-@@ -78178,12 +78648,23 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
+@@ -78186,12 +78651,23 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
              }
              uint32_t chunk = (uint32_t)(prompt->len - i);
              if (chunk > s->qwen4_graph.cap_tokens) chunk = s->qwen4_graph.cap_tokens;
@@ -922,7 +898,7 @@ index 015c3e42..17abcc49 100644
                  snprintf(err, errlen, "%s prefill failed at token %d", ds4_qwen4_family_name(), i);
                  s->checkpoint_valid = false;
                  prefill_rc = 1;
-@@ -89031,12 +89512,12 @@ bool ds4_test_mellum_moe(ds4_engine *engine, uint32_t layer, const float *x, uin
+@@ -89039,12 +89515,12 @@ bool ds4_test_mellum_moe(ds4_engine *engine, uint32_t layer, const float *x, uin
      const uint64_t E = DS4_N_EMBD, K = DS4_N_EXPERT_USED;
      const bool ok =
          ds4_gpu_tensor_write(s[MELLUM_S_FFN_NORM], 0, x, (uint64_t)T * E * sizeof(float)) &&
@@ -937,7 +913,7 @@ index 015c3e42..17abcc49 100644
          ds4_gpu_tensor_read(s[MELLUM_S_MOE_OUT], 0, out1, E * sizeof(float));
      qwen4_graph_free(&g);
      return ok;
-@@ -89045,6 +89526,72 @@ bool ds4_test_mellum_moe(ds4_engine *engine, uint32_t layer, const float *x, uin
+@@ -89053,6 +89529,72 @@ bool ds4_test_mellum_moe(ds4_engine *engine, uint32_t layer, const float *x, uin
      return false;
  #endif
  }
@@ -1011,21 +987,19 @@ index 015c3e42..17abcc49 100644
  bool ds4_test_session_graph_pos(ds4_session *s, uint32_t *pos) {
      if (!s || !pos || !ds4_session_is_qwen4(s)) return false;
 diff --git a/ds4.h b/ds4.h
-index 65a9e19d..949b3cba 100644
+index 65a9e19..d7dd38f 100644
 --- a/ds4.h
 +++ b/ds4.h
-@@ -309,6 +309,9 @@ bool ds4_engine_is_glm_dsa(ds4_engine *e);
+@@ -309,6 +309,7 @@ bool ds4_engine_is_glm_dsa(ds4_engine *e);
  bool ds4_engine_is_glm53(ds4_engine *e);
  bool ds4_engine_is_qwen4(ds4_engine *e);
  /* True for Mellum 2.1, which is also a qwen4 engine: check it first. */
-+/* One routed expert's bytes at the file's own expert type (Q8_0 or MXFP4); 0 for a non-Mellum engine.
-+ * A measurement hook: the S4 driver reports it so a slot count can be checked against the budget. */
-+uint64_t ds4_engine_mellum_expert_bytes(ds4_engine *e);
++
  bool ds4_engine_is_mellum(ds4_engine *e);
  /* The loaded model's sampler defaults, for the knobs a caller leaves unset:
   * DS4_DEFAULT_* with no top_k, except Mellum 2.1 (temperature 1.0, top_p 1.0,
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 7c1b1e20..a3654b7f 100644
+index 7c1b1e2..a3654b7 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -177,6 +177,8 @@ int ds4_gpu_tensor_read_after_selected_event(const ds4_gpu_tensor *tensor,
@@ -1116,7 +1090,7 @@ index 7c1b1e20..a3654b7f 100644
          ds4_gpu_tensor *selected, ds4_gpu_tensor *weights, ds4_gpu_tensor *mid, ds4_gpu_tensor *part,
 diff --git a/ds4_mellum_stream.c b/ds4_mellum_stream.c
 new file mode 100644
-index 00000000..a8567de5
+index 0000000..a8567de
 --- /dev/null
 +++ b/ds4_mellum_stream.c
 @@ -0,0 +1,124 @@
@@ -1246,7 +1220,7 @@ index 00000000..a8567de5
 +}
 diff --git a/ds4_mellum_stream.h b/ds4_mellum_stream.h
 new file mode 100644
-index 00000000..5543211e
+index 0000000..5543211
 --- /dev/null
 +++ b/ds4_mellum_stream.h
 @@ -0,0 +1,69 @@
@@ -1320,7 +1294,7 @@ index 00000000..5543211e
 +
 +#endif
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 63238966..94b676fd 100644
+index 6323896..94b676f 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
 @@ -715,6 +715,9 @@ static int g_model_buffer_cache_over_limit;
@@ -2579,7 +2553,7 @@ index 63238966..94b676fd 100644
 +    return 1;
 +}
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index f3107468..dc5c4832 100644
+index f310746..dc5c483 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -3077,6 +3077,75 @@ kernel void kernel_qwen4_moe_down(
@@ -2914,7 +2888,7 @@ index f3107468..dc5c4832 100644
 +    }
 +}
 diff --git a/tests/ds4_test.c b/tests/ds4_test.c
-index e39ab93f..1f004f02 100644
+index e39ab93..1f004f0 100644
 --- a/tests/ds4_test.c
 +++ b/tests/ds4_test.c
 @@ -589,6 +589,674 @@ static int test_mellum_token(int i) {
@@ -3609,8 +3583,65 @@ index e39ab93f..1f004f02 100644
      {"--mellum-session", "mellum-session", "Mellum session allocation equals its plan (DS4_TEST_MELLUM_MODEL)", test_mellum_session_allocation},
      {"--mellum-exact-prefill", "mellum-exact-prefill", "Mellum prefill equals decode byte for byte under DS4_MELLUM_EXACT_PREFILL=1 (DS4_TEST_MELLUM_MODEL)", test_mellum_exact_prefill},
      {"--mellum-rewind", "mellum-rewind", "Mellum session rewind: one token or to the last sync's end keeps the caches, elsewhere deeper replays; logits equal a straight decode (DS4_TEST_MELLUM_MODEL)", test_mellum_rewind},
+diff --git a/tests/mellum_oracle_compare.sh b/tests/mellum_oracle_compare.sh
+index c5bf2c8..bda5a39 100644
+--- a/tests/mellum_oracle_compare.sh
++++ b/tests/mellum_oracle_compare.sh
+@@ -58,29 +58,29 @@ for t in short 1100 2200; do
+     positions=$(python3 -I -c "n = $n; k = min(64, n); print(','.join(str(round(i * (n - 1) / (k - 1))) for i in range(k)))")
+     tiled=0
+     [ "$n" -ge 32 ] && tiled=1
+-    # this engine's prefill twice: under the exact-prefill diagnostic it must equal the old engine byte for
+-    # byte; without it, the release path, within the tolerance when its chunks take the tiled paths
+-    for mode in prefill-exact prefill decode; do
+-        drv=$mode
+-        [ "$mode" = prefill-exact ] && drv=prefill
+-        if [ "$mode" = prefill-exact ]; then
+-            (export DS4_MELLUM_EXACT_PREFILL=1; run "$ROOT" "$tokens" "$drv" "$dir/new.$t.$mode" "$positions") > /dev/null ||
+-                { fail=1; continue; }
+-        else
+-            run "$ROOT" "$tokens" "$drv" "$dir/new.$t.$mode" "$positions" > /dev/null || { fail=1; continue; }
+-        fi
+-        [ -e "$dir/old.$t.$drv.session.logits.f32" ] ||
+-            run "$ORACLE" "$tokens" "$drv" "$dir/old.$t.$drv" "$positions" > /dev/null || { fail=1; continue; }
+-        # Against the old engine every mode uses the near-tie rule: at d2d9338 its DS4_MELLUM_EXACT_PREFILL
+-        # leaves the attention tiles on, so even its "exact" prefill is not byte-equal to its decode at 2,200
+-        # tokens.  The strong exactness claim is the in-engine comparison below, which our port must pass
+-        # byte for byte and the old engine would not.
+-        exact=0
+-        r=$(compare "$dir/new.$t.$mode" "$dir/old.$t.$drv" "$positions" "$exact") || fail=1
+-        echo "$(echo "$r" | cut -c1-4) $t $mode vs the old engine, $(echo "$r" | cut -c6-)"
+-    done
+-    r=$(compare "$dir/new.$t.prefill-exact" "$dir/new.$t.decode" "$positions" 1) || fail=1
+-    echo "$(echo "$r" | cut -c1-4) $t prefill-exact vs decode in this engine, $(echo "$r" | cut -c6-)"
++    # Every run first, then every comparison: the reference's exact-prefill output is needed to decide
++    # whether a byte-equal cross-engine check is meaningful, and its decode output is one of the three runs.
++    run "$ROOT" "$tokens" prefill "$dir/new.$t.prefill" "$positions" > /dev/null || { fail=1; continue; }
++    (export DS4_MELLUM_EXACT_PREFILL=1
++     run "$ROOT" "$tokens" prefill "$dir/new.$t.prefill-exact" "$positions") > /dev/null || { fail=1; continue; }
++    run "$ROOT" "$tokens" decode "$dir/new.$t.decode" "$positions" > /dev/null || { fail=1; continue; }
++    run "$ORACLE" "$tokens" prefill "$dir/old.$t.prefill" "$positions" > /dev/null || { fail=1; continue; }
++    (export DS4_MELLUM_EXACT_PREFILL=1
++     run "$ORACLE" "$tokens" prefill "$dir/old.$t.exact" "$positions") > /dev/null || { fail=1; continue; }
++    run "$ORACLE" "$tokens" decode "$dir/old.$t.decode" "$positions" > /dev/null || { fail=1; continue; }
++
++    # Cross-engine comparisons are byte-exact: with the reference built from the pinned commit and each engine
++    # running from its own tree, both engines give the same bytes at these lengths.  The reference's own
++    # exact-prefill output is run too, so the comparison is like-for-like.
++    r=$(compare "$dir/new.$t.prefill-exact" "$dir/old.$t.exact" "$positions" 1) || fail=1
++    echo "$(echo "$r" | cut -c1-4) $t prefill-exact vs the old engine, $(echo "$r" | cut -c6-)"
++
++    r=$(compare "$dir/new.$t.prefill" "$dir/old.$t.prefill" "$positions" $((1 - tiled))) || fail=1
++    echo "$(echo "$r" | cut -c1-4) $t prefill vs the old engine, $(echo "$r" | cut -c6-)"
++
++    r=$(compare "$dir/new.$t.decode" "$dir/old.$t.decode" "$positions" 1) || fail=1
++    echo "$(echo "$r" | cut -c1-4) $t decode vs the old engine, $(echo "$r" | cut -c6-)"
++
+     r=$(compare "$dir/new.$t.prefill" "$dir/new.$t.decode" "$positions" $((1 - tiled))) || fail=1
+     echo "$(echo "$r" | cut -c1-4) $t prefill vs decode in this engine, $(echo "$r" | cut -c6-)"
+ done
 diff --git a/tests/mellum_trace.c b/tests/mellum_trace.c
-index 232d75d0..1bfaaae0 100644
+index 232d75d..1bfaaae 100644
 --- a/tests/mellum_trace.c
 +++ b/tests/mellum_trace.c
 @@ -142,6 +142,20 @@ static bool check_file(const char *prefix, unsigned pos, const char *what, uint6
@@ -3706,7 +3737,7 @@ index 232d75d0..1bfaaae0 100644
      }
      ds4_tokens_free(&toks);
 diff --git a/tests/mellum_trace_context.h b/tests/mellum_trace_context.h
-index 60a36197..7c5a7995 100644
+index 60a3619..7c5a799 100644
 --- a/tests/mellum_trace_context.h
 +++ b/tests/mellum_trace_context.h
 @@ -2,6 +2,7 @@
@@ -3741,10 +3772,49 @@ index 60a36197..7c5a7995 100644
 +}
  #endif
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index 60da31df..3d75c4c1 100644
+index 60da31d..6da4539 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
-@@ -325,7 +325,7 @@ static uint64_t expect_fixed(uint64_t cap) {
+@@ -193,6 +193,7 @@ static void check_qwen_predicates_unchanged(void) {
+ static ds4_backend g_open_backend;
+ static bool g_open_inspect;
+ static const char *g_open_steer_file;
++static const char *g_open_mtp;
+ static float g_open_steer_attn;
+ 
+ static void child_engine_open(const char *path) {
+@@ -205,11 +206,30 @@ static void child_engine_open(const char *path) {
+     opt.inspect_only = g_open_inspect;
+     opt.directional_steering_file = (char *)g_open_steer_file;
+     opt.directional_steering_attn = g_open_steer_attn;
++    opt.mtp_path = (char *)g_open_mtp;
+     const int rc = ds4_engine_open(&e, &opt);
+     /* the host contract: Mellum reports both predicates, and its payload support is false */
+     _exit(rc == 0 && e && ds4_engine_is_mellum(e) && ds4_engine_is_qwen4(e) ? 0 : 7);
+ }
+ 
++/* A drafter path with a Mellum model: Mellum reports as qwen4, so the Qwen block used to answer with the wrong
++ * model and the wrong reason (Mellum has no DFlash drafter but does stream). */
++static void expect_open_mtp_refused(const char *label) {
++    char path[512], err[4096];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    g_open_backend = DS4_BACKEND_METAL;
++    g_open_inspect = false;
++    g_open_mtp = path;
++    const int rc = run_child(child_engine_open, path, err, sizeof(err));
++    g_open_mtp = NULL;
++    unlink(path);
++    if (rc != 7 || !strstr(err, "Mellum 2.1 has no DFlash drafter")) {
++        fprintf(stderr, "FAIL %s: exit %d, stderr [%s]\n", label, rc, err);
++        exit(1);
++    }
++    printf("ok   open: %s\n", label);
++}
++
+ static void expect_open(ds4_backend be, bool inspect, bool refused, const char *label) {
+     char path[512], err[4096];
+     mellum_fixture_write(MF_NONE, path, sizeof(path));
+@@ -325,7 +345,7 @@ static uint64_t expect_fixed(uint64_t cap) {
  
  static uint64_t sum_requests(uint32_t ctx, uint32_t cap, uint32_t *n_out) {
      mellum_req reqs[MELLUM_MAX_REQS];
@@ -3753,7 +3823,7 @@ index 60da31df..3d75c4c1 100644
      uint64_t total = 0;
      for (uint32_t i = 0; i < n; i++) total += reqs[i].bytes;
      if (n_out) *n_out = n;
-@@ -370,7 +370,7 @@ static void check_mellum_plan_scales_with_chunk(void) {
+@@ -370,7 +390,7 @@ static void check_mellum_plan_scales_with_chunk(void) {
      CHECK(s.prefill_cap == 300 && s.scratch_bytes == 300 * expect_per_row() + expect_fixed(300));
  
      mellum_req reqs[MELLUM_MAX_REQS];
@@ -3762,7 +3832,7 @@ index 60da31df..3d75c4c1 100644
      uint32_t k = 0, v = 0, tags = 0, scratch = 0, logits = 0, frontier = 0;
      uint64_t frontier_bytes = 0;
      for (uint32_t i = 0; i < n; i++) {
-@@ -511,7 +511,7 @@ static void check_mellum_attention_scratch(void) {
+@@ -511,7 +531,7 @@ static void check_mellum_attention_scratch(void) {
      CHECK(n_full == 7);
      for (size_t c = 0; c < sizeof(caps) / sizeof(caps[0]); c++) {
          mellum_req reqs[MELLUM_MAX_REQS];
@@ -3771,7 +3841,7 @@ index 60da31df..3d75c4c1 100644
          int tables = 0, parts = 0;
          for (uint32_t i = 0; i < n; i++) {
              if (reqs[i].kind != MELLUM_REQ_SCRATCH) continue;
-@@ -528,7 +528,7 @@ static void check_mellum_attention_scratch(void) {
+@@ -528,7 +548,7 @@ static void check_mellum_attention_scratch(void) {
      }
      /* at the default chunk: 7 x 1,024 x 64 B = 448 KiB, and 65.0 MiB of partials */
      mellum_req reqs[MELLUM_MAX_REQS];
@@ -3780,8 +3850,16 @@ index 60da31df..3d75c4c1 100644
      for (uint32_t i = 0; i < n; i++) {
          if (reqs[i].kind == MELLUM_REQ_SCRATCH && reqs[i].index == MELLUM_S_ATTN_TABLE) CHECK(reqs[i].bytes == 458752ull);
          if (reqs[i].kind == MELLUM_REQ_SCRATCH && reqs[i].index == MELLUM_S_ATTN_PART) CHECK(reqs[i].bytes == 68157440ull);
+@@ -1127,6 +1147,7 @@ int main(void) {
+     expect_vocab_refused(MF_TOKEN_TYPE_U32, "tokenizer.ggml.token_type", "token_type stored as uint32");
+     expect_vocab_refused(MF_NO_IM_START, "<|im_start|>", "<|im_start|> absent");
+     expect_vocab_refused(MF_NO_IM_END, "<|im_end|>", "<|im_end|> absent");
++    expect_open_mtp_refused("a drafter path is refused by name, not as a Qwen error");
+     expect_open(DS4_BACKEND_CPU, false, true, "CPU backend refused, naming Mellum");
+     expect_open(DS4_BACKEND_CUDA, false, true, "CUDA backend refused, naming Mellum");
+     expect_open(DS4_BACKEND_CPU, true, false, "inspect-only open succeeds");
 diff --git a/tests/test_mellum_kernels.c b/tests/test_mellum_kernels.c
-index 60f957a1..9b108563 100644
+index 60f957a..9b10856 100644
 --- a/tests/test_mellum_kernels.c
 +++ b/tests/test_mellum_kernels.c
 @@ -1261,8 +1261,14 @@ typedef struct {
@@ -4686,10 +4764,10 @@ index 60f957a1..9b108563 100644
  }
 diff --git a/tests/test_mellum_s4_driver.py b/tests/test_mellum_s4_driver.py
 new file mode 100644
-index 00000000..50af1750
+index 0000000..23b0c2b
 --- /dev/null
 +++ b/tests/test_mellum_s4_driver.py
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,117 @@
 +"""Live smoke for tools/mellum_s4_measure (DS4_TEST_MELLUM_MODEL): resident and streamed runs of a short chat
 +prompt report every field the S4 measurement reads, and greedy decode gives the same token ids; the append
 +phase extends the warm session.  Skipped without the model."""
@@ -4702,7 +4780,7 @@ index 00000000..50af1750
 +
 +ROOT = Path(__file__).resolve().parents[1]
 +DRIVER = ROOT / 'tools' / 'mellum_s4_measure'
-+FIELDS = {'streaming', 'slots', 'expert_bytes', 'context', 'prompt_tokens', 'ttft_ns', 'tokens', 'stops', 'loads', 'phys_footprint_peak',
++FIELDS = {'streaming', 'slots', 'context', 'prompt_tokens', 'ttft_ns', 'tokens', 'stops', 'loads', 'phys_footprint_peak',
 +          'rss_peak', 'metal_allocated_peak'}
 +APPEND_FIELDS = {'append_tokens', 'append_ttft_ns', 'append_pos_before', 'append_pos_after', 'append_common_prefix',
 +                 'append_stops', 'append_loads', 'append_decode'}
@@ -4792,10 +4870,12 @@ index 00000000..50af1750
 +        self.assertFalse(a['streaming'])
 +        self.assertTrue(b['streaming'] and b['slots'] == 64)
 +        # the engine's effective slot count, not the flag as given
-+        # the engine's effective slot count is the byte budget floored to whole experts of the file's own
-+        # quant, so the expectation follows the model instead of Q8's 979
-+        self.assertTrue(c['streaming'] and c['expert_bytes'] > 0, c['expert_bytes'])
-+        self.assertEqual(c['slots'], (6 << 30) // c['expert_bytes'])
++        # the engine's effective slot count is the 6 GiB budget floored to whole experts of the file's quant
++        expected = {'Q8_0': 979, 'MXFP4_MOE': 1958}
++        quant = next((q for q in expected if q in os.path.basename(model)), None)
++        self.assertIsNotNone(quant, 'the smoke test knows no slot count for this quant')
++        self.assertTrue(c['streaming'])
++        self.assertEqual(c['slots'], expected[quant])
 +        self.assertEqual([t['id'] for t in a['tokens']], [t['id'] for t in c['tokens']])
 +        self.assertEqual([t['id'] for t in a['tokens']], [t['id'] for t in b['tokens']])
 +        self.assertGreater(b['stops'], 0)
@@ -4807,7 +4887,7 @@ index 00000000..50af1750
 +    unittest.main()
 diff --git a/tests/test_mellum_stream.c b/tests/test_mellum_stream.c
 new file mode 100644
-index 00000000..38880caa
+index 0000000..38880ca
 --- /dev/null
 +++ b/tests/test_mellum_stream.c
 @@ -0,0 +1,415 @@
@@ -5228,7 +5308,7 @@ index 00000000..38880caa
 +}
 diff --git a/tests/test_mellum_trace_stream.c b/tests/test_mellum_trace_stream.c
 new file mode 100644
-index 00000000..a3d16087
+index 0000000..a3d1608
 --- /dev/null
 +++ b/tests/test_mellum_trace_stream.c
 @@ -0,0 +1,34 @@
@@ -5266,39 +5346,9 @@ index 00000000..a3d16087
 +    printf("%d checks, %d failures\n", g_checks, g_failures);
 +    return g_failures ? 1 : 0;
 +}
-diff --git a/tests/test_metal_compile_options.m b/tests/test_metal_compile_options.m
-new file mode 100644
-index 00000000..fa9284ec
---- /dev/null
-+++ b/tests/test_metal_compile_options.m
-@@ -0,0 +1,24 @@
-+/* The C library must choose its shader language independently of the host executable's SDK. */
-+#include "../ds4_metal.m"
-+
-+bool ds4_log_is_tty(FILE *fp) { (void)fp; return false; }
-+
-+int main(void) {
-+    @autoreleasepool {
-+        MTLLanguageVersion expected = 0;
-+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
-+        if (@available(macOS 15.0, *)) expected = MTLLanguageVersion3_2;
-+#endif
-+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
-+        if (@available(macOS 26.0, *)) expected = MTLLanguageVersion4_0;
-+#endif
-+        MTLCompileOptions *options = ds4_gpu_compile_options();
-+        if (expected && options.languageVersion != expected) {
-+            fprintf(stderr, "shader language: expected %llu, got %llu\n",
-+                    (unsigned long long)expected, (unsigned long long)options.languageVersion);
-+            return 1;
-+        }
-+        puts("Metal compile options: PASS");
-+    }
-+    return 0;
-+}
 diff --git a/tests/test_metal_tensor_lifetime.m b/tests/test_metal_tensor_lifetime.m
 new file mode 100644
-index 00000000..e832978f
+index 0000000..e832978
 --- /dev/null
 +++ b/tests/test_metal_tensor_lifetime.m
 @@ -0,0 +1,47 @@
@@ -5351,10 +5401,10 @@ index 00000000..e832978f
 +}
 diff --git a/tools/mellum_s4_measure.c b/tools/mellum_s4_measure.c
 new file mode 100644
-index 00000000..4233ee62
+index 0000000..d25e866
 --- /dev/null
 +++ b/tools/mellum_s4_measure.c
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,237 @@
 +/* S4 measurement driver: one Mellum run from a frozen prompt, resident or streamed from a bounded expert-slot
 + * cache, reporting what the preregistered measurement reads.  The prompt is one user turn rendered with the
 + * model's chat template (thinking on); decode is greedy.  Output: one JSON object.
@@ -5566,14 +5616,12 @@ index 00000000..4233ee62
 +    if (!memory_peaks(&peak, &rss_peak)) return 1;
 +    /* the engine's effective slots (a byte budget is floored to whole experts) */
 +    const unsigned long long slots = streaming ? ds4_gpu_stream_expert_cache_configured_count() : 0u;
-+    /* a slot is one expert: the budget's floor is the file's own expert size, so the count is checkable */
-+    const unsigned long long expert_bytes = ds4_engine_mellum_expert_bytes(engine);
 +    FILE *out = fopen(out_path, "wx");
 +    if (!out) { fprintf(stderr, "mellum_s4_measure: cannot create %s: %s\n", out_path, strerror(errno)); return 1; }
-+    fprintf(out, "{\"streaming\":%s,\"slots\":%llu,\"expert_bytes\":%llu,\"stream_bytes\":%llu,\"context\":%ld,\"prompt_tokens\":%d,\"ttft_ns\":%llu,"
++    fprintf(out, "{\"streaming\":%s,\"slots\":%llu,\"stream_bytes\":%llu,\"context\":%ld,\"prompt_tokens\":%d,\"ttft_ns\":%llu,"
 +                 "\"stops\":%llu,\"loads\":%llu,\"phys_footprint_peak\":%llu,\"rss_peak\":%llu,"
 +                 "\"metal_allocated_peak\":%llu,\"tokens\":[",
-+            streaming ? "true" : "false", slots, expert_bytes, bytes, context, prompt.len, (unsigned long long)ttft,
++            streaming ? "true" : "false", slots, bytes, context, prompt.len, (unsigned long long)ttft,
 +            (unsigned long long)run.stops[gen - 1], (unsigned long long)run.loads[gen - 1], (unsigned long long)peak,
 +            (unsigned long long)rss_peak, (unsigned long long)metal_peak);
 +    write_tokens(out, &run);

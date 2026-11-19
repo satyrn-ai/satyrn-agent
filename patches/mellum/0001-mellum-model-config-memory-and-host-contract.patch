@@ -1,38 +1,34 @@
-From dd4afc644f5773eef57071f64281d3d23f78aae3 Mon Sep 17 00:00:00 2001
+From 5d3cd6c98095c91f7ac55a3e8a913efdec39c38f Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
-Date: Tue, 17 Nov 2026 07:04:18 -0500
+Date: Wed, 18 Nov 2026 22:48:02 -0500
 Subject: [PATCH 1/6] mellum: model config, memory and host contract
 
 Recognition of general.architecture = mellum inside the QWEN4_EXP family,
 hyperparameter and tensor validation that refuses each bad key or shape by
-name (32 query heads over 4 KV heads, widths in 128s), Q8_0 binding, the
-memory plan and session allocation with the forward entries refusing, the
-ds4_engine_is_mellum predicate, the model's sampler defaults (1.0 / 1.0 / 0 /
-0), and a false payload predicate with save and load refusing at every entry.
+name, Q8_0 binding, the memory plan and session allocation with the forward
+entries refusing, ds4_engine_is_mellum, the model's sampler defaults, and a
+false payload predicate with save and load refusing at every entry.
 
-The model-free acceptance is tests/test_mellum_config.c on the sparse GGUF
-that tests/mellum_fixture.h writes; the same binary validates and binds the
-real Q8_0 GGUF when DS4_TEST_MELLUM_MODEL names it.
-
-The series stays inline in ds4.c/ds4.h like the qwen35 series: the fork's
-later "move the front ends to .inc files" refactor commits are not carried.
+A drafter path with a Mellum model is refused by name before the shared Qwen
+check can answer with the wrong model and the wrong reason: Mellum has no
+DFlash drafter but it does stream.
 
 Upstream: not offered, fork only
 Retire-when: upstream runs Mellum 2.1 with this host contract
 Carried-commits: 83e39b632296bd4c26b4c6b38a638dd5d2df8aa9 0428a4c65b7695c9d947cc557e5569cd733f480b 06b13f83a673b176cef474935d66c5bbfe334d77 5b6758e09ab685dd4cf4ff08e0ba9a5db433e372 1d9b628457b5ca6b6f70d04586fa1c15553d3d4e d3892ee140ef56cd44a430c064cb99a52eb4c7a4 7eef70be896e9e97d2345f0668fe98dc5a05ec3e c9d63e080c8e25b549202cf2b6dd4c028f517deb
 ---
  Makefile                   |  14 +
- ds4.c                      | 697 ++++++++++++++++++++++++++++++++++++-
+ ds4.c                      | 707 ++++++++++++++++++++++++++++++++++++-
  ds4.h                      |   8 +-
  ds4_cli.c                  |  21 +-
  tests/mellum_fixture.h     | 256 ++++++++++++++
- tests/test_mellum_config.c | 665 +++++++++++++++++++++++++++++++++++
- 6 files changed, 1640 insertions(+), 21 deletions(-)
+ tests/test_mellum_config.c | 665 ++++++++++++++++++++++++++++++++++
+ 6 files changed, 1649 insertions(+), 22 deletions(-)
  create mode 100644 tests/mellum_fixture.h
  create mode 100644 tests/test_mellum_config.c
 
 diff --git a/Makefile b/Makefile
-index d4877fbe..108f27e9 100644
+index d4877fb..108f27e 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -88,6 +88,7 @@ help:
@@ -71,7 +67,7 @@ index d4877fbe..108f27e9 100644
  	rm -f tests/test_web_recovery
  	rm -f tests/test_metal_ssd_experts
 diff --git a/ds4.c b/ds4.c
-index a79ffce4..a6342c42 100644
+index a79ffce..a9b5b54 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -497,7 +497,7 @@ enum {
@@ -992,10 +988,11 @@ index a79ffce4..a6342c42 100644
      if (ds4_session_is_cpu(s) || ds4_session_is_glm(s) || ds4_session_is_ds41(s)) {
          if (ds4_session_eval(s, token, err, errlen) != 0) return -1;
          return ds4_session_argmax(s);
-@@ -71863,6 +72483,31 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -71863,7 +72483,40 @@ static int ds4_engine_open_internal(ds4_engine **out,
          return 1;
      }
      config_validate_model(&e->model);
+-    if (ds4_model_is_qwen4() && !opt->inspect_only) {
 +    /* qwen4_graph_load_steering allocates steer_dirs outside mellum_requests, so
 +     * a steered Mellum session would hold a tensor its plan does not count. */
 +    if (ds4_model_is_mellum() && !opt->inspect_only &&
@@ -1021,10 +1018,19 @@ index a79ffce4..a6342c42 100644
 +    if (ds4_model_is_mellum() && e->prefill_chunk != 0) {
 +        e->prefill_chunk = mellum_clamp_chunk(e->prefill_chunk);
 +    }
-     if (ds4_model_is_qwen4() && !opt->inspect_only) {
++    /* Mellum reports as qwen4 too, so its own refusals come first: the Qwen block below would otherwise name
++     * the wrong model and, for a drafter, the wrong reason (Mellum has no DFlash drafter but does stream). */
++    if (ds4_model_is_mellum() && !opt->inspect_only && opt->mtp_path && opt->mtp_path[0]) {
++        fprintf(stderr, "ds4: Mellum 2.1 has no DFlash drafter: open the model without a drafter path\n");
++        ds4_engine_close(e);
++        *out = NULL;
++        return 1;
++    }
++    if (ds4_model_is_qwen4() && !ds4_model_is_mellum() && !opt->inspect_only) {
          const bool backend_ok =
  #ifdef DS4_HAS_QWEN4_GPU
-@@ -73217,6 +73862,11 @@ bool ds4_engine_is_qwen4(ds4_engine *e) {
+             e->backend == DS4_BACKEND_METAL || e->backend == DS4_BACKEND_CUDA ||
+@@ -73217,6 +73870,11 @@ bool ds4_engine_is_qwen4(ds4_engine *e) {
      return ds4_model_is_qwen4();
  }
  
@@ -1036,7 +1042,7 @@ index a79ffce4..a6342c42 100644
  void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
                                    int *top_k, float *top_p, float *min_p) {
      if (!temperature || !top_k || !top_p || !min_p) return;
-@@ -73224,7 +73874,11 @@ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
+@@ -73224,7 +73882,11 @@ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
      *top_k = 0;
      *top_p = DS4_DEFAULT_TOP_P;
      *min_p = DS4_DEFAULT_MIN_P;
@@ -1049,7 +1055,7 @@ index a79ffce4..a6342c42 100644
          *top_p = 0.95f;
          *min_p = 0.0f;
      }
-@@ -74343,7 +74997,11 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
+@@ -74343,7 +75005,11 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
              free(s);
              return 1;
          }
@@ -1062,7 +1068,7 @@ index a79ffce4..a6342c42 100644
              e->prefill_chunk : qwen4_prefill_chunk_tokens((uint32_t)ctx_size);
          /* Every slot of a batched server has the same shape, so one arena of
           * transients serves them all and each extra session then costs only
-@@ -74351,8 +75009,13 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
+@@ -74351,8 +75017,13 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
           * when no live session borrows it (a new context size once the
           * previous sessions closed) and keeps private transients otherwise. */
          const uint32_t block_cap = (uint32_t)ctx_size / 4u + 1u;
@@ -1077,7 +1083,7 @@ index a79ffce4..a6342c42 100644
          const bool arena_fits = e->qwen4_shared_workspace &&
              e->qwen4_shared_workspace->cap_tokens >= cap_tokens &&
              e->qwen4_shared_workspace->n_block_cap >= block_cap;
-@@ -76549,6 +77212,7 @@ static int ds4_session_sync_lockstep(ds4_session *s, const ds4_tokens *prompt,
+@@ -76549,6 +77220,7 @@ static int ds4_session_sync_lockstep(ds4_session *s, const ds4_tokens *prompt,
   * once its matching prefill completes, surfacing worker-side failures
   * here instead of as a gate timeout mid-decode. */
  int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t errlen) {
@@ -1085,7 +1091,7 @@ index a79ffce4..a6342c42 100644
  #ifndef DS4_NO_GPU
      if (s) s->dspark_rewind_end = 0;
  #endif
-@@ -76646,6 +77310,7 @@ int ds4_session_sync_multimodal(
+@@ -76646,6 +77318,7 @@ int ds4_session_sync_multimodal(
          size_t image_count,
          char *err,
          size_t errlen) {
@@ -1093,7 +1099,7 @@ index a79ffce4..a6342c42 100644
      if (!s || !prompt || (image_count != 0 && !images)) {
          snprintf(err, errlen, "invalid multimodal prompt");
          return 1;
-@@ -79163,6 +79828,7 @@ static int ds4_session_eval_probe_tp(ds4_session *s, int token, bool probe_mtp,
+@@ -79163,6 +79836,7 @@ static int ds4_session_eval_probe_tp(ds4_session *s, int token, bool probe_mtp,
  }
  
  int ds4_session_eval(ds4_session *s, int token, char *err, size_t errlen) {
@@ -1101,7 +1107,7 @@ index a79ffce4..a6342c42 100644
      bool probe_mtp = true;
  #ifndef DS4_NO_GPU
      if (s && s->engine && s->engine->support_kind == DS4_SUPPORT_DSPARK) {
-@@ -81539,6 +82205,7 @@ static bool qwen4_batch_spec_next(const ds4_engine *e) {
+@@ -81539,6 +82213,7 @@ static bool qwen4_batch_spec_next(const ds4_engine *e) {
  int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count,
                                                 int (*accepted)[2], int *n_accepted,
                                                 char *err, size_t errlen) {
@@ -1109,7 +1115,7 @@ index a79ffce4..a6342c42 100644
      if (!items || count <= 0 || !accepted || !n_accepted) {
          if (err && errlen) snprintf(err, errlen, "empty speculative decode batch");
          return 1;
-@@ -81726,6 +82393,7 @@ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count
+@@ -81726,6 +82401,7 @@ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count
  
  int ds4_sessions_eval_batch(ds4_decode_item *items, int count,
                              char *err, size_t errlen) {
@@ -1117,7 +1123,7 @@ index a79ffce4..a6342c42 100644
      if (!items || count <= 0) {
          if (err && errlen) snprintf(err, errlen, "empty decode batch");
          return 1;
-@@ -81805,6 +82473,7 @@ int ds4_sessions_eval_batch_with_prefill(
+@@ -81805,6 +82481,7 @@ int ds4_sessions_eval_batch_with_prefill(
          const ds4_tokens *prefill_prompt,
          char *err,
          size_t errlen) {
@@ -1125,7 +1131,7 @@ index a79ffce4..a6342c42 100644
      if (!items || count <= 0 || !prefill_session || !prefill_prompt ||
          !prefill_session->engine) {
          if (err && errlen) snprintf(err, errlen, "invalid mixed model batch");
-@@ -86215,6 +86884,7 @@ static int ds4_session_eval_speculative_argmax_impl(
+@@ -86215,6 +86892,7 @@ static int ds4_session_eval_speculative_argmax_impl(
          bool ignore_eos, ds4_think_mode think_mode,
          int *accepted, int accepted_cap,
          char *err, size_t errlen) {
@@ -1133,7 +1139,7 @@ index a79ffce4..a6342c42 100644
      if (!s || max_tokens <= 0 || accepted_cap <= 0) return 0;
      if (!s->checkpoint_valid) {
          payload_set_err(err, errlen, "speculative decode requires a synchronized checkpoint");
-@@ -87090,6 +87760,7 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
+@@ -87090,6 +87768,7 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
                                   float top_p, float min_p, uint64_t *rng,
                                   int *accepted, int accepted_cap,
                                   char *err, size_t errlen) {
@@ -1142,7 +1148,7 @@ index a79ffce4..a6342c42 100644
          return ds4_session_eval_speculative_argmax(
              s, first_token, max_tokens, eos_token,
 diff --git a/ds4.h b/ds4.h
-index 04eb3658..0dd82239 100644
+index 04eb365..0dd8223 100644
 --- a/ds4.h
 +++ b/ds4.h
 @@ -308,9 +308,11 @@ int ds4_engine_model_id(ds4_engine *e);
@@ -1161,7 +1167,7 @@ index 04eb3658..0dd82239 100644
                                    int *top_k, float *top_p, float *min_p);
  /* Qwen3.8 reasoning-effort system instruction for a think mode (NULL when none) */
 diff --git a/ds4_cli.c b/ds4_cli.c
-index af4e2b63..c4529743 100644
+index af4e2b6..c452974 100644
 --- a/ds4_cli.c
 +++ b/ds4_cli.c
 @@ -529,11 +529,22 @@ static void build_prompt(ds4_engine *engine, const cli_generation_options *gen,
@@ -1194,7 +1200,7 @@ index af4e2b63..c4529743 100644
  static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, const ds4_tokens *prompt) {
 diff --git a/tests/mellum_fixture.h b/tests/mellum_fixture.h
 new file mode 100644
-index 00000000..a4877ec6
+index 0000000..a4877ec
 --- /dev/null
 +++ b/tests/mellum_fixture.h
 @@ -0,0 +1,256 @@
@@ -1456,7 +1462,7 @@ index 00000000..a4877ec6
 +#endif
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
 new file mode 100644
-index 00000000..608fd5e6
+index 0000000..608fd5e
 --- /dev/null
 +++ b/tests/test_mellum_config.c
 @@ -0,0 +1,665 @@

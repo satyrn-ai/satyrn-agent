@@ -1,26 +1,17 @@
-From 797a898ef585afb3e324cebaefd5776b6f91b0a2 Mon Sep 17 00:00:00 2001
+From 68d4a1e14e1b88da4f92d884398379f992f05594 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
-Date: Tue, 17 Nov 2026 07:11:26 -0500
+Date: Wed, 18 Nov 2026 22:48:05 -0500
 Subject: [PATCH 2/6] mellum: tokenizer, chat and thinking
 
 The mellum2 pre-tokenizer and its generated Unicode classes, the corpus
-markers classed as content, <think> and </think> as the reasoning boundary,
-the special-token and stop classes with <|im_end|>=28, <|endoftext|>=0, and
-the two think ids 23 and 24. Its own system turn and assistant prefix, one
-user turn per assistant turn's tool results with each <tool_response>
-wrapper rendered as tokens, a system message whose special-token text
-tokenizes to its ids, the CLI's matching system prompt and speed line, and
-imported history that closes the turn without a second <|im_end|> and drops
-earlier reasoning.
-
-tests/test_mellum_tokenizer.c checks the generator's 30 cases, and
-tests/test_mellum_config.c gains the vocabulary, stop-class, chat/tool
-render and imported-history cases; both run against the real GGUF under
-DS4_TEST_MELLUM_MODEL.
+markers classed as content, <think> and </think> as the reasoning boundary, the
+special-token and stop classes, its own system turn and assistant prefix, one
+user turn per assistant turn's tool results, the CLI's matching system prompt
+and speed line, and imported history that drops earlier reasoning.
 
 Upstream: not offered, fork only
 Retire-when: upstream renders and stops Mellum 2.1 chats
-Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7cc1be8309d630991fe b5f05300a54591f1922926286b31529228a84233 5cdf14cdf6ab26e5cd466347051bc1dcb34aab14 835c6b08c7c159784463796350809cc30bdd8539 d1a98ca532c2ee9981563719e9af474b2f778938 0df162041eab77ee0ec4a357a591f3fb1ba019db 81050b372233bf221a0b4179b2b01de6afc5e341 05cddb2bc6d96baae3b1a4da11afdab76108265c 2eda52f8d44c827314dc7e53ba88b2774f346873 88cb9ac20d32baf1252517c51631c20ea5d5009f d35666971b3471f3ab1099f273e3b2acecd2c454 77b6ac83919ae797c9af081d13b4d6b5e2a7062e c8f8198fc102f2e5c71c28b87dfae8ae5581e3fc aef990e90ecc5fc4d5ba5792cb3105f0a028b940 9710f5036c11a97099ab5b06d9ac472d64b07963 006983dca4974fd78d8414a03a816e78914249ce 19054eb5359565a6d6390c348e9a840ca365a527 6b377f20ac31c9401cc35d4b83d2fc0807494776 0d5f2e73e28e677cd45764a2ebc4fe910400515a 1d9b628457b5ca6b6f70d04586fa1c15553d3d4e ac8cf98501405c3c7abfde74cced4e2d55725bba cf63c43b1622cb0f43783a95e925a2d102dff0f8 4ba0969087986e1a8ebed4dc1b2695669210c4bb 1d8af568face2e403ea3073682c303f4de92c1a5
+Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7cc1be8309d630991fe b5f05300a54591f1922926286b31529228a84233 5cdf14cdf6ab26e5cd466347051bc1dcb34aab14 835c6b08c7c159784463796350809cc30bdd8539 d1a98ca532c2ee9981563719e9af474b2f778938 0df162041eab77ee0ec4a357a591f3fb1ba019db 81050b372233bf221a0b4179b2b01de6afc5e341 05cddb2bc6d96baae3b1a4da11afdab76108265c 2eda52f8d44c827314dc7e53ba88b2774f346873 88cb9ac20d32baf1252517c51631c20ea5d5009f d35666971b3471f3ab1099f273e3b2acecd2c454 77b6ac83919ae797c9af081d13b4d6b5e2a7062e c8f8198fc102f2e5c71c28b87dfae8ae5581e3fc aef990e90ecc5fc4d5ba5792cb3105f0a028b940 9710f5036c11a97099ab5b06d9ac472d64b07963 006983dca4974fd78d8414a03a816e78914249ce 19054eb5359565a6d6390c348e9a840ca365a527 6b377f20ac31c9401cc35d4b83d2fc0807494776 0d5f2e73e28e677cd45764a2ebc4fe910400515a ac8cf98501405c3c7abfde74cced4e2d55725bba cf63c43b1622cb0f43783a95e925a2d102dff0f8 4ba0969087986e1a8ebed4dc1b2695669210c4bb 1d8af568face2e403ea3073682c303f4de92c1a5
 ---
  Makefile                            |  18 +-
  ds4.c                               | 317 +++++++++-
@@ -47,7 +38,7 @@ Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7
  create mode 100644 tests/test_mellum_tokenizer.c
 
 diff --git a/Makefile b/Makefile
-index 108f27e9..ffc0cb4f 100644
+index 108f27e..ffc0cb4 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -746,7 +746,7 @@ test-qwen4-cuda: tests/test_qwen4_cuda
@@ -104,7 +95,7 @@ index 108f27e9..ffc0cb4f 100644
  	rm -f tests/test_web_recovery
  	rm -f tests/test_metal_ssd_experts
 diff --git a/ds4.c b/ds4.c
-index a6342c42..8d24cb43 100644
+index a9b5b54..fee1b40 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -1041,6 +1041,11 @@ static bool ds4_model_is_mellum(void) {
@@ -542,7 +533,7 @@ index a6342c42..8d24cb43 100644
              prefill_s > 0.0 ? (double)prompt->len / prefill_s : 0.0,
              decode_s > 0.0 ? (double)n_generated / decode_s : 0.0);
      free(logits);
-@@ -74177,7 +74444,7 @@ int ds4_chat_append_multimodal_message(
+@@ -74185,7 +74452,7 @@ int ds4_chat_append_multimodal_message(
          const int old_len = tokens->len;
          ds4_vocab *vocab = &e->vocab;
          qwen4_chat_open(vocab, "user", tokens);
@@ -551,7 +542,7 @@ index a6342c42..8d24cb43 100644
          size_t moved = 0;
          for (size_t i = 0; i <= image_count; i++) {
              const char *text = text_parts[i] ? text_parts[i] : "";
-@@ -74194,7 +74461,7 @@ int ds4_chat_append_multimodal_message(
+@@ -74202,7 +74469,7 @@ int ds4_chat_append_multimodal_message(
              }
              moved++;
          }
@@ -560,7 +551,7 @@ index a6342c42..8d24cb43 100644
          qwen4_chat_close(vocab, tokens);
          return 1;
      }
-@@ -74993,7 +75260,7 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
+@@ -75001,7 +75268,7 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
      if (ds4_model_is_qwen4()) {
          if ((e->backend != DS4_BACKEND_METAL && e->backend != DS4_BACKEND_CUDA) ||
              e->distributed.role != DS4_DISTRIBUTED_NONE) {
@@ -569,7 +560,7 @@ index a6342c42..8d24cb43 100644
              free(s);
              return 1;
          }
-@@ -77453,7 +77720,7 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
+@@ -77461,7 +77728,7 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
              s->checkpoint_valid = false;
              if (!qwen4_graph_forward_tokens(&s->qwen4_graph, &e->model, &e->weights,
                                              prompt->v + i, chunk, s->logits, false)) {
@@ -578,7 +569,7 @@ index a6342c42..8d24cb43 100644
                  s->checkpoint_valid = false;
                  prefill_rc = 1;
                  break;
-@@ -79643,7 +79910,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
+@@ -79651,7 +79918,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
  #ifdef DS4_HAS_QWEN4_GPU
      if (ds4_session_is_qwen4(s)) {
          if (!s->qwen4_graph_ready) {
@@ -587,7 +578,7 @@ index a6342c42..8d24cb43 100644
              return 1;
          }
          if (qwen4_session_replay_if_stale(s, err, errlen) != 0) return 1;
-@@ -79653,7 +79920,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
+@@ -79661,7 +79928,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
          }
          if (!s->glm_spec_inside) { s->glm_mtp_have = 0; s->glm_mtp_have2 = false; }
          if (!qwen4_graph_forward_token(&s->qwen4_graph, &e->model, &e->weights, token, s->logits)) {
@@ -597,7 +588,7 @@ index a6342c42..8d24cb43 100644
              return 1;
          }
 diff --git a/ds4.h b/ds4.h
-index 0dd82239..e8c1e7fc 100644
+index 0dd8223..e8c1e7f 100644
 --- a/ds4.h
 +++ b/ds4.h
 @@ -388,10 +388,26 @@ void ds4_encode_chat_prompt(
@@ -628,7 +619,7 @@ index 0dd82239..e8c1e7fc 100644
  bool ds4_token_is_thinking_control(ds4_engine *e, int token);
  bool ds4_token_is_stop_for_think_mode(ds4_engine *e,
 diff --git a/ds4_cli.c b/ds4_cli.c
-index c4529743..c28401b6 100644
+index c452974..c28401b 100644
 --- a/ds4_cli.c
 +++ b/ds4_cli.c
 @@ -386,6 +386,7 @@ typedef struct {
@@ -682,7 +673,7 @@ index c4529743..c28401b6 100644
      if (interrupted) cli_interrupt_clear();
 diff --git a/ds4_mellum_unicode.inc b/ds4_mellum_unicode.inc
 new file mode 100644
-index 00000000..d79b7377
+index 0000000..d79b737
 --- /dev/null
 +++ b/ds4_mellum_unicode.inc
 @@ -0,0 +1,903 @@
@@ -1590,7 +1581,7 @@ index 00000000..d79b7377
 +}
 +
 diff --git a/ds4_prompt_prefix.h b/ds4_prompt_prefix.h
-index ad439d44..1bd5932c 100644
+index ad439d4..1bd5932 100644
 --- a/ds4_prompt_prefix.h
 +++ b/ds4_prompt_prefix.h
 @@ -4,6 +4,7 @@
@@ -1629,7 +1620,7 @@ index ad439d44..1bd5932c 100644
  }
 diff --git a/tests/gen_mellum_chat_ids.py b/tests/gen_mellum_chat_ids.py
 new file mode 100644
-index 00000000..65446068
+index 0000000..6544606
 --- /dev/null
 +++ b/tests/gen_mellum_chat_ids.py
 @@ -0,0 +1,257 @@
@@ -1892,7 +1883,7 @@ index 00000000..65446068
 +    main(sys.argv[1])
 diff --git a/tests/gen_mellum_tokenizer_cases.py b/tests/gen_mellum_tokenizer_cases.py
 new file mode 100644
-index 00000000..943d6add
+index 0000000..943d6ad
 --- /dev/null
 +++ b/tests/gen_mellum_tokenizer_cases.py
 @@ -0,0 +1,138 @@
@@ -2036,7 +2027,7 @@ index 00000000..943d6add
 +    sys.exit(main())
 diff --git a/tests/gen_mellum_unicode.py b/tests/gen_mellum_unicode.py
 new file mode 100644
-index 00000000..3f0e3577
+index 0000000..3f0e357
 --- /dev/null
 +++ b/tests/gen_mellum_unicode.py
 @@ -0,0 +1,336 @@
@@ -2378,7 +2369,7 @@ index 00000000..3f0e3577
 +    sys.exit(main())
 diff --git a/tests/mellum_chat_ids.inc b/tests/mellum_chat_ids.inc
 new file mode 100644
-index 00000000..52dec4a6
+index 0000000..52dec4a
 --- /dev/null
 +++ b/tests/mellum_chat_ids.inc
 @@ -0,0 +1,223 @@
@@ -2607,7 +2598,7 @@ index 00000000..52dec4a6
 +};
 diff --git a/tests/mellum_tokenizer_cases.inc b/tests/mellum_tokenizer_cases.inc
 new file mode 100644
-index 00000000..fb85675f
+index 0000000..fb85675
 --- /dev/null
 +++ b/tests/mellum_tokenizer_cases.inc
 @@ -0,0 +1,131 @@
@@ -2744,7 +2735,7 @@ index 00000000..fb85675f
 +};
 diff --git a/tests/mellum_tool_text.h b/tests/mellum_tool_text.h
 new file mode 100644
-index 00000000..8934c458
+index 0000000..8934c45
 --- /dev/null
 +++ b/tests/mellum_tool_text.h
 @@ -0,0 +1,95 @@
@@ -2844,7 +2835,7 @@ index 00000000..8934c458
 +
 +#endif
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index 608fd5e6..3334d924 100644
+index 608fd5e..3334d92 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
 @@ -7,6 +7,14 @@
@@ -3354,7 +3345,7 @@ index 608fd5e6..3334d924 100644
      check_real_model();
 diff --git a/tests/test_mellum_tokenizer.c b/tests/test_mellum_tokenizer.c
 new file mode 100644
-index 00000000..60e00790
+index 0000000..60e0079
 --- /dev/null
 +++ b/tests/test_mellum_tokenizer.c
 @@ -0,0 +1,137 @@

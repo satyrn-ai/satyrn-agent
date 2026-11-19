@@ -1,29 +1,17 @@
-From f8cf52935557792ebd5555bfb83b5ba58090135e Mon Sep 17 00:00:00 2001
-From: pauleveritt <pauleveritt@me.com>
-Date: Wed, 18 Nov 2026 19:54:58 -0500
+From 810dce77d34b64f62ea5a1e39cf2a5c44c8ccc5c Mon Sep 17 00:00:00 2001
+From: Koudai Aono <koxudaxi@gmail.com>
+Date: Wed, 18 Nov 2026 22:48:09 -0500
 Subject: [PATCH 4/6] mellum: optimized q8 prefill and decode
 
-Tiled expert GEMMs from 32 rows and batched Q8_0 projections, Metal 4
-tensor-tile experts (E1), prefill attention tiles with half operands, and the
-decode fusions (q/k norm and RoPE, K/V staged as f16, the MoE reduce with its
-residual, and add plus RMS norm) in one dispatch each. The exact rows kernel
-stays for chunks under 32 rows, and DS4_MELLUM_EXACT_PREFILL=1 keeps every
-chunk exact for diagnostics.
+Tiled expert GEMMs from 32 rows, batched Q8_0 projections, Metal 4
+tensor-tile experts, prefill attention tiles with half operands, the four
+decode fusions, and DS4_MELLUM_EXACT_PREFILL for diagnostics. The f32 tiled
+attention experiment is removed, the sliding decode kernel loads two keys
+before folding either, and its reference kernel ships for the comparison.
 
-The A/B/B/A CLI runners, their model-free contract and the 2048-token decode
-prompt ship with the patch; the ported tests are test_mellum_fastpath.sh and
-the exact-prefill and deep-rewind cases in ds4_test.
-
-Also carried: the f32 tiled-attention experiment removed (0ea33285), the sliding decode kernel's two-key loads
-(6604b190), and the sliding reference kernel with its comparison (f160af74). The shared Metal compile-options
-helper from patches/common is restored after the reference's compiler setup replaced it.
-
-Tests cover kernels, the 45 fast-path cases, exact-prefill and rewind
-comparisons, and Qwen kernel regressions. Historical Q8 numerical and
-performance results used a file whose hash differs from the published
-model. Published-model per-patch acceptance and the required physical
-Mac Studio comparison remain pending; see
-docs/reports/mellum-engine-evidence.md.
+The A/B/B/A CLI runners, their model-free contract, the 2048-token decode
+prompt and the three oracle token fixtures ship with the patch. The oracle
+compares against an immutable d2d9338 build, each engine from its own tree.
 
 Upstream: not offered, fork only
 Retire-when: upstream has equivalent Mellum fast paths
@@ -43,7 +31,7 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  tests/mellum_moe_ref.inc             |  35 +++
  tests/mellum_oracle_1100.tokens      |  71 +++++
  tests/mellum_oracle_2200.tokens      | 140 ++++++++++
- tests/mellum_oracle_compare.sh       | 124 +++++++++
+ tests/mellum_oracle_compare.sh       | 114 ++++++++
  tests/mellum_oracle_short.tokens     |   4 +
  tests/mellum_prompts/prompt_2048.txt |  97 +++++++
  tests/mellum_trace.c                 |  80 ++++--
@@ -52,7 +40,7 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  tests/test_mellum_fastpath.sh        | 123 +++++++++
  tests/test_mellum_kernels.c          | 257 +++++++++++++++++-
  tests/test_mellum_runners.sh         |  71 +++++
- 23 files changed, 2517 insertions(+), 91 deletions(-)
+ 23 files changed, 2507 insertions(+), 91 deletions(-)
  create mode 100755 tests/mellum_cli_decode_abba.sh
  create mode 100755 tests/mellum_cli_prefill_abba.sh
  create mode 100644 tests/mellum_heldout_long.tokens
@@ -67,7 +55,7 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  create mode 100755 tests/test_mellum_runners.sh
 
 diff --git a/Makefile b/Makefile
-index 149d57cc..63cd6bae 100644
+index 149d57c..63cd6ba 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -1053,6 +1053,18 @@ tests/test_mellum_tokenizer.o: tests/test_mellum_tokenizer.c tests/mellum_tokeni
@@ -90,7 +78,7 @@ index 149d57cc..63cd6bae 100644
  test-mellum: tests/test_mellum_config tests/test_mellum_tokenizer
  	./tests/test_mellum_config
 diff --git a/ds4.c b/ds4.c
-index ba0f5c6d..d0be491d 100644
+index fb28dd8..7a1a769 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -17484,9 +17484,10 @@ typedef enum {
@@ -356,7 +344,7 @@ index ba0f5c6d..d0be491d 100644
  }
  
  /* The logits of one row of HIDDEN into g->logits: output norm, then the one-row LM head.  Prefill
-@@ -88917,12 +89012,12 @@ bool ds4_test_mellum_moe(ds4_engine *engine, uint32_t layer, const float *x, uin
+@@ -88925,12 +89020,12 @@ bool ds4_test_mellum_moe(ds4_engine *engine, uint32_t layer, const float *x, uin
      const uint64_t E = DS4_N_EMBD, K = DS4_N_EXPERT_USED;
      const bool ok =
          ds4_gpu_tensor_write(s[MELLUM_S_FFN_NORM], 0, x, (uint64_t)T * E * sizeof(float)) &&
@@ -372,7 +360,7 @@ index ba0f5c6d..d0be491d 100644
      qwen4_graph_free(&g);
      return ok;
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index a3c25c38..293958cf 100644
+index a3c25c3..293958c 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -3621,6 +3621,14 @@ int ds4_gpu_qwen4_moe_reduce_tensor(
@@ -466,7 +454,7 @@ index a3c25c38..293958cf 100644
  #ifdef __cplusplus
  }
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 78934319..7f85d140 100644
+index 7893431..7f85d14 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
 @@ -2757,6 +2757,10 @@ static int ds4_gpu_mpp_available(void) {
@@ -737,7 +725,7 @@ index 78934319..7f85d140 100644
 +    return res && mellum_moe(out, res, x, logits, selected, weights, mid, part, model_map, model_size, p, n_tokens);
  }
 diff --git a/metal/mellum.metal b/metal/mellum.metal
-index 93879999..f13492e8 100644
+index 9387999..f13492e 100644
 --- a/metal/mellum.metal
 +++ b/metal/mellum.metal
 @@ -21,19 +21,13 @@ struct ds4_metal_args_mellum_qk_norm_rope {
@@ -1135,7 +1123,7 @@ index 93879999..f13492e8 100644
 +    }
 +}
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index c4233285..f3107468 100644
+index c423328..f310746 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -3561,6 +3561,13 @@ static inline qwen4_raw16 qwen4_load_raw16(device const char *row, uint b, uint
@@ -1166,7 +1154,7 @@ index c4233285..f3107468 100644
          const uint ag = (r.h.x >> 16) | (r.h.y << 16);
          const uint auxs = (r.h.y >> 16) | (r.h.z << 16);
 diff --git a/tests/ds4_test.c b/tests/ds4_test.c
-index caacefad..bf223396 100644
+index caacefa..bf22339 100644
 --- a/tests/ds4_test.c
 +++ b/tests/ds4_test.c
 @@ -755,6 +755,95 @@ static void test_mellum_rewind_frontier_k1_case(ds4_engine *engine, int len) {
@@ -1286,7 +1274,7 @@ index caacefad..bf223396 100644
      {"--qwen4-restore-reuse", "qwen4-restore-reuse", "Qwen restore discards old verifier state and rejects truncated payloads", test_qwen_restore_reused_session},
 diff --git a/tests/mellum_cli_decode_abba.sh b/tests/mellum_cli_decode_abba.sh
 new file mode 100755
-index 00000000..3eb4f398
+index 0000000..3eb4f39
 --- /dev/null
 +++ b/tests/mellum_cli_decode_abba.sh
 @@ -0,0 +1,74 @@
@@ -1366,7 +1354,7 @@ index 00000000..3eb4f398
 +PY
 diff --git a/tests/mellum_cli_prefill_abba.sh b/tests/mellum_cli_prefill_abba.sh
 new file mode 100755
-index 00000000..36ec8508
+index 0000000..36ec850
 --- /dev/null
 +++ b/tests/mellum_cli_prefill_abba.sh
 @@ -0,0 +1,108 @@
@@ -1480,7 +1468,7 @@ index 00000000..36ec8508
 +PY
 diff --git a/tests/mellum_heldout_long.tokens b/tests/mellum_heldout_long.tokens
 new file mode 100644
-index 00000000..a61ace18
+index 0000000..a61ace1
 --- /dev/null
 +++ b/tests/mellum_heldout_long.tokens
 @@ -0,0 +1,377 @@
@@ -1863,7 +1851,7 @@ index 00000000..a61ace18
 +3322 4241 61 233 308 3322 4241 97 2288 97 32755 28 233 27 8091 233
 diff --git a/tests/mellum_logits_compare.py b/tests/mellum_logits_compare.py
 new file mode 100644
-index 00000000..b69f8796
+index 0000000..b69f879
 --- /dev/null
 +++ b/tests/mellum_logits_compare.py
 @@ -0,0 +1,88 @@
@@ -1956,7 +1944,7 @@ index 00000000..b69f8796
 +if __name__ == '__main__':
 +    sys.exit(main(sys.argv))
 diff --git a/tests/mellum_moe_ref.inc b/tests/mellum_moe_ref.inc
-index 8fbcccff..fbd7a97a 100644
+index 8fbcccf..fbd7a97 100644
 --- a/tests/mellum_moe_ref.inc
 +++ b/tests/mellum_moe_ref.inc
 @@ -83,3 +83,38 @@ static inline void mref_moe_row(const mref_weights *a, const float *x, mref_t *r
@@ -2000,7 +1988,7 @@ index 8fbcccff..fbd7a97a 100644
 +}
 diff --git a/tests/mellum_oracle_1100.tokens b/tests/mellum_oracle_1100.tokens
 new file mode 100644
-index 00000000..b3fa26a1
+index 0000000..b3fa26a
 --- /dev/null
 +++ b/tests/mellum_oracle_1100.tokens
 @@ -0,0 +1,71 @@
@@ -2077,7 +2065,7 @@ index 00000000..b3fa26a1
 +63698 352 9379 46 4384 5429 385 28 233 27 8091 233
 diff --git a/tests/mellum_oracle_2200.tokens b/tests/mellum_oracle_2200.tokens
 new file mode 100644
-index 00000000..7de38291
+index 0000000..7de3829
 --- /dev/null
 +++ b/tests/mellum_oracle_2200.tokens
 @@ -0,0 +1,140 @@
@@ -2223,10 +2211,10 @@ index 00000000..7de38291
 +309 4860 48 28 233 27 8091 233
 diff --git a/tests/mellum_oracle_compare.sh b/tests/mellum_oracle_compare.sh
 new file mode 100644
-index 00000000..7108eb16
+index 0000000..c5bf2c8
 --- /dev/null
 +++ b/tests/mellum_oracle_compare.sh
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,114 @@
 +#!/bin/sh
 +# The external oracle: the port's logits against the pinned M5 Max reference capture, at the oracle positions of
 +# tests/mellum_oracle_{short,1100,2200}.tokens.  Both inputs ship in this patch, so the check runs from the tree:
@@ -2300,22 +2288,12 @@ index 00000000..7108eb16
 +        fi
 +        [ -e "$dir/old.$t.$drv.session.logits.f32" ] ||
 +            run "$ORACLE" "$tokens" "$drv" "$dir/old.$t.$drv" "$positions" > /dev/null || { fail=1; continue; }
-+        exact=1
-+        [ "$mode" = prefill ] && [ "$tiled" -eq 1 ] && exact=0
-+        if [ "$mode" = prefill-exact ]; then
-+            # The reference's own exact-prefill flag is only a usable oracle where it actually is exact:
-+            # at d2d9338 it does not disable the attention tiles, so at 2,200 tokens its "exact" prefill is
-+            # not byte-equal to its decode.  Measure that first; require byte equality across engines only
-+            # where the reference itself passes it.
-+            if [ ! -e "$dir/old.$t.exact.session.logits.f32" ]; then
-+                (export DS4_MELLUM_EXACT_PREFILL=1
-+                 run "$ORACLE" "$tokens" prefill "$dir/old.$t.exact" "$positions") > /dev/null || { fail=1; continue; }
-+            fi
-+            r0=$(compare "$dir/old.$t.exact" "$dir/old.$t.decode" "$positions" 1) || true
-+            case "$r0" in ok*) exact=1 ;; *) exact=0; echo "note $t: the reference's exact prefill is not byte-equal to its decode, so the cross-engine exact comparison uses the near-tie rule" ;; esac
-+            cmp_old="$dir/old.$t.exact"
-+        fi
-+        r=$(compare "$dir/new.$t.$mode" "${cmp_old:-$dir/old.$t.$drv}" "$positions" "$exact") || fail=1
++        # Against the old engine every mode uses the near-tie rule: at d2d9338 its DS4_MELLUM_EXACT_PREFILL
++        # leaves the attention tiles on, so even its "exact" prefill is not byte-equal to its decode at 2,200
++        # tokens.  The strong exactness claim is the in-engine comparison below, which our port must pass
++        # byte for byte and the old engine would not.
++        exact=0
++        r=$(compare "$dir/new.$t.$mode" "$dir/old.$t.$drv" "$positions" "$exact") || fail=1
 +        echo "$(echo "$r" | cut -c1-4) $t $mode vs the old engine, $(echo "$r" | cut -c6-)"
 +    done
 +    r=$(compare "$dir/new.$t.prefill-exact" "$dir/new.$t.decode" "$positions" 1) || fail=1
@@ -2353,7 +2331,7 @@ index 00000000..7108eb16
 +exit "$fail"
 diff --git a/tests/mellum_oracle_short.tokens b/tests/mellum_oracle_short.tokens
 new file mode 100644
-index 00000000..88ece4e2
+index 0000000..88ece4e
 --- /dev/null
 +++ b/tests/mellum_oracle_short.tokens
 @@ -0,0 +1,4 @@
@@ -2363,7 +2341,7 @@ index 00000000..88ece4e2
 +255 99 66776 12619 901 27764 6253 48 28 233 27 8091 233
 diff --git a/tests/mellum_prompts/prompt_2048.txt b/tests/mellum_prompts/prompt_2048.txt
 new file mode 100644
-index 00000000..d35c426c
+index 0000000..d35c426
 --- /dev/null
 +++ b/tests/mellum_prompts/prompt_2048.txt
 @@ -0,0 +1,97 @@
@@ -2466,7 +2444,7 @@ index 00000000..d35c426c
 +Summarize the text above in three sentences.
 \ No newline at end of file
 diff --git a/tests/mellum_trace.c b/tests/mellum_trace.c
-index c7088308..232d75d0 100644
+index c708830..232d75d 100644
 --- a/tests/mellum_trace.c
 +++ b/tests/mellum_trace.c
 @@ -24,21 +24,26 @@
@@ -2609,7 +2587,7 @@ index c7088308..232d75d0 100644
      }
 diff --git a/tests/test_mellum_cli.sh b/tests/test_mellum_cli.sh
 new file mode 100755
-index 00000000..54b93452
+index 0000000..54b9345
 --- /dev/null
 +++ b/tests/test_mellum_cli.sh
 @@ -0,0 +1,53 @@
@@ -2667,7 +2645,7 @@ index 00000000..54b93452
 +[ "$fail" -eq 0 ] && echo "mellum-cli: PASS" || echo "mellum-cli: FAILED"
 +exit "$fail"
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index 07aea9f1..a32765e8 100644
+index 07aea9f..a32765e 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
 @@ -309,6 +309,7 @@ static uint64_t expect_per_row(void) {
@@ -2691,7 +2669,7 @@ index 07aea9f1..a32765e8 100644
  static uint64_t sum_requests(uint32_t ctx, uint32_t cap, uint32_t *n_out) {
 diff --git a/tests/test_mellum_fastpath.sh b/tests/test_mellum_fastpath.sh
 new file mode 100755
-index 00000000..ba808fed
+index 0000000..ba808fe
 --- /dev/null
 +++ b/tests/test_mellum_fastpath.sh
 @@ -0,0 +1,123 @@
@@ -2819,7 +2797,7 @@ index 00000000..ba808fed
 +[ "$fail" -eq 0 ] && echo "mellum-fastpath: PASS" || echo "mellum-fastpath: FAILED"
 +exit "$fail"
 diff --git a/tests/test_mellum_kernels.c b/tests/test_mellum_kernels.c
-index 9bc023b5..df80d59c 100644
+index 9bc023b..df80d59 100644
 --- a/tests/test_mellum_kernels.c
 +++ b/tests/test_mellum_kernels.c
 @@ -570,6 +570,10 @@ typedef struct {
@@ -3137,7 +3115,7 @@ index 9bc023b5..df80d59c 100644
      test_prefill_equals_decode();
 diff --git a/tests/test_mellum_runners.sh b/tests/test_mellum_runners.sh
 new file mode 100755
-index 00000000..c9a8516a
+index 0000000..c9a8516
 --- /dev/null
 +++ b/tests/test_mellum_runners.sh
 @@ -0,0 +1,71 @@

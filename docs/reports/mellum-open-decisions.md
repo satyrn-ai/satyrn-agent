@@ -42,7 +42,17 @@ per-machine Metal limit, planned bytes, peak, swap before/after and n, recorded 
 What is ready: the ported A/B/B/A runners and (with 0006) `tools/mellum_s4_measure` produce those fields; the
 acceptance procedure is Task 20.
 
-## 4. S4 driver slot count — closed
+## 4. Open question for Koudai: inline `.inc` files or plain `ds4.c`?
+
+Spec §4's ledger names `ds4_mellum_config.inc`, `ds4_mellum_plan.inc`, `ds4_mellum_graph.inc` and friends. This
+port puts Mellum's code directly in `ds4.c`, as the qwen35 series does, and carries only the generated Unicode
+table as a `.inc` file. That choice is not listed among the deviations.
+
+Keeping the reference's `.inc` files would shrink the `ds4.c` region the coming qwen35 rebase must resolve, allow a
+straight file-by-file diff against `d2d9338` (the closest thing to Koudai's byte-identity gate), and make later
+updates from the still-moving `ds4-mellum` cheaper. The cost is a larger series now.
+
+## 5. S4 driver slot count — closed
 
 `tests/test_mellum_s4_driver.py` no longer hardcodes 979. The driver now reports `expert_bytes` from a new
 `ds4_engine_mellum_expert_bytes` hook, and the smoke test asserts `slots == (6 GiB // expert_bytes)`, which holds

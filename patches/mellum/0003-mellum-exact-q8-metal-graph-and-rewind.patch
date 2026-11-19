@@ -1,27 +1,16 @@
-From 250837fa4d546d105fb2f034cf428a3894292954 Mon Sep 17 00:00:00 2001
+From f03b4bf0f0d1ae8aa5e5902100286294f111105e Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
-Date: Tue, 17 Nov 2026 07:35:37 -0500
+Date: Wed, 18 Nov 2026 22:48:07 -0500
 Subject: [PATCH 3/6] mellum: exact q8 metal graph and rewind
 
-The Q8_0 Metal graph: q/k norm and RoPE with YaRN on the full layers only,
-ring commit and sliding-window attention, ungated full attention on the
-upstream qwen4 decode kernels, MoE with top-8 of 64 routed experts and no
-shared expert, the layer loop and logits, and the DS4_MELLUM_TRACE driver.
+An exact Q8_0 Metal graph: q/k norm and RoPE, ring commit and sliding-window
+attention, ungated full attention on the upstream qwen4 decode kernels, MoE
+with top-8 of 64 routed experts, the layer loop and logits, the trace driver,
+and the lifting of the forward-pass refusal.
 
-Rewind: one token back keeps both caches; at the last sync's end the
-frontier's rings and logits are restored; anywhere else the graph resets and
-the kept tokens are replayed. The exact rows kernel makes a replay equal the
-decode steps it replaces.
-
-Tests cover kernels, trace equality, and ds4_test --mellum-rewind at
-500/1, 1100/1, 1100/3 and the 1100/40 frontier. Historical real-model
-results used a Q8 file whose hash differs from the published model;
-published-model oracle and rewind acceptance must be repeated.
-
-The exact-prefill diagnostic and fast-path target land in 0004 with the
-thresholds they control. This differs from spec section 4 and remains an
-explicit boundary deviation for Koudai to review. Acceptance status and
-historical commands are in docs/reports/mellum-engine-evidence.md.
+Rewind: one token back keeps both caches; at the last sync's end the frontier's
+rings and logits are restored; anywhere else the graph resets and the kept
+tokens are replayed.
 
 Upstream: not offered, fork only
 Retire-when: upstream runs an exact Mellum 2.1 Metal graph
@@ -50,7 +39,7 @@ Carried-commits: 5c3b117390a2cb8bb9aa28b78707dcb3b222ba7e d1c144df01cdfa72f0a737
  create mode 100755 tests/test_mellum_trace.sh
 
 diff --git a/Makefile b/Makefile
-index ffc0cb4f..149d57cc 100644
+index ffc0cb4..149d57c 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -9,6 +9,7 @@ endif
@@ -117,7 +106,7 @@ index ffc0cb4f..149d57cc 100644
  	rm -f tests/test_qwen4_ngram_state
  	rm -f tests/test_web_recovery
 diff --git a/ds4.c b/ds4.c
-index 8d24cb43..ba0f5c6d 100644
+index fee1b40..fb28dd8 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -17471,6 +17471,9 @@ typedef enum {
@@ -611,7 +600,7 @@ index 8d24cb43..ba0f5c6d 100644
          if (ds4_session_eval(s, token, err, errlen) != 0) return -1;
          return ds4_session_argmax(s);
      }
-@@ -77479,7 +77833,6 @@ static int ds4_session_sync_lockstep(ds4_session *s, const ds4_tokens *prompt,
+@@ -77487,7 +77841,6 @@ static int ds4_session_sync_lockstep(ds4_session *s, const ds4_tokens *prompt,
   * once its matching prefill completes, surfacing worker-side failures
   * here instead of as a gate timeout mid-decode. */
  int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t errlen) {
@@ -619,7 +608,7 @@ index 8d24cb43..ba0f5c6d 100644
  #ifndef DS4_NO_GPU
      if (s) s->dspark_rewind_end = 0;
  #endif
-@@ -77577,7 +77930,6 @@ int ds4_session_sync_multimodal(
+@@ -77585,7 +77938,6 @@ int ds4_session_sync_multimodal(
          size_t image_count,
          char *err,
          size_t errlen) {
@@ -627,7 +616,7 @@ index 8d24cb43..ba0f5c6d 100644
      if (!s || !prompt || (image_count != 0 && !images)) {
          snprintf(err, errlen, "invalid multimodal prompt");
          return 1;
-@@ -77738,6 +78090,9 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
+@@ -77746,6 +78098,9 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
          if (prefill_rc != 0) return prefill_rc;
          s->checkpoint_valid = true;
          s->mtp_draft_valid = false;
@@ -637,7 +626,7 @@ index 8d24cb43..ba0f5c6d 100644
          return 0;
      }
  #endif
-@@ -80095,7 +80450,6 @@ static int ds4_session_eval_probe_tp(ds4_session *s, int token, bool probe_mtp,
+@@ -80103,7 +80458,6 @@ static int ds4_session_eval_probe_tp(ds4_session *s, int token, bool probe_mtp,
  }
  
  int ds4_session_eval(ds4_session *s, int token, char *err, size_t errlen) {
@@ -645,7 +634,7 @@ index 8d24cb43..ba0f5c6d 100644
      bool probe_mtp = true;
  #ifndef DS4_NO_GPU
      if (s && s->engine && s->engine->support_kind == DS4_SUPPORT_DSPARK) {
-@@ -82472,7 +82826,6 @@ static bool qwen4_batch_spec_next(const ds4_engine *e) {
+@@ -82480,7 +82834,6 @@ static bool qwen4_batch_spec_next(const ds4_engine *e) {
  int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count,
                                                 int (*accepted)[2], int *n_accepted,
                                                 char *err, size_t errlen) {
@@ -653,7 +642,7 @@ index 8d24cb43..ba0f5c6d 100644
      if (!items || count <= 0 || !accepted || !n_accepted) {
          if (err && errlen) snprintf(err, errlen, "empty speculative decode batch");
          return 1;
-@@ -82660,7 +83013,6 @@ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count
+@@ -82668,7 +83021,6 @@ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count
  
  int ds4_sessions_eval_batch(ds4_decode_item *items, int count,
                              char *err, size_t errlen) {
@@ -661,7 +650,7 @@ index 8d24cb43..ba0f5c6d 100644
      if (!items || count <= 0) {
          if (err && errlen) snprintf(err, errlen, "empty decode batch");
          return 1;
-@@ -82740,7 +83092,6 @@ int ds4_sessions_eval_batch_with_prefill(
+@@ -82748,7 +83100,6 @@ int ds4_sessions_eval_batch_with_prefill(
          const ds4_tokens *prefill_prompt,
          char *err,
          size_t errlen) {
@@ -669,7 +658,7 @@ index 8d24cb43..ba0f5c6d 100644
      if (!items || count <= 0 || !prefill_session || !prefill_prompt ||
          !prefill_session->engine) {
          if (err && errlen) snprintf(err, errlen, "invalid mixed model batch");
-@@ -87151,7 +87502,6 @@ static int ds4_session_eval_speculative_argmax_impl(
+@@ -87159,7 +87510,6 @@ static int ds4_session_eval_speculative_argmax_impl(
          bool ignore_eos, ds4_think_mode think_mode,
          int *accepted, int accepted_cap,
          char *err, size_t errlen) {
@@ -677,7 +666,7 @@ index 8d24cb43..ba0f5c6d 100644
      if (!s || max_tokens <= 0 || accepted_cap <= 0) return 0;
      if (!s->checkpoint_valid) {
          payload_set_err(err, errlen, "speculative decode requires a synchronized checkpoint");
-@@ -88027,7 +88377,6 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
+@@ -88035,7 +88385,6 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
                                   float top_p, float min_p, uint64_t *rng,
                                   int *accepted, int accepted_cap,
                                   char *err, size_t errlen) {
@@ -685,7 +674,7 @@ index 8d24cb43..ba0f5c6d 100644
      if (temperature <= 0.0f) {
          return ds4_session_eval_speculative_argmax(
              s, first_token, max_tokens, eos_token,
-@@ -88345,7 +88694,36 @@ void ds4_session_rewind(ds4_session *s, int pos) {
+@@ -88353,7 +88702,36 @@ void ds4_session_rewind(ds4_session *s, int pos) {
      bool state_ok = false;
  #ifndef DS4_NO_GPU
  #ifdef DS4_HAS_QWEN4_GPU
@@ -723,7 +712,7 @@ index 8d24cb43..ba0f5c6d 100644
          /* a verify snapshot can restore the verified block's start (the
           * pre-verify snap0 set, kept for exact-sampling resample rewinds),
           * its row-0 state (one token back), or its row-1 state (two back
-@@ -88408,6 +88786,21 @@ ds4_session *ds4_session_new_test_checkpoint(const int *tokens, int n) {
+@@ -88416,6 +88794,21 @@ ds4_session *ds4_session_new_test_checkpoint(const int *tokens, int n) {
      return s;
  }
  
@@ -745,7 +734,7 @@ index 8d24cb43..ba0f5c6d 100644
  void ds4_session_free_test_checkpoint(ds4_session *s) {
      if (!s) return;
      token_vec_free(&s->checkpoint);
-@@ -88487,4 +88880,61 @@ bool ds4_test_dspark_prefix_capture(ds4_engine *engine, const ds4_tokens *prompt
+@@ -88495,4 +88888,61 @@ bool ds4_test_dspark_prefix_capture(ds4_engine *engine, const ds4_tokens *prompt
      ds4_session_free(ref);
      return ok;
  }
@@ -808,7 +797,7 @@ index 8d24cb43..ba0f5c6d 100644
 +}
  #endif
 diff --git a/ds4.h b/ds4.h
-index e8c1e7fc..65a9e19d 100644
+index e8c1e7f..65a9e19 100644
 --- a/ds4.h
 +++ b/ds4.h
 @@ -508,6 +508,8 @@ void ds4_session_free_test_checkpoint(ds4_session *s);
@@ -831,7 +820,7 @@ index e8c1e7fc..65a9e19d 100644
  int ds4_session_ctx(ds4_session *s);
  int ds4_session_prefill_cap(ds4_session *s);
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 2965aef9..a3c25c38 100644
+index 2965aef..a3c25c3 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -3668,6 +3668,147 @@ int ds4_gpu_qwen4_mtp_stage_tensor(
@@ -983,7 +972,7 @@ index 2965aef9..a3c25c38 100644
  }
  #endif
 diff --git a/ds4_metal.m b/ds4_metal.m
-index b86815c4..78934319 100644
+index b86815c..7893431 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
 @@ -4807,6 +4807,7 @@ static NSString *ds4_gpu_full_source(void) {
@@ -1430,7 +1419,7 @@ index b86815c4..78934319 100644
 +}
 diff --git a/metal/mellum.metal b/metal/mellum.metal
 new file mode 100644
-index 00000000..93879999
+index 0000000..9387999
 --- /dev/null
 +++ b/metal/mellum.metal
 @@ -0,0 +1,202 @@
@@ -1637,7 +1626,7 @@ index 00000000..93879999
 +    *reinterpret_cast<device float4 *>(out + ((uint64_t)row * args.n_head + h) * MELLUM_SWA_D + tiisg * 4u) = result;
 +}
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index 8b375249..c4233285 100644
+index 8b37524..c423328 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -2098,7 +2098,7 @@ struct ds4_metal_args_qwen4_attn_decode {
@@ -1691,7 +1680,7 @@ index 8b375249..c4233285 100644
  }
  
 diff --git a/tests/ds4_test.c b/tests/ds4_test.c
-index aed77309..caacefad 100644
+index aed7730..caacefa 100644
 --- a/tests/ds4_test.c
 +++ b/tests/ds4_test.c
 @@ -442,6 +442,422 @@ cleanup:
@@ -2129,7 +2118,7 @@ index aed77309..caacefad 100644
      {"--session-rewind", "session-rewind", "Qwen3.8 rewind by snapshot restore and by replay", test_session_rewind_replay},
 diff --git a/tests/mellum_moe_ref.inc b/tests/mellum_moe_ref.inc
 new file mode 100644
-index 00000000..8fbcccff
+index 0000000..8fbcccf
 --- /dev/null
 +++ b/tests/mellum_moe_ref.inc
 @@ -0,0 +1,85 @@
@@ -2220,7 +2209,7 @@ index 00000000..8fbcccff
 +}
 diff --git a/tests/mellum_trace.c b/tests/mellum_trace.c
 new file mode 100644
-index 00000000..c7088308
+index 0000000..c708830
 --- /dev/null
 +++ b/tests/mellum_trace.c
 @@ -0,0 +1,322 @@
@@ -2548,7 +2537,7 @@ index 00000000..c7088308
 +}
 diff --git a/tests/mellum_trace_context.h b/tests/mellum_trace_context.h
 new file mode 100644
-index 00000000..60a36197
+index 0000000..60a3619
 --- /dev/null
 +++ b/tests/mellum_trace_context.h
 @@ -0,0 +1,21 @@
@@ -2574,7 +2563,7 @@ index 00000000..60a36197
 +}
 +#endif
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index 3334d924..07aea9f1 100644
+index 3334d92..07aea9f 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
 @@ -206,7 +206,8 @@ static void child_engine_open(const char *path) {
@@ -2663,7 +2652,7 @@ index 3334d924..07aea9f1 100644
      err[0] = '\0'; CHECK(ds4_session_load_payload(&s, fp, 64, err, sizeof(err)) == 1 && strcmp(err, msg) != 0);
 diff --git a/tests/test_mellum_kernels.c b/tests/test_mellum_kernels.c
 new file mode 100644
-index 00000000..9bc023b5
+index 0000000..9bc023b
 --- /dev/null
 +++ b/tests/test_mellum_kernels.c
 @@ -0,0 +1,2208 @@
@@ -4877,7 +4866,7 @@ index 00000000..9bc023b5
 +}
 diff --git a/tests/test_mellum_trace.sh b/tests/test_mellum_trace.sh
 new file mode 100755
-index 00000000..b00cda06
+index 0000000..b00cda0
 --- /dev/null
 +++ b/tests/test_mellum_trace.sh
 @@ -0,0 +1,92 @@

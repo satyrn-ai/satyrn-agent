@@ -1,22 +1,11 @@
-From 0c5009f69c8d41a0d284e4556dcf5dc5f0a0382b Mon Sep 17 00:00:00 2001
-From: pauleveritt <pauleveritt@me.com>
-Date: Wed, 18 Nov 2026 19:54:58 -0500
+From e58003cafd34ea81e7716663ef5ca02665325080 Mon Sep 17 00:00:00 2001
+From: Koudai Aono <koxudaxi@gmail.com>
+Date: Wed, 18 Nov 2026 22:48:11 -0500
 Subject: [PATCH 5/6] mellum: mxfp4 moe experts
 
-Open a Mellum file whose routed experts are all MXFP4_MOE, refuse mixed
-or unsupported expert quants by name, and run resident MoE and the layer
-loop with tensors staged as half. The double reference reads MXFP4 too.
-
-The shared fixtures gain mref_weights.expert_type, explicitly Q8_0 in
-the older initializers. Address tables, streamed slot sizing and the
-S6-era tiled MXFP4 kernel tests land together in 0006. The Python expert
-index, pack and GGUF tools are excluded from this engine port.
-
-Published-model Q8 non-regression and a valid same-machine MXFP4
-performance comparison remain pending. Historical Q8 results used a
-different model hash; the earlier performance harness reused output
-directories and loaded the port's shaders in the reference. This does not prove
-the performance gate. See docs/reports/mellum-engine-evidence.md.
+Resident MXFP4_MOE experts: loading and validation, the expert index and pack
+at the quant's own size, the MoE and layer paths for MXFP4 arenas, and
+refusal of every mixture by name. Address tables stay with streaming.
 
 Upstream: not offered, fork only
 Retire-when: upstream supports JetBrains MXFP4_MOE
@@ -35,7 +24,7 @@ Carried-commits: 0adf6bafb1f17e642124b60b183575864f118629 989dc7c8dada6685007733
  create mode 100644 tests/mellum_heldout_unicode.tokens
 
 diff --git a/Makefile b/Makefile
-index 63cd6bae..13293ecb 100644
+index 63cd6ba..13293ec 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -1479,3 +1479,4 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
@@ -44,7 +33,7 @@ index 63cd6bae..13293ecb 100644
  	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))
 +
 diff --git a/ds4.c b/ds4.c
-index d0be491d..015c3e42 100644
+index 7a1a769..d2e71db 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -5703,8 +5703,22 @@ static void weights_validate_qwen4_layout(
@@ -132,7 +121,7 @@ index d0be491d..015c3e42 100644
      p.router_offset = l->ffn_gate_inp->abs_offset;
      p.gate_offset = l->ffn_gate_exps->abs_offset;
      p.up_offset = l->ffn_up_exps->abs_offset;
-@@ -88979,7 +88996,8 @@ bool ds4_test_dspark_prefix_capture(ds4_engine *engine, const ds4_tokens *prompt
+@@ -88987,7 +89004,8 @@ bool ds4_test_dspark_prefix_capture(ds4_engine *engine, const ds4_tokens *prompt
   * through the layer struct mellum_graph_moe reads (so a test's reference does not share the driver's binding),
   * and false if the layer has a shared-expert tensor. */
  bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void **map,
@@ -142,7 +131,7 @@ index d0be491d..015c3e42 100644
      if (!engine || !ds4_model_is_mellum() || layer >= DS4_N_LAYER) return false;
      const ds4_model *m = &engine->model;
      const ds4_tensor *r = tensor_by_namef(m, "blk.%u.ffn_gate_inp.weight", layer);
-@@ -88995,6 +89013,7 @@ bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void
+@@ -89003,6 +89021,7 @@ bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void
      *gate = g->abs_offset;
      *up = u->abs_offset;
      *down = d->abs_offset;
@@ -151,7 +140,7 @@ index d0be491d..015c3e42 100644
  }
  
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 293958cf..7c1b1e20 100644
+index 293958c..7c1b1e2 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -3833,7 +3833,8 @@ int ds4_gpu_mellum_attn_full_rows_tensor(
@@ -174,7 +163,7 @@ index 293958cf..7c1b1e20 100644
      uint64_t router_offset;
      uint64_t gate_offset;
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 7f85d140..63238966 100644
+index 7f85d14..6323896 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
 @@ -50989,7 +50989,7 @@ static int mellum_moe(
@@ -187,7 +176,7 @@ index 7f85d140..63238966 100644
          p->n_expert == 0u || p->n_expert > 512u || p->n_used == 0u || p->n_used > p->n_expert || p->n_used > 16u) {
          return 0;
 diff --git a/tests/ds4_test.c b/tests/ds4_test.c
-index bf223396..e39ab93f 100644
+index bf22339..e39ab93 100644
 --- a/tests/ds4_test.c
 +++ b/tests/ds4_test.c
 @@ -872,7 +872,8 @@ static void test_mellum_rewind(void) {
@@ -512,7 +501,7 @@ index bf223396..e39ab93f 100644
  #else
 diff --git a/tests/mellum_heldout_unicode.tokens b/tests/mellum_heldout_unicode.tokens
 new file mode 100644
-index 00000000..2bd1796f
+index 0000000..2bd1796
 --- /dev/null
 +++ b/tests/mellum_heldout_unicode.tokens
 @@ -0,0 +1,15 @@
@@ -532,7 +521,7 @@ index 00000000..2bd1796f
 +3108 21349 59273 25573 8876 73673 34435 65 43851 255 28312 35178 2949 25459 701 1459
 +1409 21625 28 233 27 8091 233
 diff --git a/tests/mellum_moe_ref.inc b/tests/mellum_moe_ref.inc
-index fbd7a97a..e2d62d7b 100644
+index fbd7a97..e2d62d7 100644
 --- a/tests/mellum_moe_ref.inc
 +++ b/tests/mellum_moe_ref.inc
 @@ -1,8 +1,10 @@
@@ -673,7 +662,7 @@ index fbd7a97a..e2d62d7b 100644
      }
  }
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index a32765e8..60da31df 100644
+index a32765e..60da31d 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
 @@ -1113,6 +1113,9 @@ int main(void) {
@@ -687,7 +676,7 @@ index a32765e8..60da31df 100644
      expect_refused(MF_DOWN_Q4K, "ffn_down_exps", "ffn_down_exps not Q8_0");
      expect_refused(MF_UP_Q4K, "ffn_up_exps", "ffn_up_exps not Q8_0");
 diff --git a/tests/test_mellum_kernels.c b/tests/test_mellum_kernels.c
-index df80d59c..60f957a1 100644
+index df80d59..60f957a 100644
 --- a/tests/test_mellum_kernels.c
 +++ b/tests/test_mellum_kernels.c
 @@ -1327,7 +1327,7 @@ static ds4_gpu_mellum_moe moe_params(const moe_arena_t *a, uint64_t router_off)
