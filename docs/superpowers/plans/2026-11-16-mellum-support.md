@@ -610,6 +610,8 @@ git add patches/mellum && git commit -m "feat(ds4): load Mellum MXFP4_MOE expert
 
 ### Task 16: Engine patch 0006 — SSD expert streaming
 
+**Status:** implementation/export and current-machine validation complete; full acceptance remains open for the physical 16 GB / 8 GB gates. See [evidence](../../reports/mellum-engine-evidence.md).
+
 **Files:**
 - Create: `patches/mellum/0006-mellum-ssd-expert-streaming.patch`
 - Reference: `ds4_mellum_stream.c`, `ds4_mellum_stream.h`, streaming hunks in `ds4.c`, `ds4.h`, `ds4_metal.m`, `ds4_mellum_graph.inc`
@@ -620,15 +622,15 @@ git add patches/mellum && git commit -m "feat(ds4): load Mellum MXFP4_MOE expert
 - Consumes: task 15.
 - Produces: stream config, uncached descriptor, slot cache, stop/resume decode, overlapped loads, grouped layer-major prefill, read-fault handling.
 
-- [ ] **Step 1: Run the stream suite and watch it fail**
+- [x] **Step 1: Run the stream suite and watch it fail**
 
 `make test-mellum-stream` fails before the scheduler exists.
 
-- [ ] **Step 2: Implement, then prove exactness**
+- [x] **Step 2: Implement, then prove exactness**
 
 Streamed and resident greedy ids agree for 512 tokens in 3/3 runs per quant.
 
-- [ ] **Step 3b: Port the resident-versus-streamed measure driver**
+- [x] **Step 3b: Port the resident-versus-streamed measure driver**
 
 `tools/mellum_s4_measure.c` (237 lines) is what the spec's §2.5 and §8 32K rows are measured with, and it consumes the streaming and Metal-allocation hooks this patch adds. Add it and its `tools/mellum_s4_measure` Makefile target; it is not part of `make all`. The Python orchestrator (`mellum_s4_measure.py` and its GGUF helpers) is not required by the spec's command and stays out.
 
@@ -639,7 +641,7 @@ Expected: the binary exists and accepts `--model … --prompt … --gen 512 --co
 
 16 GB Mac mini: MXFP4 resident first, then Q8 with `--ssd-streaming --ssd-streaming-cache-experts 6GB`. 8 GB case: MXFP4 with `--ssd-streaming --ssd-streaming-cache-experts 2GB`, context 32768. Record the Metal limit, planned bytes, Metal peak, host footprint, swap before/after, first token, prefill, generation, command, commit and `n`. No row passes with swap growth or 2.5 GiB.
 
-- [ ] **Step 4: Export, prove, commit**
+- [x] **Step 4: Export, prove, commit**
 
 ```bash
 devenv shell -- ds4-export && devenv shell -- ds4-check --model mellum --build

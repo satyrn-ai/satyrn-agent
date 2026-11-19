@@ -1,7 +1,7 @@
 From 3702a2c4e5cfd4b0437f0f91f2c495225455a401 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 17 Nov 2026 07:35:37 -0500
-Subject: [PATCH 3/5] mellum: exact q8 metal graph and rewind
+Subject: [PATCH 3/6] mellum: exact q8 metal graph and rewind
 
 The Q8_0 Metal graph: q/k norm and RoPE with YaRN on the full layers only,
 ring commit and sliding-window attention, ungated full attention on the

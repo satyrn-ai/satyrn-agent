@@ -1,7 +1,7 @@
-From e83ff40815a71807207c3437e4b9a3f5380271cf Mon Sep 17 00:00:00 2001
-From: Koudai Aono <koxudaxi@gmail.com>
-Date: Wed, 18 Nov 2026 17:40:20 -0500
-Subject: [PATCH 5/5] mellum: mxfp4 moe experts
+From 82d3b134c041a8825d09b1ea6aba5503fbfa8f95 Mon Sep 17 00:00:00 2001
+From: pauleveritt <pauleveritt@me.com>
+Date: Wed, 18 Nov 2026 19:54:58 -0500
+Subject: [PATCH 5/6] mellum: mxfp4 moe experts
 
 Open a Mellum file whose routed experts are all MXFP4_MOE, refuse every
 mixture by name, read the expert index and the pack at the quant's own size,
@@ -174,10 +174,10 @@ index 293958cf..7c1b1e20 100644
      uint64_t router_offset;
      uint64_t gate_offset;
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 7a082ffd..7fe285b6 100644
+index 7f85d140..63238966 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -50982,7 +50982,7 @@ static int mellum_moe(
+@@ -50989,7 +50989,7 @@ static int mellum_moe(
          ds4_gpu_tensor *out, const ds4_gpu_tensor *res, const ds4_gpu_tensor *x, ds4_gpu_tensor *logits,
          ds4_gpu_tensor *selected, ds4_gpu_tensor *weights, ds4_gpu_tensor *mid, ds4_gpu_tensor *part,
          const void *model_map, uint64_t model_size, const ds4_gpu_mellum_moe *p, uint32_t n_tokens) {
