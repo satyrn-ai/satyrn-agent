@@ -156,8 +156,13 @@ def test_project_relative_drafter_uses_toml_directory(tmp_path: Path) -> None:
         ),
         (
             None,
-            ["--think-budget", "12", "--think-close", "force", "--think-until-first-write"],
-            (12, 2.0, ThinkCloseMode.FORCE, True),
+            ["--think-budget", "12", "--think-close", "force"],
+            (12, 2.0, ThinkCloseMode.FORCE, False),
+        ),
+        (
+            None,
+            ["--think-budget", "12", "--think-until-first-write"],
+            (12, 2.0, ThinkCloseMode.BIAS, True),
         ),
         (
             '[tool.satyrn]\nthink_budget = { max_tokens = 50, bias = 4.0, close = "force", until_first_write = true }\n',

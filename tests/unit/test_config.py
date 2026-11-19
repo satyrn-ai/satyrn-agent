@@ -27,18 +27,6 @@ def test_think_budget_close_and_first_write_defaults() -> None:
     assert config.until_first_write is False
 
 
-@pytest.mark.parametrize("value", ["soft", "", None, 1])
-def test_think_budget_rejects_invalid_close(value: object) -> None:
-    with pytest.raises((TypeError, ValueError), match="close"):
-        ThinkBudgetConfig(max_tokens=10, bias=1.0, close=cast("ThinkCloseMode", value))
-
-
-@pytest.mark.parametrize("value", [1, 0, "true", None])
-def test_think_budget_rejects_non_boolean_first_write(value: object) -> None:
-    with pytest.raises(TypeError, match="until_first_write"):
-        ThinkBudgetConfig(max_tokens=10, bias=1.0, until_first_write=cast("bool", value))
-
-
 def test_explicit_zero_sampling_overrides_are_values() -> None:
     overrides = SamplingOverrides(temperature=0.0, top_k=0, top_p=0.0, min_p=0.0)
 

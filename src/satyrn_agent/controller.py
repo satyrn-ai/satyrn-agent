@@ -14,7 +14,7 @@ from .dflash import DFlashStep, Recorder
 from .errors import DFlashUnavailable
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from ds4py import Session
     from ds4py.engine.decode import DecodeStep
@@ -93,6 +93,8 @@ class RuntimeController:
         *,
         interactive: bool,
         end_think_token: int,
+        closing_tokens: Sequence[int],
+        vocab_size: int,
     ) -> None:
         self._session = session
         self._native = native
@@ -100,7 +102,7 @@ class RuntimeController:
         self._backend = backend
         self._interactive = interactive
         self._closed = False
-        self.think_hook = ThinkBudgetHook(config.think_budget, end_think_token)
+        self.think_hook = ThinkBudgetHook(config.think_budget, end_think_token, closing_tokens, vocab_size)
         self._live_state = session.state(_STATE_KEY, lambda: RuntimeState(config.dflash, PlainStep(), Recorder()))
         self._resolved = False
         self._unsubscribes: list[Callable[[], None]] = []
