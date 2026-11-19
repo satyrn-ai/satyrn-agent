@@ -489,7 +489,7 @@ git add patches/mellum && git commit -m "feat(ds4): carry the Mellum tokenizer, 
 
 ### Task 12: Engine patch 0003 (part 1) — exact Q8 Metal graph
 
-**Status:** Implemented/exported with Task 13; published-Q8 oracle and exact-graph acceptance at the 0003 prefix remains pending.
+**Status:** Implemented/exported with Task 13. Per-prefix acceptance at the 0003 clone (`ca4372c6`) passes: config, 509 kernel checks, `ds4_test --mellum-rewind` OK. The published-Q8 oracle is recorded in `docs/reports/mellum-engine-evidence.md`.
 
 **Files:**
 - Create: `patches/mellum/0003-mellum-exact-q8-metal-graph-and-rewind.patch`
@@ -563,7 +563,7 @@ git add patches/mellum && git commit -m "feat(ds4): rewind Mellum sessions to th
 
 ### Task 14: Engine patch 0004 — optimized Q8 prefill and decode
 
-**Status:** Implemented/exported; published-Q8 numerical/performance reruns and the required physical Mac Studio acceptance remain pending.
+**Status:** Implemented/exported. Published-Q8 numerical reruns pass (fast paths 45/45, kernels 662 at this prefix, oracle PASS) and the corrected-harness Q8 pair is recorded; the physical M4 Max Mac Studio row remains pending on that machine.
 
 **Files:**
 - Create: `patches/mellum/0004-mellum-optimized-q8-prefill-and-decode.patch`
@@ -613,7 +613,7 @@ git add patches/mellum && git commit -m "feat(ds4): add the Mellum Q8 fast paths
 
 ### Task 15: Engine patch 0005 — MXFP4_MOE experts
 
-**Status:** Implemented/exported; published-Q8 n=6 non-regression and a valid same-machine MXFP4 performance pair remain pending. Historical timing claims are not acceptance.
+**Status:** Implemented/exported. Q8 non-regression across 0004→0005→0006 is recorded (3,956/124.40, 3,964/127.78, 3,994/127.87 t/s) against the same-machine reference (3,978/128.32), and the MXFP4 pair (4,085/151.99 against 4,074/152.13). Physical memory rows remain pending.
 
 **Files:**
 - Create: `patches/mellum/0005-mellum-mxfp4-moe-experts.patch`
