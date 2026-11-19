@@ -16,7 +16,7 @@ from pydantic_ai.messages import (
 )
 
 from satyrn_agent.cli import SatyrnAgentExtension, main, resolve_config
-from satyrn_agent.config import DFlashMode, SatyrnConfig
+from satyrn_agent.config import DFlashMode, SatyrnConfig, ThinkCloseMode
 from satyrn_agent.errors import ConfigurationError
 from tests.e2e.model_free._harness import native_for, open_harness, scripted_tool_exchange
 from tests.e2e.model_free._native import ScenarioFakeNative
@@ -149,6 +149,55 @@ def test_project_relative_drafter_uses_toml_directory(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("toml", "argv", "expected"),
     [
+        (
+            '[tool.satyrn]\nthink_budget = { max_tokens = 50, bias = 4.0, close = "force", until_first_write = true }\n',
+            [],
+            (50, 4.0, ThinkCloseMode.FORCE, True),
+        ),
+        (
+            None,
+            ["--think-budget", "12", "--think-close", "force", "--think-until-first-write"],
+            (12, 2.0, ThinkCloseMode.FORCE, True),
+        ),
+        (
+            '[tool.satyrn]\nthink_budget = { max_tokens = 50, bias = 4.0, close = "force", until_first_write = true }\n',
+            ["--think-budget", "12", "--think-close", "bias", "--no-think-until-first-write"],
+            (12, 4.0, ThinkCloseMode.BIAS, False),
+        ),
+    ],
+)
+def test_think_close_and_first_write_source_rules(
+    tmp_path: Path,
+    toml: str | None,
+    argv: list[str],
+    expected: tuple[int, float, ThinkCloseMode, bool],
+) -> None:
+    config = resolved(tmp_path, argv, toml=toml)
+
+    assert config.think_budget is not None
+    assert (
+        config.think_budget.max_tokens,
+        config.think_budget.bias,
+        config.think_budget.close,
+        config.think_budget.until_first_write,
+    ) == expected
+
+
+def test_no_think_budget_clears_all_project_think_fields(tmp_path: Path) -> None:
+    config = resolved(
+        tmp_path,
+        ["--no-think-budget"],
+        toml=(
+            '[tool.satyrn]\nthink_budget = { max_tokens = 50, bias = 4.0, close = "force", until_first_write = true }\n'
+        ),
+    )
+
+    assert config.think_budget is None
+
+
+@pytest.mark.parametrize(
+    ("toml", "argv", "expected"),
+    [
         (None, ["--think-budget", "12"], (12, 2.0)),
         (
             "[tool.satyrn]\nthink_budget = { max_tokens = 50, bias = 4.0 }\n",
@@ -179,6 +228,10 @@ def test_think_budget_source_rules(
     ("toml", "argv", "match"),
     [
         (None, ["--think-bias", "2"], "effective think budget"),
+        (None, ["--think-close", "force"], "effective think budget"),
+        (None, ["--think-until-first-write"], "effective think budget"),
+        (None, ["--no-think-budget", "--think-close", "force"], "conflicts"),
+        (None, ["--no-think-budget", "--think-until-first-write"], "conflicts"),
         (None, ["--no-think-budget", "--think-budget", "2"], "conflicts"),
         (
             "[tool.satyrn]\nthink_budget = { max_tokens = 50, bias = 4.0 }\n",

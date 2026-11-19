@@ -14,6 +14,11 @@ class DFlashMode(StrEnum):
     OFF = "off"
 
 
+class ThinkCloseMode(StrEnum):
+    BIAS = "bias"
+    FORCE = "force"
+
+
 def validate_integer(value: int, name: str, *, minimum: int) -> None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise TypeError(f"{name} must be an integer")
@@ -42,10 +47,16 @@ def validate_think_bias(value: float) -> None:
 class ThinkBudgetConfig:
     max_tokens: int
     bias: float
+    close: ThinkCloseMode = ThinkCloseMode.BIAS
+    until_first_write: bool = False
 
     def __post_init__(self) -> None:
         validate_integer(self.max_tokens, "max_tokens", minimum=1)
         validate_think_bias(self.bias)
+        if not isinstance(self.close, ThinkCloseMode):
+            raise ConfigurationError("close must be a ThinkCloseMode")
+        if not isinstance(self.until_first_write, bool):
+            raise TypeError("until_first_write must be a boolean")
 
 
 @dataclass(frozen=True, slots=True)

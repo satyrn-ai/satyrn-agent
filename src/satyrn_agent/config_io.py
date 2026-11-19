@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeIs, cast
 
-from .config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig
+from .config import DFlashMode, SamplingOverrides, SatyrnConfig, ThinkBudgetConfig, ThinkCloseMode
 from .errors import ConfigurationError, MissingDrafterPath
 
 if TYPE_CHECKING:
@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 _CONFIG_FIELDS = {"dflash", "drafter_path", "draft_tokens", "sampling", "think_budget"}
 _SAMPLING_FIELDS = {"temperature", "top_k", "top_p", "min_p"}
 _DFLASH_MODES = {"auto", "on", "off"}
+_THINK_BUDGET_FIELDS = {"max_tokens", "bias", "close", "until_first_write"}
+_THINK_CLOSE_MODES = {"bias", "force"}
 
 
 def is_mapping(value: object) -> TypeIs[Mapping[str, object]]:
@@ -35,8 +37,17 @@ def _sampling(value: object) -> TypeIs[SamplingOverridesDocument]:
 def validate_think_budget_document(value: object) -> TypeIs[ThinkBudgetDocument]:
     if not is_mapping(value):
         raise TypeError("think_budget must be an object")
-    if set(value) != {"max_tokens", "bias"}:
+    if unknown := set(value) - _THINK_BUDGET_FIELDS:
+        raise ConfigurationError(f"unknown think_budget fields: {', '.join(sorted(unknown))}")
+    if not {"max_tokens", "bias"} <= set(value):
         raise ConfigurationError("think_budget requires max_tokens and bias")
+    close = value.get("close", "bias")
+    if not isinstance(close, str):
+        raise TypeError("close must be a string")
+    if close not in _THINK_CLOSE_MODES:
+        raise ConfigurationError("close must be bias or force")
+    if not isinstance(value.get("until_first_write", False), bool):
+        raise TypeError("until_first_write must be a boolean")
     return True
 
 
@@ -75,5 +86,14 @@ def config_from_dict(data: object) -> SatyrnConfig:
         drafter_path=Path(path) if path is not None else None,
         draft_tokens=data.get("draft_tokens", 0),
         sampling=SamplingOverrides(**data.get("sampling", {})),
-        think_budget=None if budget is None else ThinkBudgetConfig(**budget),
+        think_budget=(
+            None
+            if budget is None
+            else ThinkBudgetConfig(
+                max_tokens=budget["max_tokens"],
+                bias=budget["bias"],
+                close=ThinkCloseMode(budget.get("close", "bias")),
+                until_first_write=budget.get("until_first_write", False),
+            )
+        ),
     )
