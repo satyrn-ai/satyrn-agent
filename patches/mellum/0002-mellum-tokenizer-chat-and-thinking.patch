@@ -1,6 +1,6 @@
-From 68d4a1e14e1b88da4f92d884398379f992f05594 Mon Sep 17 00:00:00 2001
-From: Koudai Aono <koxudaxi@gmail.com>
-Date: Wed, 18 Nov 2026 22:48:05 -0500
+From bedec5f5dafaea679e1e84a9699e1a802b13a3fb Mon Sep 17 00:00:00 2001
+From: pauleveritt <pauleveritt@me.com>
+Date: Thu, 19 Nov 2026 07:24:00 -0500
 Subject: [PATCH 2/6] mellum: tokenizer, chat and thinking
 
 The mellum2 pre-tokenizer and its generated Unicode classes, the corpus
@@ -95,7 +95,7 @@ index 108f27e..ffc0cb4 100644
  	rm -f tests/test_web_recovery
  	rm -f tests/test_metal_ssd_experts
 diff --git a/ds4.c b/ds4.c
-index a9b5b54..fee1b40 100644
+index cb9cd1d..61e9c36 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -1041,6 +1041,11 @@ static bool ds4_model_is_mellum(void) {
@@ -533,7 +533,7 @@ index a9b5b54..fee1b40 100644
              prefill_s > 0.0 ? (double)prompt->len / prefill_s : 0.0,
              decode_s > 0.0 ? (double)n_generated / decode_s : 0.0);
      free(logits);
-@@ -74185,7 +74452,7 @@ int ds4_chat_append_multimodal_message(
+@@ -74186,7 +74453,7 @@ int ds4_chat_append_multimodal_message(
          const int old_len = tokens->len;
          ds4_vocab *vocab = &e->vocab;
          qwen4_chat_open(vocab, "user", tokens);
@@ -542,7 +542,7 @@ index a9b5b54..fee1b40 100644
          size_t moved = 0;
          for (size_t i = 0; i <= image_count; i++) {
              const char *text = text_parts[i] ? text_parts[i] : "";
-@@ -74202,7 +74469,7 @@ int ds4_chat_append_multimodal_message(
+@@ -74203,7 +74470,7 @@ int ds4_chat_append_multimodal_message(
              }
              moved++;
          }
@@ -551,7 +551,7 @@ index a9b5b54..fee1b40 100644
          qwen4_chat_close(vocab, tokens);
          return 1;
      }
-@@ -75001,7 +75268,7 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
+@@ -75002,7 +75269,7 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
      if (ds4_model_is_qwen4()) {
          if ((e->backend != DS4_BACKEND_METAL && e->backend != DS4_BACKEND_CUDA) ||
              e->distributed.role != DS4_DISTRIBUTED_NONE) {
@@ -560,7 +560,7 @@ index a9b5b54..fee1b40 100644
              free(s);
              return 1;
          }
-@@ -77461,7 +77728,7 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
+@@ -77462,7 +77729,7 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
              s->checkpoint_valid = false;
              if (!qwen4_graph_forward_tokens(&s->qwen4_graph, &e->model, &e->weights,
                                              prompt->v + i, chunk, s->logits, false)) {
@@ -569,7 +569,7 @@ index a9b5b54..fee1b40 100644
                  s->checkpoint_valid = false;
                  prefill_rc = 1;
                  break;
-@@ -79651,7 +79918,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
+@@ -79652,7 +79919,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
  #ifdef DS4_HAS_QWEN4_GPU
      if (ds4_session_is_qwen4(s)) {
          if (!s->qwen4_graph_ready) {
@@ -578,7 +578,7 @@ index a9b5b54..fee1b40 100644
              return 1;
          }
          if (qwen4_session_replay_if_stale(s, err, errlen) != 0) return 1;
-@@ -79661,7 +79928,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
+@@ -79662,7 +79929,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
          }
          if (!s->glm_spec_inside) { s->glm_mtp_have = 0; s->glm_mtp_have2 = false; }
          if (!qwen4_graph_forward_token(&s->qwen4_graph, &e->model, &e->weights, token, s->logits)) {
@@ -2835,7 +2835,7 @@ index 0000000..8934c45
 +
 +#endif
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index 608fd5e..3334d92 100644
+index 6a016fb..40ada9a 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
 @@ -7,6 +7,14 @@
@@ -2853,7 +2853,7 @@ index 608fd5e..3334d92 100644
  #define CHECK(c) do { if (!(c)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
  
  /* Run fn in a child; return its exit status and what it wrote to stderr. */
-@@ -539,6 +547,458 @@ static void check_mellum_plan(void) {
+@@ -582,6 +590,458 @@ static void check_mellum_plan(void) {
      check_mellum_attention_scratch();
  }
  
@@ -3312,7 +3312,7 @@ index 608fd5e..3334d92 100644
  static void check_sampling_defaults(void) {
      static ds4_engine e;
      float t = -1, p = -1, m = -1;
-@@ -620,6 +1080,8 @@ static void check_real_model(void) {
+@@ -663,6 +1123,8 @@ static void check_real_model(void) {
          exit(1);
      }
      printf("ok   real model: keys validated, every tensor bound and checked\n");
@@ -3321,7 +3321,7 @@ index 608fd5e..3334d92 100644
  }
  
  int main(void) {
-@@ -651,12 +1113,21 @@ int main(void) {
+@@ -694,6 +1156,11 @@ int main(void) {
      expect_refused(MF_NO_OUTPUT_NORM, "output_norm.weight", "no output_norm");
      expect_refused(MF_NO_ATTN_Q_NORM, "blk.5.attn_q_norm.weight", "no attn_q_norm in layer 5");
      expect_refused(MF_BAD_ATTN_Q_DIM, "blk.5.attn_q.weight", "attn_q of the wrong width");
@@ -3330,9 +3330,10 @@ index 608fd5e..3334d92 100644
 +    expect_vocab_refused(MF_TOKEN_TYPE_U32, "tokenizer.ggml.token_type", "token_type stored as uint32");
 +    expect_vocab_refused(MF_NO_IM_START, "<|im_start|>", "<|im_start|> absent");
 +    expect_vocab_refused(MF_NO_IM_END, "<|im_end|>", "<|im_end|> absent");
-     expect_open(DS4_BACKEND_CPU, false, true, "CPU backend refused, naming Mellum");
-     expect_open(DS4_BACKEND_CUDA, false, true, "CUDA backend refused, naming Mellum");
-     expect_open(DS4_BACKEND_CPU, true, false, "inspect-only open succeeds");
+     expect_open_mtp_refused("a drafter path is refused by name, not as a Qwen error");
+     expect_open_option_refused(1, "tensor parallelism is refused, naming Mellum");
+     expect_open_option_refused(2, "a distributed slice is refused, naming Mellum");
+@@ -705,6 +1172,10 @@ int main(void) {
      check_mellum_steering_refused();
      check_mellum_plan();
      check_memory_plan();

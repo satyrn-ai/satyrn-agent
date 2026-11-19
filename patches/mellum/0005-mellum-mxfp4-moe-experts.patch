@@ -1,6 +1,6 @@
-From e58003cafd34ea81e7716663ef5ca02665325080 Mon Sep 17 00:00:00 2001
-From: Koudai Aono <koxudaxi@gmail.com>
-Date: Wed, 18 Nov 2026 22:48:11 -0500
+From 3786a2eccc17a66110c94b2925fffd1f76d5ea9b Mon Sep 17 00:00:00 2001
+From: pauleveritt <pauleveritt@me.com>
+Date: Thu, 19 Nov 2026 07:24:06 -0500
 Subject: [PATCH 5/6] mellum: mxfp4 moe experts
 
 Resident MXFP4_MOE experts: loading and validation, the expert index and pack
@@ -33,7 +33,7 @@ index 63cd6ba..13293ec 100644
  	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))
 +
 diff --git a/ds4.c b/ds4.c
-index 7a1a769..d2e71db 100644
+index 8fc7424..9c4d91b 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -5703,8 +5703,22 @@ static void weights_validate_qwen4_layout(
@@ -121,7 +121,7 @@ index 7a1a769..d2e71db 100644
      p.router_offset = l->ffn_gate_inp->abs_offset;
      p.gate_offset = l->ffn_gate_exps->abs_offset;
      p.up_offset = l->ffn_up_exps->abs_offset;
-@@ -88987,7 +89004,8 @@ bool ds4_test_dspark_prefix_capture(ds4_engine *engine, const ds4_tokens *prompt
+@@ -88988,7 +89005,8 @@ bool ds4_test_dspark_prefix_capture(ds4_engine *engine, const ds4_tokens *prompt
   * through the layer struct mellum_graph_moe reads (so a test's reference does not share the driver's binding),
   * and false if the layer has a shared-expert tensor. */
  bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void **map,
@@ -131,7 +131,7 @@ index 7a1a769..d2e71db 100644
      if (!engine || !ds4_model_is_mellum() || layer >= DS4_N_LAYER) return false;
      const ds4_model *m = &engine->model;
      const ds4_tensor *r = tensor_by_namef(m, "blk.%u.ffn_gate_inp.weight", layer);
-@@ -89003,6 +89021,7 @@ bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void
+@@ -89004,6 +89022,7 @@ bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void
      *gate = g->abs_offset;
      *up = u->abs_offset;
      *down = d->abs_offset;
@@ -662,10 +662,10 @@ index fbd7a97..e2d62d7 100644
      }
  }
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index a32765e..60da31d 100644
+index c112857..d0b257c 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
-@@ -1113,6 +1113,9 @@ int main(void) {
+@@ -1156,6 +1156,9 @@ int main(void) {
      expect_refused(MF_YARN_FACTOR_8, "mellum.rope.scaling.factor", "yarn factor 8");
      expect_refused(MF_ATTN_FACTOR_1, "mellum.rope.scaling.yarn_attn_factor", "yarn_attn_factor 1.0");
      expect_refused(MF_ORIG_CTX_4096, "mellum.rope.scaling.original_context_length", "original context 4096");

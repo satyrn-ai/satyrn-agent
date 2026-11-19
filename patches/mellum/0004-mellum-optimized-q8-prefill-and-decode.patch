@@ -1,6 +1,6 @@
-From 810dce77d34b64f62ea5a1e39cf2a5c44c8ccc5c Mon Sep 17 00:00:00 2001
-From: Koudai Aono <koxudaxi@gmail.com>
-Date: Wed, 18 Nov 2026 22:48:09 -0500
+From 7cc0da00cbdf40623e43648d987bfca74d2aa244 Mon Sep 17 00:00:00 2001
+From: pauleveritt <pauleveritt@me.com>
+Date: Thu, 19 Nov 2026 07:24:04 -0500
 Subject: [PATCH 4/6] mellum: optimized q8 prefill and decode
 
 Tiled expert GEMMs from 32 rows, batched Q8_0 projections, Metal 4
@@ -31,7 +31,7 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  tests/mellum_moe_ref.inc             |  35 +++
  tests/mellum_oracle_1100.tokens      |  71 +++++
  tests/mellum_oracle_2200.tokens      | 140 ++++++++++
- tests/mellum_oracle_compare.sh       | 114 ++++++++
+ tests/mellum_oracle_compare.sh       | 117 +++++++++
  tests/mellum_oracle_short.tokens     |   4 +
  tests/mellum_prompts/prompt_2048.txt |  97 +++++++
  tests/mellum_trace.c                 |  80 ++++--
@@ -40,14 +40,14 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  tests/test_mellum_fastpath.sh        | 123 +++++++++
  tests/test_mellum_kernels.c          | 257 +++++++++++++++++-
  tests/test_mellum_runners.sh         |  71 +++++
- 23 files changed, 2507 insertions(+), 91 deletions(-)
+ 23 files changed, 2510 insertions(+), 91 deletions(-)
  create mode 100755 tests/mellum_cli_decode_abba.sh
  create mode 100755 tests/mellum_cli_prefill_abba.sh
  create mode 100644 tests/mellum_heldout_long.tokens
  create mode 100644 tests/mellum_logits_compare.py
  create mode 100644 tests/mellum_oracle_1100.tokens
  create mode 100644 tests/mellum_oracle_2200.tokens
- create mode 100644 tests/mellum_oracle_compare.sh
+ create mode 100755 tests/mellum_oracle_compare.sh
  create mode 100644 tests/mellum_oracle_short.tokens
  create mode 100644 tests/mellum_prompts/prompt_2048.txt
  create mode 100755 tests/test_mellum_cli.sh
@@ -78,7 +78,7 @@ index 149d57c..63cd6ba 100644
  test-mellum: tests/test_mellum_config tests/test_mellum_tokenizer
  	./tests/test_mellum_config
 diff --git a/ds4.c b/ds4.c
-index fb28dd8..7a1a769 100644
+index 807786c..8fc7424 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -17484,9 +17484,10 @@ typedef enum {
@@ -344,7 +344,7 @@ index fb28dd8..7a1a769 100644
  }
  
  /* The logits of one row of HIDDEN into g->logits: output norm, then the one-row LM head.  Prefill
-@@ -88925,12 +89020,12 @@ bool ds4_test_mellum_moe(ds4_engine *engine, uint32_t layer, const float *x, uin
+@@ -88926,12 +89021,12 @@ bool ds4_test_mellum_moe(ds4_engine *engine, uint32_t layer, const float *x, uin
      const uint64_t E = DS4_N_EMBD, K = DS4_N_EXPERT_USED;
      const bool ok =
          ds4_gpu_tensor_write(s[MELLUM_S_FFN_NORM], 0, x, (uint64_t)T * E * sizeof(float)) &&
@@ -2210,16 +2210,16 @@ index 0000000..7de3829
 +113 622 2371 43413 46 13099 1284 1699 301 393 62011 87048 23578 6911 1165 8886
 +309 4860 48 28 233 27 8091 233
 diff --git a/tests/mellum_oracle_compare.sh b/tests/mellum_oracle_compare.sh
-new file mode 100644
-index 0000000..c5bf2c8
+new file mode 100755
+index 0000000..b039e9d
 --- /dev/null
 +++ b/tests/mellum_oracle_compare.sh
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,117 @@
 +#!/bin/sh
 +# The external oracle: the port's logits against the pinned M5 Max reference capture, at the oracle positions of
 +# tests/mellum_oracle_{short,1100,2200}.tokens.  Both inputs ship in this patch, so the check runs from the tree:
 +#
-+#   DS4_TEST_MELLUM_MODEL=... sh tests/mellum_oracle_compare.sh
++#   sh tests/mellum_oracle_compare.sh ORACLE_DIR MODEL.gguf [GREEDY_TOKENS]
 +#
 +# The accepted reference is the M5 Max's resident Q8_0 logits recorded at d2d9338; its sha256s are listed in
 +# docs/reports/mellum-engine-evidence.md.  A capture from any other build is not this oracle.
@@ -2275,29 +2275,32 @@ index 0000000..c5bf2c8
 +    positions=$(python3 -I -c "n = $n; k = min(64, n); print(','.join(str(round(i * (n - 1) / (k - 1))) for i in range(k)))")
 +    tiled=0
 +    [ "$n" -ge 32 ] && tiled=1
-+    # this engine's prefill twice: under the exact-prefill diagnostic it must equal the old engine byte for
-+    # byte; without it, the release path, within the tolerance when its chunks take the tiled paths
-+    for mode in prefill-exact prefill decode; do
-+        drv=$mode
-+        [ "$mode" = prefill-exact ] && drv=prefill
-+        if [ "$mode" = prefill-exact ]; then
-+            (export DS4_MELLUM_EXACT_PREFILL=1; run "$ROOT" "$tokens" "$drv" "$dir/new.$t.$mode" "$positions") > /dev/null ||
-+                { fail=1; continue; }
-+        else
-+            run "$ROOT" "$tokens" "$drv" "$dir/new.$t.$mode" "$positions" > /dev/null || { fail=1; continue; }
-+        fi
-+        [ -e "$dir/old.$t.$drv.session.logits.f32" ] ||
-+            run "$ORACLE" "$tokens" "$drv" "$dir/old.$t.$drv" "$positions" > /dev/null || { fail=1; continue; }
-+        # Against the old engine every mode uses the near-tie rule: at d2d9338 its DS4_MELLUM_EXACT_PREFILL
-+        # leaves the attention tiles on, so even its "exact" prefill is not byte-equal to its decode at 2,200
-+        # tokens.  The strong exactness claim is the in-engine comparison below, which our port must pass
-+        # byte for byte and the old engine would not.
-+        exact=0
-+        r=$(compare "$dir/new.$t.$mode" "$dir/old.$t.$drv" "$positions" "$exact") || fail=1
-+        echo "$(echo "$r" | cut -c1-4) $t $mode vs the old engine, $(echo "$r" | cut -c6-)"
-+    done
++    # Every run first, then every comparison: the reference's exact-prefill output is needed to decide
++    # whether a byte-equal cross-engine check is meaningful, and its decode output is one of the three runs.
++    run "$ROOT" "$tokens" prefill "$dir/new.$t.prefill" "$positions" > /dev/null || { fail=1; continue; }
++    (export DS4_MELLUM_EXACT_PREFILL=1
++     run "$ROOT" "$tokens" prefill "$dir/new.$t.prefill-exact" "$positions") > /dev/null || { fail=1; continue; }
++    run "$ROOT" "$tokens" decode "$dir/new.$t.decode" "$positions" > /dev/null || { fail=1; continue; }
++    run "$ORACLE" "$tokens" prefill "$dir/old.$t.prefill" "$positions" > /dev/null || { fail=1; continue; }
++    (export DS4_MELLUM_EXACT_PREFILL=1
++     run "$ORACLE" "$tokens" prefill "$dir/old.$t.exact" "$positions") > /dev/null || { fail=1; continue; }
++    run "$ORACLE" "$tokens" decode "$dir/old.$t.decode" "$positions" > /dev/null || { fail=1; continue; }
++
++    # Cross-engine comparisons are byte-exact: with the reference built from the pinned commit and each engine
++    # running from its own tree, both engines give the same bytes at these lengths.  The reference's own
++    # exact-prefill output is run too, so the comparison is like-for-like.
++    r=$(compare "$dir/new.$t.prefill-exact" "$dir/old.$t.exact" "$positions" 1) || fail=1
++    echo "$(echo "$r" | cut -c1-4) $t prefill-exact vs the old engine, $(echo "$r" | cut -c6-)"
++
++    r=$(compare "$dir/new.$t.prefill" "$dir/old.$t.prefill" "$positions" $((1 - tiled))) || fail=1
++    echo "$(echo "$r" | cut -c1-4) $t prefill vs the old engine, $(echo "$r" | cut -c6-)"
++
++    r=$(compare "$dir/new.$t.decode" "$dir/old.$t.decode" "$positions" 1) || fail=1
++    echo "$(echo "$r" | cut -c1-4) $t decode vs the old engine, $(echo "$r" | cut -c6-)"
++
 +    r=$(compare "$dir/new.$t.prefill-exact" "$dir/new.$t.decode" "$positions" 1) || fail=1
 +    echo "$(echo "$r" | cut -c1-4) $t prefill-exact vs decode in this engine, $(echo "$r" | cut -c6-)"
++
 +    r=$(compare "$dir/new.$t.prefill" "$dir/new.$t.decode" "$positions" $((1 - tiled))) || fail=1
 +    echo "$(echo "$r" | cut -c1-4) $t prefill vs decode in this engine, $(echo "$r" | cut -c6-)"
 +done
@@ -2645,10 +2648,10 @@ index 0000000..54b9345
 +[ "$fail" -eq 0 ] && echo "mellum-cli: PASS" || echo "mellum-cli: FAILED"
 +exit "$fail"
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index 07aea9f..a32765e 100644
+index daacfca..c112857 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
-@@ -309,6 +309,7 @@ static uint64_t expect_per_row(void) {
+@@ -352,6 +352,7 @@ static uint64_t expect_per_row(void) {
           + 2ull * T_USED * 4u                          /* selected, weights */
           + (uint64_t)T_USED * T_FF * 4u                /* mid */
           + (uint64_t)T_USED * T_E * 4u                 /* per-expert partial outputs */
@@ -2656,7 +2659,7 @@ index 07aea9f..a32765e 100644
           + 7ull * 64u;                                 /* full attention's rows table: 64 B a row, 7 full layers */
  }
  
-@@ -318,8 +319,8 @@ static uint64_t expect_attn_part(uint64_t cap) {
+@@ -361,8 +362,8 @@ static uint64_t expect_attn_part(uint64_t cap) {
  }
  
  static uint64_t expect_fixed(uint64_t cap) {

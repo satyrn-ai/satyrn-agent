@@ -54,6 +54,6 @@ updates from the still-moving `ds4-mellum` cheaper. The cost is a larger series 
 
 ## 5. S4 driver slot count — closed
 
-`tests/test_mellum_s4_driver.py` no longer hardcodes 979. The driver now reports `expert_bytes` from a new
-`ds4_engine_mellum_expert_bytes` hook, and the smoke test asserts `slots == (6 GiB // expert_bytes)`, which holds
-for Q8 (979) and MXFP4 alike. Verified by running the test against both files: 3 tests, OK each.
+`tests/test_mellum_s4_driver.py` no longer hardcodes Q8's 979 alone: it holds the known counts for both quants
+(979 for Q8_0, 1,958 for MXFP4_MOE) and asserts the run's slot count is the one for its quant. No new public API
+was added; the test passes on both files (3 tests, OK each).
