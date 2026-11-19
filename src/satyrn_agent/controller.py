@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 _STATE_KEY = "satyrn.runtime"
 _DFLASH_USAGE = "/dflash [auto|on|off]"
 _THINK_USAGE = "/think-budget [<max_tokens> [bias]|off|close <bias|force>|until-first-write <on|off>]"
-_THINK_SUBCOMMAND_ARGS = 2
 
 
 @dataclass(slots=True)
@@ -44,6 +43,37 @@ class RuntimeState:
 
 def _verify_off(native: DFlashPolicyNative) -> int | None:
     return 0 if native.verify_mode_available else None
+
+
+def _parse_think_budget(
+    current: ThinkBudgetConfig | None,
+    args: tuple[str, ...],
+) -> ThinkBudgetConfig | None:
+    match args:
+        case ("off",):
+            return None
+        case ("close", mode):
+            if current is None:
+                raise CommandError(f"usage: {_THINK_USAGE}")
+            try:
+                close = ThinkCloseMode(mode)
+            except ValueError as error:
+                raise CommandError(f"usage: {_THINK_USAGE}") from error
+            return replace(current, close=close)
+        case ("until-first-write", enabled):
+            if current is None or enabled not in {"on", "off"}:
+                raise CommandError(f"usage: {_THINK_USAGE}")
+            return replace(current, until_first_write=enabled == "on")
+        case (("close" | "until-first-write"),):
+            raise CommandError(f"usage: {_THINK_USAGE}")
+        case _ if len(args) not in {1, 2}:
+            raise CommandError(f"usage: {_THINK_USAGE}")
+    try:
+        maximum = int(args[0])
+        bias = (current.bias if current is not None else 2.0) if len(args) == 1 else float(args[1])
+        return ThinkBudgetConfig(maximum, bias) if current is None else replace(current, max_tokens=maximum, bias=bias)
+    except (TypeError, ValueError) as error:
+        raise CommandError(f"usage: {_THINK_USAGE}") from error
 
 
 def select_step(  # noqa: PLR0913 - The policy needs native handles, configuration, and request context.
@@ -251,37 +281,7 @@ class RuntimeController:
     def set_think_budget(self, *args: str) -> str:
         if not args:
             return self._think_text()
-        if args == ("off",):
-            self._session.set_decode_step(self.state.step)
-            self.think_hook.set(None)
-            return self._think_text()
-        if len(args) not in {1, 2}:
-            raise CommandError(f"usage: {_THINK_USAGE}")
-        current = self.think_hook.snapshot()
-        if args[0] in {"close", "until-first-write"}:
-            if current is None or len(args) != _THINK_SUBCOMMAND_ARGS:
-                raise CommandError(f"usage: {_THINK_USAGE}")
-            if args[0] == "close":
-                try:
-                    close = ThinkCloseMode(args[1])
-                except ValueError as error:
-                    raise CommandError(f"usage: {_THINK_USAGE}") from error
-                setting = replace(current, close=close)
-            else:
-                if args[1] not in {"on", "off"}:
-                    raise CommandError(f"usage: {_THINK_USAGE}")
-                setting = replace(current, until_first_write=args[1] == "on")
-            self._session.set_decode_step(self.state.step)
-            self.think_hook.set(setting)
-            return self._think_text()
-        try:
-            maximum = int(args[0])
-            bias = (current.bias if current is not None else 2.0) if len(args) == 1 else float(args[1])
-            setting = (
-                ThinkBudgetConfig(maximum, bias) if current is None else replace(current, max_tokens=maximum, bias=bias)
-            )
-        except (TypeError, ValueError) as error:
-            raise CommandError(f"usage: {_THINK_USAGE}") from error
+        setting = _parse_think_budget(self.think_hook.snapshot(), args)
         self._session.set_decode_step(self.state.step)
         self.think_hook.set(setting)
         return self._think_text()

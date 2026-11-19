@@ -629,7 +629,11 @@ def test_non_success_write_outcomes_do_not_suppress_thinking(
         events: list[SessionEvent] = []
         harness.runtime.on_event(events.append, kinds={"agent_event"})
         part = ToolReturnPart("write_file", "not written", tool_call_id="synthetic", outcome=outcome)
-        harness.runtime.model.session.emit("agent_event", event=FunctionToolResultEvent(part=part))
+
+        def inject_after_reset(event: SessionEvent) -> None:
+            harness.runtime.model.session.emit("agent_event", event=FunctionToolResultEvent(part=part))
+
+        harness.runtime.on_event(inject_after_reset, kinds={"run_start"})
         asyncio.run(harness.runtime.run("read"))
 
         result_index = _tool_result_index(events, "read_file")
@@ -648,7 +652,11 @@ def test_successful_shell_result_does_not_suppress_thinking(
         events: list[SessionEvent] = []
         harness.runtime.on_event(events.append, kinds={"agent_event"})
         part = ToolReturnPart("run_command", "wrote shell.txt", tool_call_id="shell", outcome="success")
-        harness.runtime.model.session.emit("agent_event", event=FunctionToolResultEvent(part=part))
+
+        def inject_after_reset(event: SessionEvent) -> None:
+            harness.runtime.model.session.emit("agent_event", event=FunctionToolResultEvent(part=part))
+
+        harness.runtime.on_event(inject_after_reset, kinds={"run_start"})
         asyncio.run(harness.runtime.run("read"))
 
         result_index = _tool_result_index(events, "read_file")

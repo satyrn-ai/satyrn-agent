@@ -18,6 +18,8 @@ from satyrn_agent.errors import DFlashError, DFlashUnavailable
 from tests.e2e.model_free._harness import Harness, native_for, native_for_dflash, open_harness
 from tests.e2e.model_free._native import ScenarioFakeNative
 
+_THINK_USAGE = "/think-budget [<max_tokens> [bias]|off|close <bias|force>|until-first-write <on|off>]"
+
 
 def make_tui(harness: Harness) -> TUI:
     return TUI(harness.runtime, output=DummyOutput(), configure_commands=harness.extension.configure_commands)
@@ -71,6 +73,8 @@ def test_initial_footer_and_think_budget_query_set_forms(
                 "think budget 30 tokens, bias 4.5, close force, until first write on"
             )
             with pytest.raises(CommandError, match="usage: /think-budget"):
+                asyncio.run(tui.commands.execute("/think-budget close"))
+            with pytest.raises(CommandError, match="usage: /think-budget"):
                 asyncio.run(tui.commands.execute("/think-budget close soft"))
             with pytest.raises(CommandError, match="usage: /think-budget"):
                 asyncio.run(tui.commands.execute("/think-budget until-first-write perhaps"))
@@ -97,21 +101,21 @@ def test_initial_footer_and_think_budget_query_set_forms(
     [
         ("/dflash invalid", "/dflash [auto|on|off]"),
         ("/dflash on extra", "/dflash [auto|on|off]"),
-        ("/think-budget 0", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget -1", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget nope", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget 2 0", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget 2 -1", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget 2 nan", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget 2 inf", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget 2 3 extra", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget off extra", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget close soft", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget close force extra", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget until-first-write perhaps", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget until-first-write on extra", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget close force", "/think-budget [<max_tokens> [bias]|off]"),
-        ("/think-budget until-first-write on", "/think-budget [<max_tokens> [bias]|off]"),
+        ("/think-budget 0", _THINK_USAGE),
+        ("/think-budget -1", _THINK_USAGE),
+        ("/think-budget nope", _THINK_USAGE),
+        ("/think-budget 2 0", _THINK_USAGE),
+        ("/think-budget 2 -1", _THINK_USAGE),
+        ("/think-budget 2 nan", _THINK_USAGE),
+        ("/think-budget 2 inf", _THINK_USAGE),
+        ("/think-budget 2 3 extra", _THINK_USAGE),
+        ("/think-budget off extra", _THINK_USAGE),
+        ("/think-budget close soft", _THINK_USAGE),
+        ("/think-budget close force extra", _THINK_USAGE),
+        ("/think-budget until-first-write perhaps", _THINK_USAGE),
+        ("/think-budget until-first-write on extra", _THINK_USAGE),
+        ("/think-budget close force", _THINK_USAGE),
+        ("/think-budget until-first-write on", _THINK_USAGE),
     ],
 )
 def test_command_usage_errors(
@@ -122,8 +126,6 @@ def test_command_usage_errors(
 ) -> None:
     with open_harness(tmp_path, native_for("answer"), ["--dflash", "off"], monkeypatch, interactive=True) as harness:
         tui = make_tui(harness)
-        if command.startswith("/think-budget"):
-            usage = "/think-budget [<max_tokens> [bias]|off|close <bias|force>|until-first-write <on|off>]"
         try:
             with pytest.raises(CommandError, match=f"usage: {re.escape(usage)}"):
                 asyncio.run(tui.commands.execute(command))

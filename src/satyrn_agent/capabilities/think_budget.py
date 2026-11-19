@@ -155,28 +155,20 @@ class ThinkBudgetHook:
 
     def __call__(self, view: LogitsView) -> None:
         config, suppressed = self._snapshot()
-        if config is None:
+        closing_tokens: tuple[int, ...] | None = None
+        if config is not None:
+            if suppressed and config.until_first_write:
+                if view.in_think:
+                    closing_tokens = (self._end_think_token,)
+            elif config.close is ThinkCloseMode.BIAS:
+                if view.in_think and view.think_tokens >= config.max_tokens:
+                    view.bias(self._end_think_token, config.bias)
+            elif self._thinking_usage(view) >= config.max_tokens and view.in_think:
+                closing_tokens = self._closing_tokens
+        if closing_tokens is None:
             self._reset_force()
-            return
-        if suppressed and config.until_first_write:
-            if view.in_think:
-                self._force(view, (self._end_think_token,))
-            else:
-                self._reset_force()
-            return
-        if config.close is ThinkCloseMode.BIAS:
-            self._reset_force()
-            if view.in_think and view.think_tokens >= config.max_tokens:
-                view.bias(self._end_think_token, config.bias)
-            return
-        thinking_usage = self._thinking_usage(view)
-        if not view.in_think:
-            self._reset_force()
-            return
-        if thinking_usage < config.max_tokens:
-            self._reset_force()
-            return
-        self._force(view, self._closing_tokens)
+        else:
+            self._force(view, closing_tokens)
 
 
 def resolve_end_think(engine: Tokenizer) -> int:
