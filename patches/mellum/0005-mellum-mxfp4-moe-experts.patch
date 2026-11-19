@@ -1,26 +1,26 @@
-From 82d3b134c041a8825d09b1ea6aba5503fbfa8f95 Mon Sep 17 00:00:00 2001
+From 255c424e7990eb88c7ba739b310a145da0debfbf Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Wed, 18 Nov 2026 19:54:58 -0500
 Subject: [PATCH 5/6] mellum: mxfp4 moe experts
 
-Open a Mellum file whose routed experts are all MXFP4_MOE, refuse every
-mixture by name, read the expert index and the pack at the quant's own size,
-and run the MoE and the layer loop with tensors staged as half. The double
-reference reads MXFP4 too, so the real-weights gate compares against it.
+Open a Mellum file whose routed experts are all MXFP4_MOE, refuse mixed
+or unsupported expert quants by name, and run resident MoE and the layer
+loop with tensors staged as half. The double reference reads MXFP4 too.
 
-Gates: test-mellum-kernels 662/662; MXFP4 config accepted, one-layer and mixed-down files refused by name;
-ds4_test --mellum-moe passes on the real MXFP4 file (selection 0 differ,
-weights 2.58e-07, staged reference 3.62e-05 at the worst layer); Q8 resident
-medians after the loaders are 3,814 t/s prefill and 118.75 t/s decode against
-3,987 and 125.08 before, inside the 10% cap; the MXFP4 same-machine pair is
-4,038 / 143.39 against the d2d9338 reference's 3,996 / 143.31. Both SHA-verified
-files load. Evidence in docs/reports/mellum-engine-evidence.md.
+The shared fixtures gain mref_weights.expert_type, explicitly Q8_0 in
+the older initializers. Address tables, streamed slot sizing and the
+S6-era tiled MXFP4 kernel tests land together in 0006. The Python expert
+index, pack and GGUF tools are excluded from this engine port.
+
+Published-model Q8 non-regression and a valid same-machine MXFP4
+performance comparison remain pending. Historical Q8 results used a
+different model hash; the earlier performance harness reused output
+directories and loaded the port's shaders in the reference. This does not prove
+the performance gate. See docs/reports/mellum-engine-evidence.md.
 
 Upstream: not offered, fork only
 Retire-when: upstream supports JetBrains MXFP4_MOE
-
-The shared fixtures gain mref_weights.expert_type, defaulted to Q8_0 where the older initializers left it
-zero. Address-table loading, its kernels and their cases belong to 0006 with streaming.
+Carried-commits: 0adf6bafb1f17e642124b60b183575864f118629 989dc7c8dada668500773328c00d4e851805a842 f6d49a5d57b8566809d53412ac470bd897dd811b 362dca64275b54cd9f6694441618f411fdabd1d5 24175f3845987c0761d4186ec66be7c7735a3f4b 37ccfd165c7d82afd4ef1719c5f0a1acbdac32fd ed405beb79cee502b1c3cf2ce28bd3657118795c 4fa5070983da883b42fc08eb0f0670f4aa4b730a
 ---
  Makefile                            |   1 +
  ds4.c                               |  41 ++--

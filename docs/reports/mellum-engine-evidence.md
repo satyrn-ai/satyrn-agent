@@ -10,7 +10,48 @@ missed the difference. Those historical commands do not establish acceptance aga
 the affected oracle and performance gates need repeating. Fresh 0006 runs use the SHA-verified published
 blob already in the Hugging Face cache. The existing file in `~/models` was not changed.
 
-## 64 greedy token ids match the fork (0003)
+## Patch discipline checkpoint (2026-11-18)
+
+The current export is `71f694084a31f3b1f8773cc367bcbdb92dd1c255`. A commit-message cleanup regenerated the patches from real engine
+commits with `ds4-export`; every one of the six source trees is identical to its pre-cleanup tree.
+The final tree remains `3130743ca6021711109b4a2248ffbb2e5acc9ef9`. The fresh native results below
+and `mellum-task16-summary.json` retain their original validated commit, `fd27653b`, rather than
+pretending new model runs occurred after the metadata cleanup.
+
+All six patches now have the three required trailers. The duplicate `f160af74` was removed from
+0004's ledger and 0006 uses the specification's exact retirement condition. The restored 0005 ledger
+contains eight resident MXFP4 product/test commits. Its old 13-entry list also named two kernel-test
+commits now carried by 0006 (`fe2001bd`, `d49c06cb`) and three Python expert-index/pack commits excluded
+from this port (`48c5b937`, `e2273c99`, `a9fd4f8e`). Those excluded tools are not claimed as carried.
+The 0003–0005 messages now qualify historical numerical and performance evidence.
+
+Two design discrepancies remain explicit:
+
+- **Patch boundary:** the exact-prefill diagnostic and `test-mellum-fastpath` target land in 0004,
+  alongside the fast-path thresholds they control. Specification §4 assigns them to 0003, so its
+  0003 fast-path command cannot run at that prefix. This is a recorded deviation for Koudai's review;
+  the specification has not been rewritten to imply approval. The 0003 exact graph, trace and rewind
+  gates remain required; the diagnostic and fast-path gates remain required at 0004.
+- **Integration sequence:** specification §2.2/§10 requires PR #24 to merge before Mellum implementation.
+  Implementation proceeded before that prerequisite. PR #24 was still OPEN at this checkpoint, and
+  Qwen's first patch fails a non-mutating apply check against the Mellum tip in `ds4.c` and
+  `ds4_metal.m`. Common+Mellum reconstructs, but the complete model stack is not integrated or accepted.
+  Task 17 must use the complete then-current Qwen series after #24 merges. Owner coordination is not
+  claimed by this checkpoint.
+
+| Acceptance item | Current status and remaining work |
+| --- | --- |
+| 0001–0002 real Q8 config/tokenizer/chat | Historical runs used the different Q8 hash; repeat each required real-model section at its own patch prefix using the published file, with no skips |
+| 0003 oracle, exact graph and rewind | Repeat the published-file oracle/logit/rewind gates at the 0003 prefix; final 0006 resident/streamed parity does not replace them |
+| 0004 fast paths and performance | Repeat published-file numerical checks and the n=6 same-machine reference/port comparison; the required physical M4 Max Mac Studio row is still pending |
+| 0005 resident MXFP4 and Q8 non-regression | Published MXFP4 numerical results are recorded; repeat per-prefix published-Q8 n=6 non-regression and a valid same-machine MXFP4 comparison |
+| 0006 streaming | Fresh final-tree local tests and 512-ID parity pass on both verified quants; physical 16 GB / 8 GB acceptance remains pending |
+| Complete stack and overall acceptance | Qwen rebase/full-prefix/DFlash checks, physical 36 GB / 24 GB / 16 GB / 8 GB rows, ds4-py companions and downstream/tool acceptance remain required in their assigned tasks |
+
+These statuses supersede historical completion lines in the implementation ledger. Pending acceptance
+is not waived by an exported patch, a successful library build, or the 128 GiB host results.
+
+## 64 greedy token ids match the fork (0003), historical
 
 ```bash
 Q8="$HOME/models/Mellum2.1-12B-A2.5B-Thinking-Q8_0.gguf"
@@ -20,9 +61,9 @@ cd ~/projects/pauleveritt/ds4-mellum && ./ds4 -m "$Q8" --metal -c 4096 --temp 0 
 python3 -c "import json;a=[s[\"selected\"][\"id\"] for s in json.load(open(\"/tmp/ours.json\"))[\"steps\"]];b=[s[\"selected\"][\"id\"] for s in json.load(open(\"/tmp/ref.json\"))[\"steps\"]];print(len(a),a==b)"
 ```
 
-Result: `64 True` — zero id mismatches. First twelve ids: 23, 233, 2116, 895, 333, 6246, 434, 255, 99, 2717, 669, 410.
+Historical result on the different-hash Q8 file: `64 True` — zero id mismatches. First twelve ids: 23, 233, 2116, 895, 333, 6246, 434, 255, 99, 2717, 669, 410.
 
-## Exact prefill and the fast paths (0004)
+## Exact prefill and the fast paths (0004), historical
 
 ```bash
 DS4_TEST_MELLUM_MODEL="$Q8" ./ds4_test --mellum-exact-prefill --mellum-rewind
@@ -41,7 +82,7 @@ DS4_TEST_MELLUM_MODEL="$Q8" make test-mellum-fastpath
 - `DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_tokenizer`: 30/30 ids equal the reference encode.
 - `tests/gen_mellum_chat_ids.py` (fork version) regenerates `tests/mellum_chat_ids.inc` with no diff.
 
-## Same-machine performance (0004, Q8, resident, context 3072, n=6)
+## Historical same-machine performance (0004, Q8, resident, context 3072, n=6)
 
 ```bash
 ARMS=AA tests/mellum_cli_prefill_abba.sh "$OUT/prefill" "$Q8" 2048
@@ -61,7 +102,9 @@ directory, so no two runs share `setup.txt`, stderr files or `runs.txt`.
 | Decode, port | 6 | 124.67 t/s | 116.17–125.78 |
 | Decode, `d2d9338` reference | 6 | 126.55 t/s | 126.26–126.71 |
 
-Both pairs are within 1.5% of the same-machine reference, each engine loading its own shaders.
+These historical pairs are within 1.5% of the same-machine reference, each engine loading its own
+shaders. The different Q8 hash and the M5 Max host mean they do not establish the published-model
+or physical M4 Max Mac Studio acceptance gates.
 
 ## MXFP4 (0005), historical validation
 
@@ -70,8 +113,9 @@ values, and the earlier harness reused output directories and loaded the port's 
 process. Those timings cannot establish the 0005 performance gate. Repeat it with the corrected harness
 and verified model files before publishing the memory matrix.
 
-Q8 non-regression after 0005: prefill 3,814 t/s and decode 118.75 t/s against 3,987 / 125.08 before the MXFP4
-loaders — 4.3% and 5.1% down, inside the 10% cap. `ds4_test --mellum-moe` on the MXFP4 file passes (weights,
+Historical Q8 comparison after 0005: prefill 3,814 t/s and decode 118.75 t/s against 3,987 / 125.08
+before the MXFP4 loaders — 4.3% and 5.1% down. This is not a pass against the published model; the
+non-regression gate needs repeating. `ds4_test --mellum-moe` on the MXFP4 file passes (weights,
 selection and the staged double reference), and `tests/test_mellum_config` opens it, refusing every mixture.
 
 The MXFP4 file verifies: sha256 `cf09584a…8166`, 7,029,537,056 bytes. These are M5 Max numbers; the spec's §2.3 figures

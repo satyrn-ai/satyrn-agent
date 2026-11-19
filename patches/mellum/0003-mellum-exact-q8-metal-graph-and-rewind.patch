@@ -1,4 +1,4 @@
-From 3702a2c4e5cfd4b0437f0f91f2c495225455a401 Mon Sep 17 00:00:00 2001
+From e1f9a0799b9f59f89929a4603b75990674f2e514 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 17 Nov 2026 07:35:37 -0500
 Subject: [PATCH 3/6] mellum: exact q8 metal graph and rewind
@@ -13,11 +13,15 @@ frontier's rings and logits are restored; anywhere else the graph resets and
 the kept tokens are replayed. The exact rows kernel makes a replay equal the
 decode steps it replaces.
 
-Asserted by tests/test_mellum_kernels.c (509 checks), the trace driver's
-untraced-versus-fully-traced logit equality, and ds4_test --mellum-rewind at
-500/1, 1100/1, 1100/3 and the 1100/40 frontier case: zero differing logit
-words, and the stale-frontier rewind resets. On the real Q8_0 GGUF, 64 greedy
-token ids match the fork's CLI at d2d9338.
+Tests cover kernels, trace equality, and ds4_test --mellum-rewind at
+500/1, 1100/1, 1100/3 and the 1100/40 frontier. Historical real-model
+results used a Q8 file whose hash differs from the published model;
+published-model oracle and rewind acceptance must be repeated.
+
+The exact-prefill diagnostic and fast-path target land in 0004 with the
+thresholds they control. This differs from spec section 4 and remains an
+explicit boundary deviation for Koudai to review. Acceptance status and
+historical commands are in docs/reports/mellum-engine-evidence.md.
 
 Upstream: not offered, fork only
 Retire-when: upstream runs an exact Mellum 2.1 Metal graph

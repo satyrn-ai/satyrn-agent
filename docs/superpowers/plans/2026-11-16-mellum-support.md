@@ -12,6 +12,26 @@
 
 **Delivery split.** Part A (tasks 1–9) is a handoff to Koudai for the two generic ds4-py PRs: different repo, different conventions (`docs/plans/`, `uv run --frozen --extra agent`). Part B (tasks 10–22) is the satyrn-agent branch `feat/mellum-support`. Both parts ship separately; the plan is one document because task 18 consumes the two companion commits.
 
+## Current checkpoint and open acceptance
+
+Engine patches 0001–0006 are implemented and exported. This is an implementation checkpoint, not
+completion of every patch's acceptance. The [evidence/status table](../../reports/mellum-engine-evidence.md#patch-discipline-checkpoint-2026-11-18)
+supersedes earlier ledger completion claims affected by the Q8 model-provenance correction.
+Required published-file per-prefix config/tokenizer/oracle/rewind/numerical and performance reruns
+remain open, alongside the physical memory matrix and complete Qwen/downstream acceptance.
+
+The exact-prefill diagnostic and `test-mellum-fastpath` target are delivered in 0004, although spec §4
+assigns them to 0003. This boundary deviation remains for Koudai's review; it does not remove either
+patch's numerical/oracle acceptance requirements. The spec itself is unchanged.
+
+The spec's prerequisite that PR #24 merge before Mellum implementation was not followed. It remains
+open at this checkpoint. The Qwen prefix is not yet rebased, so neither the Qwen-inclusive prefix nor
+the full stack is accepted. Task 17 waits for #24 and consumes its complete then-current series.
+No owner notification or approval of these deviations is asserted.
+
+The cleanup regenerated engine commit messages with all six source trees unchanged. Historical native
+results retain the original commit/tree provenance; metadata changes are not presented as new model runs.
+
 ## Global Constraints
 
 - Metal is the only supported backend. No CUDA, ROCm, CPU inference, distributed, multi-GPU, or multi-session server work.
@@ -22,6 +42,8 @@
 - No Satyrn identifier or policy appears in ds4-py production code or tests. Native chat belongs to `patches/mellum`; generic protocol and tool profiles to ds4-py; sampling/DFlash/think/persistence policy to Satyrn.
 - Recommended Mellum client sampling is temperature 0.6, top-p 0.95, top-k 20. Native Mellum defaults are 1.0, 1.0, 0, 0. Precedence is `native → Mellum recommendation → project → CLI → request`, preserving explicit zero and `min_p=0`.
 - Every patch message carries `Upstream:`, `Retire-when:` and `Carried-commits:` trailers, with the ledger expanded from the spec's `git rev-list` command.
+- Verify the actual model SHA-256 before building/running the real-model gates. The existing `~/models/...Q8_0.gguf`
+  has a different hash; use a verified published file such as the matching HF cache blob. Equal byte size is insufficient.
 - Commands run inside `devenv shell` with `uv --frozen`. No second Python environment and no second hook runner.
 - Before any build or model run: `pgrep -fl "ds4|dogfood"` must show no model process. Never use `--raw-prompt`.
 - Record the command, commit, machine, `n`, and raw output for every measurement. A pending row is not a pass.
@@ -366,6 +388,8 @@ Work in the task worktree on `feat/mellum-support`. Engine work happens in the d
 
 ### Task 10: Engine patch 0001 — model config, memory and host contract
 
+**Status:** Implemented/exported; required real-model config/host acceptance needs repeating at this prefix with the published Q8 file.
+
 **Files:**
 - Create: `patches/mellum/0001-mellum-model-config-memory-and-host-contract.patch`
 - Reference: `ds4_mellum_config.inc`, `ds4_mellum_plan.inc`, `ds4.c`, `ds4.h` from `pauleveritt/ds4-mellum` at `d2d9338`
@@ -398,7 +422,8 @@ Write the recognition, hyperparameter and tensor validation, Q8 binding, memory 
 - [ ] **Step 4: Run the real-model acceptance**
 
 ```bash
-export Q8="$HOME/models/Mellum2.1-12B-A2.5B-Thinking-Q8_0.gguf"
+: "${Q8:?Set Q8 to the SHA-verified published Q8_0 GGUF}"
+shasum -a 256 "$Q8"  # require 69e0ac02a16586c2c9e991f1e3b8a1eb403882e7ab9e69ea01eb23dbbbc6841f
 mkdir -p "$OUT"
 pgrep -fl "ds4|dogfood"
 make tests/test_mellum_config && DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_config > "$OUT/patch-0001-real.log" 2>&1
@@ -425,6 +450,8 @@ git commit -m "feat(ds4): carry the Mellum model config and host contract"
 ```
 
 ### Task 11: Engine patch 0002 — tokenizer, chat and thinking
+
+**Status:** Implemented/exported; required real-model config/tokenizer/chat acceptance needs repeating at this prefix with the published Q8 file, without skipped sections.
 
 **Files:**
 - Create: `patches/mellum/0002-mellum-tokenizer-chat-and-thinking.patch`
@@ -462,6 +489,8 @@ git add patches/mellum && git commit -m "feat(ds4): carry the Mellum tokenizer, 
 
 ### Task 12: Engine patch 0003 (part 1) — exact Q8 Metal graph
 
+**Status:** Implemented/exported with Task 13; published-Q8 oracle and exact-graph acceptance at the 0003 prefix remains pending.
+
 **Files:**
 - Create: `patches/mellum/0003-mellum-exact-q8-metal-graph-and-rewind.patch`
 - Reference: `ds4_mellum_graph_alloc.inc`, `ds4_mellum_graph.inc`, `ds4_mellum_test_hooks.inc`, `metal/mellum.metal`, guarded hunks in `metal/qwen4.metal`, `ds4_gpu.h`, `ds4_metal.m`
@@ -470,7 +499,7 @@ git add patches/mellum && git commit -m "feat(ds4): carry the Mellum tokenizer, 
 
 **Interfaces:**
 - Consumes: patch 0002.
-- Produces: exact Q8 graph, allocation, sliding/full attention, 64 routed experts with top 8, MoE, logits, and the exact-prefill diagnostic. Rewind lands in task 13 and is squashed into this same patch file.
+- Produces: exact Q8 graph, allocation, sliding/full attention, 64 routed experts with top 8, MoE, logits, and trace diagnostics. Rewind lands in task 13 and is squashed into this same patch file. The exact-prefill switch and fast-path target land in Task 14; this differs from spec §4 and remains an open boundary review item.
 
 - [ ] **Step 1: Port the model-free kernel and oracle tests first**
 
@@ -489,6 +518,8 @@ git add patches/mellum && git commit -m "feat(ds4): run an exact Mellum Q8 Metal
 ```
 
 ### Task 13: Engine patch 0003 (part 2) — rewind and frontier
+
+**Status:** Implemented/exported; repeat published-Q8 rewind/frontier/logit acceptance at the 0003 prefix.
 
 **Files:**
 - Modify: `patches/mellum/0003-mellum-exact-q8-metal-graph-and-rewind.patch`
@@ -532,6 +563,8 @@ git add patches/mellum && git commit -m "feat(ds4): rewind Mellum sessions to th
 
 ### Task 14: Engine patch 0004 — optimized Q8 prefill and decode
 
+**Status:** Implemented/exported; published-Q8 numerical/performance reruns and the required physical Mac Studio acceptance remain pending.
+
 **Files:**
 - Create: `patches/mellum/0004-mellum-optimized-q8-prefill-and-decode.patch`
 - Reference: tiled/batched/fused commits selected by the spec's `git log --grep` ledger
@@ -559,7 +592,7 @@ Expected: PASS model-free; the scripts accept `ARMS=AA … OUT MODEL 2048`.
 
 - [ ] **Step 3: Measure the Q8 pair on the 36 GB Mac Studio**
 
-`pgrep -fl "ds4|dogfood"` shows nothing. Repeat the §2.3 n=6 **Q8** pair and require medians within 10% of 1,515 t/s prefill and 88.19 t/s generation. The MXFP4 baseline pair belongs to Task 15, whose loaders it needs. Record command, commit, machine and raw output.
+`pgrep -fl "ds4|dogfood"` shows nothing. On the physical 36 GB M4 Max Mac Studio, repeat the §2.3 n=6 **Q8** pair with the verified published model, immutable `d2d9338` reference and port. Each engine runs from its own tree with fresh output directories. Require port medians within 10% of the same-machine reference; another host is supplemental evidence. The MXFP4 pair belongs to Task 15. Record command, model hash, commit, machine and raw output.
 
 - [ ] **Step 3b: Qwen kernel regression**
 
@@ -580,6 +613,8 @@ git add patches/mellum && git commit -m "feat(ds4): add the Mellum Q8 fast paths
 
 ### Task 15: Engine patch 0005 — MXFP4_MOE experts
 
+**Status:** Implemented/exported; published-Q8 n=6 non-regression and a valid same-machine MXFP4 performance pair remain pending. Historical timing claims are not acceptance.
+
 **Files:**
 - Create: `patches/mellum/0005-mellum-mxfp4-moe-experts.patch`
 - Reference: MXFP4 commits from the spec's `git log --grep='MXFP4\|mxfp4'` ledger
@@ -587,7 +622,7 @@ git add patches/mellum && git commit -m "feat(ds4): add the Mellum Q8 fast paths
 
 **Interfaces:**
 - Consumes: task 14.
-- Produces: MXFP4_MOE expert loading and kernels, uniform-expert validation, half-size slot arithmetic, numeric fixtures; unsupported or mixed quants fail by name.
+- Produces: resident MXFP4_MOE expert loading and kernels, uniform-expert validation and numeric fixtures; unsupported or mixed quants fail by name. Streamed slot sizing and the S6-era tiled kernel tests land in Task 16 with their address-table dependencies. Python expert-index/pack tooling is excluded.
 
 - [ ] **Step 1: Write the failing quant-identity tests**
 
@@ -599,7 +634,7 @@ Re-run until MXFP4 reference logits pass.
 
 - [ ] **Step 3: Prove Q8 did not regress, and measure the MXFP4 pair**
 
-Repeat the §2.3 Q8 resident n=6 pair on the same machine: medians no worse than 10%. Then run the MXFP4 pair through the ported runners and require medians within 10% of 1,550 t/s prefill and 94.48 t/s generation.
+Repeat the published-Q8 resident n=6 pair on the same machine before/after 0005: medians must not regress by more than 10%. Then run the SHA-verified MXFP4 pair through the ported runners against immutable `d2d9338` on that same machine and require medians within 10% of the reference. Each engine uses its own working directory/shaders and fresh output directories. The physical Mac Studio row remains required by §8.
 
 - [ ] **Step 4: Export, prove, commit**
 
