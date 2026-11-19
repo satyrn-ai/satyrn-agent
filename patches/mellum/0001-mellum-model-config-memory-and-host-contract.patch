@@ -1,7 +1,7 @@
-From b8fe767c6ba15616fea820aca31f516cea41c812 Mon Sep 17 00:00:00 2001
+From dd4afc644f5773eef57071f64281d3d23f78aae3 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 17 Nov 2026 07:04:18 -0500
-Subject: [PATCH 1/5] mellum: model config, memory and host contract
+Subject: [PATCH 1/6] mellum: model config, memory and host contract
 
 Recognition of general.architecture = mellum inside the QWEN4_EXP family,
 hyperparameter and tensor validation that refuses each bad key or shape by

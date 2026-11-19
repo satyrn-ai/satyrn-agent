@@ -1,7 +1,7 @@
-From 968e557fe1785d6b6d745039d3832ce171c5066e Mon Sep 17 00:00:00 2001
+From 0c5009f69c8d41a0d284e4556dcf5dc5f0a0382b Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Wed, 18 Nov 2026 19:54:58 -0500
-Subject: [PATCH 5/5] mellum: mxfp4 moe experts
+Subject: [PATCH 5/6] mellum: mxfp4 moe experts
 
 Open a Mellum file whose routed experts are all MXFP4_MOE, refuse mixed
 or unsupported expert quants by name, and run resident MoE and the layer

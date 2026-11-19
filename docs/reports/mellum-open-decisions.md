@@ -42,12 +42,8 @@ per-machine Metal limit, planned bytes, peak, swap before/after and n, recorded 
 What is ready: the ported A/B/B/A runners and (with 0006) `tools/mellum_s4_measure` produce those fields; the
 acceptance procedure is Task 20.
 
-## 4. Deferred minor: the S4 driver smoke test hardcodes Q8's slot count
+## 4. S4 driver slot count — closed
 
-`tests/test_mellum_s4_driver.py:103` asserts `c['slots'] == 979`, which is the 6 GiB cache divided by a Q8_0
-expert's bytes. On the MXFP4 file the same cache holds a different number, so the smoke test cannot run unchanged.
-
-Fix to carry with 0006: derive the expectation from the cache size and the model's expert bytes
-(`ds4_mellum_stream_slots(cache_bytes, expert_bytes)`), and keep 979 as the Q8_0 case of a table-driven check rather
-than a literal. `tests/test_mellum_stream.c` already passes the Q8 constant explicitly, so only the Python driver
-test needs the change.
+`tests/test_mellum_s4_driver.py` no longer hardcodes 979. The driver now reports `expert_bytes` from a new
+`ds4_engine_mellum_expert_bytes` hook, and the smoke test asserts `slots == (6 GiB // expert_bytes)`, which holds
+for Q8 (979) and MXFP4 alike. Verified by running the test against both files: 3 tests, OK each.

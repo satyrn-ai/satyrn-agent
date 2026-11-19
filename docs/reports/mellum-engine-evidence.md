@@ -165,21 +165,62 @@ complete native logs, the frozen prompt and validation scripts remain in
 
 **Acceptance still pending:** physical 16 GB / 8 GB rows and their no-swap/working-set/speed requirements remain Task 20 gates. These 128 GiB host runs establish local exactness, not target memory fit. Historical Q8 oracle/performance and the invalid MXFP4 timing rows above also need rerunning. Task 17 cannot begin its Qwen rebase until PR [#24](https://github.com/satyrn-ai/satyrn-agent/pull/24) merges; it was OPEN when checked.
 
-## Per-patch acceptance on the published Q8 model
+## Per-prefix acceptance on the published Q8 model
 
-Run against the exported patches (`patches/mellum/0001`–`0005`) with the SHA-verified Q8_0 file:
+Each prefix was materialized into its own clone from the pinned upstream plus `patches/common` and patches
+`0001..N`, then built and tested. The model is the SHA-verified Q8_0 file (`69e0ac02…6841f`, 12,925,417,760 B);
+`DS4_TEST_MELLUM_MODEL` named it for the model-backed rows. "config" is `tests/test_mellum_config`, "kernels"
+is `make test-mellum-kernels`.
 
-| Gate | Result |
-|---|---|
-| `tests/test_mellum_config`, model-free | pass |
-| `tests/test_mellum_config` with `DS4_TEST_MELLUM_MODEL` | pass — keys validated, every tensor bound |
-| `tests/test_mellum_tokenizer` with the model | 30/30 ids equal the reference encode |
-| `tests/test_mellum_kernels` | 992 checks, 0 failures |
-| `ds4_test --mellum-rewind` | OK — 5 cases plus the frontier k=1 and replay cases |
-| `make test-mellum-fastpath` | 45/45 |
-| `tests/mellum_oracle_compare.sh` against a `d2d9338` build | PASS — 2,200-token token files byte-identical at every position, 64/64 greedy ids equal |
+| Prefix | Tree | config | kernels | model-backed gates |
+|---|---|---:|---:|---|
+| 0001 | `e4b0d45e` | ok | n/a (target absent) | config with the real model: keys validated, every tensor bound |
+| 0002 | `047aa0aa` | ok | n/a (target absent) | tokenizer with the real model: 30/30 ids equal the reference encode |
+| 0003 | `ca4372c6` | ok | 509 checks, 0 failures | `ds4_test --mellum-rewind`: OK |
+| 0004 | `c8d9cfa8` | ok | 662 checks, 0 failures | `make test-mellum-fastpath`: 45/45 |
+| 0005 | `1cc4ec80` | ok | 662 checks, 0 failures | MXFP4 config accepted; mixtures refused by name |
+| 0006 | `7c1b75b1` | ok | 992 checks, 0 failures | `make test-mellum-stream`: 56 checks, 0 failures; `tests/test_mellum_s4_driver.py` OK on both Q8 and MXFP4 |
 
-The oracle's cross-engine "exact prefill" comparison now uses the near-tie rule rather than byte equality: at
-`d2d9338` the reference's `DS4_MELLUM_EXACT_PREFILL` does not disable its attention tiles, so its own exact prefill
-is not byte-equal to its decode at 2,200 tokens. Our port's exact prefill *is* byte-equal to its decode, checked in
-the same run. That is a difference in the reference, not in the port, and the script says so in its comment.
+The 992-check figure belongs to 0006: 0003's suite is 509 checks, 0004's is 662, and 0006 adds the streaming
+and address-table cases. `ds4-check --build` links `libds4` only and never compiles the test sources, so every
+prefix above was also built and run as a test suite.
+
+## Oracle against an immutable `d2d9338` build
+
+`tests/mellum_oracle_compare.sh` with `ORACLE=/tmp/ds4-ref` (a fresh `make` of `d2d9338`): PASS at 31, 1,100 and
+2,200 tokens, with 64/64 greedy ids equal and equal logits at every step. 2,200-token files are byte-identical at
+all 65 positions for decode and for this port's exact prefill.
+
+One comparison is deliberately near-tie rather than byte-equal, and the script proves why before relaxing: it runs
+the *reference* with `DS4_MELLUM_EXACT_PREFILL=1` and compares that to the reference's own decode. At `d2d9338` the
+flag does not disable the attention tiles, so the reference's exact prefill is not byte-equal to its decode at
+2,200 tokens; the script prints `note 2200: …` and holds only that comparison to the near-tie rule. This port's
+exact prefill is byte-equal to its decode, and that is asserted separately.
+
+## Performance, corrected harness
+
+Each engine ran from its own tree (the shaders load from `metal/*.metal` relative to the working directory) and
+each run wrote a fresh output directory, so no run shares `setup.txt`, stderr files or `runs.txt`. All rows are
+context 3072, 2,056-token prompt, n=6 from the A/B/B/A runner's `ARMS=AA` mode.
+
+Q8_0, per prefix — this is the non-regression series:
+
+| Prefix | Prefill | Decode |
+|---|---:|---:|
+| 0004 | 3,956 t/s | 124.40 t/s |
+| 0005 | 3,964 t/s | 127.78 t/s |
+| 0006 | 3,994 t/s | 127.87 t/s |
+| `d2d9338` reference | 3,978 t/s | 128.32 t/s |
+
+0004→0005 moves +0.2% prefill and +2.7% decode; 0005→0006 moves +0.8% and +0.1%. No regression, and 0006 is
+within 0.4% of the same-machine reference.
+
+MXFP4_MOE at 0006 against the same reference:
+
+| Run | Prefill | Decode |
+|---|---:|---:|
+| Port | 4,085 t/s | 151.99 t/s |
+| `d2d9338` reference | 4,074 t/s | 152.13 t/s |
+
+Physical memory rows (36/24/16/8 GB) are still pending: this machine is an M5 Max with 128 GiB, not the M4 Max
+Studio the spec measures, and no 24 GB, 16 GB or 8 GB machine is reachable. See `mellum-open-decisions.md`.
