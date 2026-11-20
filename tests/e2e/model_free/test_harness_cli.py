@@ -252,6 +252,22 @@ def test_project_auto_empty_drafter_is_rejected_with_source(tmp_path: Path) -> N
     assert str(caught.value).startswith(f"{tmp_path}/pyproject.toml: ")
 
 
+@pytest.mark.parametrize("project_dflash", [None, "on"])
+def test_cli_empty_drafter_over_project_drafter_is_unsourced(
+    tmp_path: Path,
+    project_dflash: str | None,
+) -> None:
+    mode = "" if project_dflash is None else f'dflash = "{project_dflash}"\n'
+    with pytest.raises(ConfigurationError, match="non-empty") as caught:
+        resolved(
+            tmp_path,
+            ["--drafter", ""],
+            toml=f'[tool.satyrn]\n{mode}drafter_path = "models/drafter.gguf"\n',
+        )
+
+    assert "pyproject.toml" not in str(caught.value)
+
+
 def test_cli_auto_empty_drafter_is_rejected_without_source(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="drafter_path must be non-empty") as caught:
         resolved(tmp_path, ["--drafter", ""])

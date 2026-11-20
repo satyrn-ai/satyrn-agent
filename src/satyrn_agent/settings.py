@@ -124,13 +124,14 @@ def resolve_settings(args: argparse.Namespace, project_dir: Path) -> ResolvedSet
     try:
         config_from_dict(satyrn_values)
     except (ConfigurationError, TypeError) as error:
-        missing_cli_drafter = (
-            isinstance(error, MissingDrafterPath)
-            and (project_values.get("dflash") != "on" or args.dflash not in {None, "on"})
-            and "drafter_path" not in project_values
-            and (
-                (args.drafter is not None and not args.drafter.strip())
-                or (args.dflash == "on" and args.drafter is None)
+        cli_blanked_drafter = args.drafter is not None and not args.drafter.strip()
+        missing_cli_drafter = isinstance(error, MissingDrafterPath) and (
+            cli_blanked_drafter
+            or (
+                args.dflash == "on"
+                and args.drafter is None
+                and project_values.get("dflash") != "on"
+                and "drafter_path" not in project_values
             )
         )
         if missing_cli_drafter:
