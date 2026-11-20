@@ -12,9 +12,13 @@ blob already in the Hugging Face cache. The existing file in `~/models` was not 
 
 ## Patch discipline checkpoint
 
-Six patches export from commits `fca0fde`..`10fa580`, each exactly its own delta, authored
-`pauleveritt <pauleveritt@me.com>`, with the three required trailers. Applying them in order reconstructs tree
-`cd3911c3` from a pristine clone, and `ds4-check --model mellum --build` passes.
+Six patches export from commits `2ccfb395`..`03486a4b` (the current `From` headers), each exactly its own
+delta, authored `pauleveritt <pauleveritt@me.com>`, with the three required trailers. Applying them in order
+reconstructs tree `5e05d49a` from a pristine clone, and `ds4-check --model mellum --build` passes. The
+per-prefix table below is authoritative for the current export; older ledger entries that name `cd3911c3` or
+`3130743c…` describe superseded exports. Re-verified 2026-11-20 by materializing each prefix from a pristine
+clone of the pin plus `patches/common` and patches `0001..N`: `70e58577`, `9efd174a`, `ffaffa3f`, `a7d0da5c`,
+`aac1d47f`, `5e05d49a`.
 
 ## 64 greedy token ids match the fork (0003), historical
 
@@ -88,7 +92,9 @@ The MXFP4 file verifies: sha256 `cf09584a…8166`, 7,029,537,056 bytes. These ar
 
 ## SSD streaming (0006) on the exported artifact
 
-Tree `cd3911c3`, context 32768, 512 greedy tokens, three resident and three streamed processes on Q8_0. The
+Tree `ece0d5fe`, context 32768, 512 greedy tokens, three resident and three streamed processes on Q8_0. The
+current 0006 tree is `5e05d49a`; its only deltas from `ece0d5fe` are removing duplicate host-contract test lines
+from `tests/test_mellum_config.c` and correcting the oracle-script header, so the engine source is unchanged. The
 prompt's SHA-256 is `f3b0e01b…6806`. Resident ids agree across all three runs, streamed ids agree across all
 three, and resident equals streamed at all 512 positions. Raw runs and ids are in
 `mellum-task16-summary.json`.
@@ -104,13 +110,13 @@ then built and tested. Model: the SHA-verified Q8_0 file (`69e0ac02…6841f`, 12
 | 0001 | `70e58577` | ok | target absent | real-model config: keys validated, every tensor bound; a drafter path refused by name |
 | 0002 | `9efd174a` | ok | target absent | tokenizer with the real model: 30/30 ids equal the reference encode |
 | 0003 | `ffaffa3f` | ok | 509 | `ds4_test --mellum-rewind`: OK |
-| 0004 | `76aadc28` | ok | 662 | `make test-mellum-fastpath`: 45/45 |
-| 0005 | `c22290b3` | ok | 662 | MXFP4 config accepted; mixtures refused by name |
-| 0006 | `ece0d5fe` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
+| 0004 | `a7d0da5c` | ok | 662 | `make test-mellum-fastpath`: 45/45 |
+| 0005 | `aac1d47f` | ok | 662 | MXFP4 config accepted; mixtures refused by name |
+| 0006 | `5e05d49a` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
 
 The check counts belong to their prefix: 0003 is 509, 0004 and 0005 are 662, 0006 is 992. `ds4-check --build`
 links `libds4` only and never compiles the test sources, which is why each prefix above was also built and run
-as a suite. The six patches applied in order reconstruct to tree `ece0d5fe` from a pristine clone (`ds4-check --model mellum --build`).
+as a suite. The six patches applied in order reconstruct to tree `5e05d49a` from a pristine clone (`ds4-check --model mellum --build`).
 
 ## Oracle against an immutable `d2d9338` build
 

@@ -1,4 +1,4 @@
-From 69641c01b97960ba687d2fb18336dc6ef14c83ce Mon Sep 17 00:00:00 2001
+From 03486a4b6de1e08915a4fdbaf5bf59cf9e95089d Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:32 -0500
 Subject: [PATCH 6/6] mellum: ssd expert streaming
@@ -23,14 +23,14 @@ Carried-commits: 2bb8f7fcec1c4bc691046d00d406e9d4fc68b868 1268d49811528be618590e
  tests/ds4_test.c                   | 678 +++++++++++++++++++++++
  tests/mellum_trace.c               |  54 +-
  tests/mellum_trace_context.h       |  19 +
- tests/test_mellum_config.c         |  21 +-
+ tests/test_mellum_config.c         |  14 +-
  tests/test_mellum_kernels.c        | 769 ++++++++++++++++++++++++--
  tests/test_mellum_s4_driver.py     | 122 +++++
  tests/test_mellum_stream.c         | 415 ++++++++++++++
  tests/test_mellum_trace_stream.c   |  34 ++
  tests/test_metal_tensor_lifetime.m |  47 ++
  tools/mellum_s4_measure.c          | 237 ++++++++
- 18 files changed, 4201 insertions(+), 168 deletions(-)
+ 18 files changed, 4194 insertions(+), 168 deletions(-)
  create mode 100644 ds4_mellum_stream.c
  create mode 100644 ds4_mellum_stream.h
  create mode 100644 tests/test_mellum_s4_driver.py
@@ -40,7 +40,7 @@ Carried-commits: 2bb8f7fcec1c4bc691046d00d406e9d4fc68b868 1268d49811528be618590e
  create mode 100644 tools/mellum_s4_measure.c
 
 diff --git a/.gitignore b/.gitignore
-index b60b89c..dee544d 100644
+index b60b89ce..dee544d4 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -114,3 +114,12 @@ __pycache__/
@@ -57,7 +57,7 @@ index b60b89c..dee544d 100644
 +/tests/test_metal_tensor_lifetime
 +/tests/mellum_trace
 diff --git a/Makefile b/Makefile
-index 13293ec..e0fda63 100644
+index 13293ecb..e0fda632 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -27,8 +27,8 @@ DS4_DSPARK_SUPPORT ?= gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf
@@ -166,7 +166,7 @@ index 13293ec..e0fda63 100644
 +ifeq ($(UNAME_S),Darwin)
 +endif
 diff --git a/ds4.c b/ds4.c
-index 9c4d91b..04c6add 100644
+index 9c4d91b7..04c6add1 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -42,6 +42,20 @@
@@ -983,7 +983,7 @@ index 9c4d91b..04c6add 100644
  bool ds4_test_session_graph_pos(ds4_session *s, uint32_t *pos) {
      if (!s || !pos || !ds4_session_is_qwen4(s)) return false;
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 7c1b1e2..a3654b7 100644
+index 7c1b1e20..a3654b7f 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -177,6 +177,8 @@ int ds4_gpu_tensor_read_after_selected_event(const ds4_gpu_tensor *tensor,
@@ -1074,7 +1074,7 @@ index 7c1b1e2..a3654b7 100644
          ds4_gpu_tensor *selected, ds4_gpu_tensor *weights, ds4_gpu_tensor *mid, ds4_gpu_tensor *part,
 diff --git a/ds4_mellum_stream.c b/ds4_mellum_stream.c
 new file mode 100644
-index 0000000..a8567de
+index 00000000..a8567de5
 --- /dev/null
 +++ b/ds4_mellum_stream.c
 @@ -0,0 +1,124 @@
@@ -1204,7 +1204,7 @@ index 0000000..a8567de
 +}
 diff --git a/ds4_mellum_stream.h b/ds4_mellum_stream.h
 new file mode 100644
-index 0000000..5543211
+index 00000000..5543211e
 --- /dev/null
 +++ b/ds4_mellum_stream.h
 @@ -0,0 +1,69 @@
@@ -1278,7 +1278,7 @@ index 0000000..5543211
 +
 +#endif
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 6323896..94b676f 100644
+index 63238966..94b676fd 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
 @@ -715,6 +715,9 @@ static int g_model_buffer_cache_over_limit;
@@ -2537,7 +2537,7 @@ index 6323896..94b676f 100644
 +    return 1;
 +}
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index f310746..dc5c483 100644
+index f3107468..dc5c4832 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -3077,6 +3077,75 @@ kernel void kernel_qwen4_moe_down(
@@ -2872,7 +2872,7 @@ index f310746..dc5c483 100644
 +    }
 +}
 diff --git a/tests/ds4_test.c b/tests/ds4_test.c
-index e39ab93..1f004f0 100644
+index e39ab93f..1f004f02 100644
 --- a/tests/ds4_test.c
 +++ b/tests/ds4_test.c
 @@ -589,6 +589,674 @@ static int test_mellum_token(int i) {
@@ -3568,7 +3568,7 @@ index e39ab93..1f004f0 100644
      {"--mellum-exact-prefill", "mellum-exact-prefill", "Mellum prefill equals decode byte for byte under DS4_MELLUM_EXACT_PREFILL=1 (DS4_TEST_MELLUM_MODEL)", test_mellum_exact_prefill},
      {"--mellum-rewind", "mellum-rewind", "Mellum session rewind: one token or to the last sync's end keeps the caches, elsewhere deeper replays; logits equal a straight decode (DS4_TEST_MELLUM_MODEL)", test_mellum_rewind},
 diff --git a/tests/mellum_trace.c b/tests/mellum_trace.c
-index 232d75d..1bfaaae 100644
+index 232d75d0..1bfaaae0 100644
 --- a/tests/mellum_trace.c
 +++ b/tests/mellum_trace.c
 @@ -142,6 +142,20 @@ static bool check_file(const char *prefix, unsigned pos, const char *what, uint6
@@ -3664,7 +3664,7 @@ index 232d75d..1bfaaae 100644
      }
      ds4_tokens_free(&toks);
 diff --git a/tests/mellum_trace_context.h b/tests/mellum_trace_context.h
-index 60a3619..7c5a799 100644
+index 60a36197..7c5a7995 100644
 --- a/tests/mellum_trace_context.h
 +++ b/tests/mellum_trace_context.h
 @@ -2,6 +2,7 @@
@@ -3699,23 +3699,14 @@ index 60a3619..7c5a799 100644
 +}
  #endif
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index d0b257c..e22c870 100644
+index d0b257ce..ce4a5c3b 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
-@@ -195,6 +195,7 @@ static const char *g_open_mtp;
- static int g_open_option;   /* 1 tensor parallelism, 2 distributed, 3 power throttling */
- static bool g_open_inspect;
- static const char *g_open_steer_file;
-+static const char *g_open_mtp;
- static float g_open_steer_attn;
- 
- static void child_engine_open(const char *path) {
-@@ -211,14 +212,14 @@ static void child_engine_open(const char *path) {
+@@ -211,14 +211,13 @@ static void child_engine_open(const char *path) {
      if (g_open_option == 1) opt.tp.role = DS4_TP_LEADER;
      if (g_open_option == 2) opt.distributed.role = DS4_DISTRIBUTED_COORDINATOR;
      if (g_open_option == 3) opt.power_percent = 50;
 -    if (g_open_option == 4) opt.ssd_streaming = true;   /* streaming arrives in 0006; until then it is refused */
-+    opt.mtp_path = (char *)g_open_mtp;
      const int rc = ds4_engine_open(&e, &opt);
      /* the host contract: Mellum reports both predicates, and its payload support is false */
      _exit(rc == 0 && e && ds4_engine_is_mellum(e) && ds4_engine_is_qwen4(e) ? 0 : 7);
@@ -3728,18 +3719,7 @@ index d0b257c..e22c870 100644
  static void expect_open_mtp_refused(const char *label) {
      char path[512], err[4096];
      mellum_fixture_write(MF_NONE, path, sizeof(path));
-@@ -235,6 +236,10 @@ static void expect_open_mtp_refused(const char *label) {
-     printf("ok   open: %s\n", label);
- }
- 
-+/* A drafter path with a Mellum model: Mellum reports as qwen4, so the shared check used to answer with the
-+ * wrong model and the wrong reason (Mellum has no DFlash drafter but does stream). */
-+
-+
- /* Options the shared qwen4 open check refuses for Mellum too: tensor parallelism, a distributed slice, and
-  * power throttling.  Mellum is a qwen4 engine, so that check must not be skipped for it. */
- static void expect_open_option_refused(int which, const char *label) {
-@@ -368,7 +373,7 @@ static uint64_t expect_fixed(uint64_t cap) {
+@@ -368,7 +367,7 @@ static uint64_t expect_fixed(uint64_t cap) {
  
  static uint64_t sum_requests(uint32_t ctx, uint32_t cap, uint32_t *n_out) {
      mellum_req reqs[MELLUM_MAX_REQS];
@@ -3748,7 +3728,7 @@ index d0b257c..e22c870 100644
      uint64_t total = 0;
      for (uint32_t i = 0; i < n; i++) total += reqs[i].bytes;
      if (n_out) *n_out = n;
-@@ -413,7 +418,7 @@ static void check_mellum_plan_scales_with_chunk(void) {
+@@ -413,7 +412,7 @@ static void check_mellum_plan_scales_with_chunk(void) {
      CHECK(s.prefill_cap == 300 && s.scratch_bytes == 300 * expect_per_row() + expect_fixed(300));
  
      mellum_req reqs[MELLUM_MAX_REQS];
@@ -3757,7 +3737,7 @@ index d0b257c..e22c870 100644
      uint32_t k = 0, v = 0, tags = 0, scratch = 0, logits = 0, frontier = 0;
      uint64_t frontier_bytes = 0;
      for (uint32_t i = 0; i < n; i++) {
-@@ -554,7 +559,7 @@ static void check_mellum_attention_scratch(void) {
+@@ -554,7 +553,7 @@ static void check_mellum_attention_scratch(void) {
      CHECK(n_full == 7);
      for (size_t c = 0; c < sizeof(caps) / sizeof(caps[0]); c++) {
          mellum_req reqs[MELLUM_MAX_REQS];
@@ -3766,7 +3746,7 @@ index d0b257c..e22c870 100644
          int tables = 0, parts = 0;
          for (uint32_t i = 0; i < n; i++) {
              if (reqs[i].kind != MELLUM_REQ_SCRATCH) continue;
-@@ -571,7 +576,7 @@ static void check_mellum_attention_scratch(void) {
+@@ -571,7 +570,7 @@ static void check_mellum_attention_scratch(void) {
      }
      /* at the default chunk: 7 x 1,024 x 64 B = 448 KiB, and 65.0 MiB of partials */
      mellum_req reqs[MELLUM_MAX_REQS];
@@ -3775,11 +3755,7 @@ index d0b257c..e22c870 100644
      for (uint32_t i = 0; i < n; i++) {
          if (reqs[i].kind == MELLUM_REQ_SCRATCH && reqs[i].index == MELLUM_S_ATTN_TABLE) CHECK(reqs[i].bytes == 458752ull);
          if (reqs[i].kind == MELLUM_REQ_SCRATCH && reqs[i].index == MELLUM_S_ATTN_PART) CHECK(reqs[i].bytes == 68157440ull);
-@@ -1171,10 +1176,10 @@ int main(void) {
-     expect_vocab_refused(MF_NO_IM_START, "<|im_start|>", "<|im_start|> absent");
-     expect_vocab_refused(MF_NO_IM_END, "<|im_end|>", "<|im_end|> absent");
-     expect_open_mtp_refused("a drafter path is refused by name, not as a Qwen error");
-+    expect_open_mtp_refused("a drafter path is refused by name, not as a Qwen error");
+@@ -1174,7 +1173,6 @@ int main(void) {
      expect_open_option_refused(1, "tensor parallelism is refused, naming Mellum");
      expect_open_option_refused(2, "a distributed slice is refused, naming Mellum");
      expect_open_option_refused(3, "power throttling is refused, naming Mellum");
@@ -3788,7 +3764,7 @@ index d0b257c..e22c870 100644
      expect_open(DS4_BACKEND_CUDA, false, true, "CUDA backend refused, naming Mellum");
      expect_open(DS4_BACKEND_CPU, true, false, "inspect-only open succeeds");
 diff --git a/tests/test_mellum_kernels.c b/tests/test_mellum_kernels.c
-index 60f957a..9b10856 100644
+index 60f957a1..9b108563 100644
 --- a/tests/test_mellum_kernels.c
 +++ b/tests/test_mellum_kernels.c
 @@ -1261,8 +1261,14 @@ typedef struct {
@@ -4693,7 +4669,7 @@ index 60f957a..9b10856 100644
  }
 diff --git a/tests/test_mellum_s4_driver.py b/tests/test_mellum_s4_driver.py
 new file mode 100644
-index 0000000..5c3f454
+index 00000000..5c3f4545
 --- /dev/null
 +++ b/tests/test_mellum_s4_driver.py
 @@ -0,0 +1,122 @@
@@ -4821,7 +4797,7 @@ index 0000000..5c3f454
 +    unittest.main()
 diff --git a/tests/test_mellum_stream.c b/tests/test_mellum_stream.c
 new file mode 100644
-index 0000000..38880ca
+index 00000000..38880caa
 --- /dev/null
 +++ b/tests/test_mellum_stream.c
 @@ -0,0 +1,415 @@
@@ -5242,7 +5218,7 @@ index 0000000..38880ca
 +}
 diff --git a/tests/test_mellum_trace_stream.c b/tests/test_mellum_trace_stream.c
 new file mode 100644
-index 0000000..a3d1608
+index 00000000..a3d16087
 --- /dev/null
 +++ b/tests/test_mellum_trace_stream.c
 @@ -0,0 +1,34 @@
@@ -5282,7 +5258,7 @@ index 0000000..a3d1608
 +}
 diff --git a/tests/test_metal_tensor_lifetime.m b/tests/test_metal_tensor_lifetime.m
 new file mode 100644
-index 0000000..e832978
+index 00000000..e832978f
 --- /dev/null
 +++ b/tests/test_metal_tensor_lifetime.m
 @@ -0,0 +1,47 @@
@@ -5335,7 +5311,7 @@ index 0000000..e832978
 +}
 diff --git a/tools/mellum_s4_measure.c b/tools/mellum_s4_measure.c
 new file mode 100644
-index 0000000..d25e866
+index 00000000..d25e866c
 --- /dev/null
 +++ b/tools/mellum_s4_measure.c
 @@ -0,0 +1,237 @@

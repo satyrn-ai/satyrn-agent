@@ -1,4 +1,4 @@
-From 84723274b1bd4d2ae4ad6e97e3ad8413366f523e Mon Sep 17 00:00:00 2001
+From 2cd52f88520042f59a4414042bf5adf4e8583b89 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:28 -0500
 Subject: [PATCH 4/6] mellum: optimized q8 prefill and decode
@@ -31,7 +31,7 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  tests/mellum_moe_ref.inc             |  35 +++
  tests/mellum_oracle_1100.tokens      |  71 +++++
  tests/mellum_oracle_2200.tokens      | 140 ++++++++++
- tests/mellum_oracle_compare.sh       | 117 +++++++++
+ tests/mellum_oracle_compare.sh       | 119 +++++++++
  tests/mellum_oracle_short.tokens     |   4 +
  tests/mellum_prompts/prompt_2048.txt |  97 +++++++
  tests/mellum_trace.c                 |  80 ++++--
@@ -40,7 +40,7 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  tests/test_mellum_fastpath.sh        | 123 +++++++++
  tests/test_mellum_kernels.c          | 257 +++++++++++++++++-
  tests/test_mellum_runners.sh         |  71 +++++
- 23 files changed, 2510 insertions(+), 91 deletions(-)
+ 23 files changed, 2512 insertions(+), 91 deletions(-)
  create mode 100755 tests/mellum_cli_decode_abba.sh
  create mode 100755 tests/mellum_cli_prefill_abba.sh
  create mode 100644 tests/mellum_heldout_long.tokens
@@ -55,7 +55,7 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  create mode 100755 tests/test_mellum_runners.sh
 
 diff --git a/Makefile b/Makefile
-index 149d57c..63cd6ba 100644
+index 149d57cc..63cd6bae 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -1053,6 +1053,18 @@ tests/test_mellum_tokenizer.o: tests/test_mellum_tokenizer.c tests/mellum_tokeni
@@ -78,7 +78,7 @@ index 149d57c..63cd6ba 100644
  test-mellum: tests/test_mellum_config tests/test_mellum_tokenizer
  	./tests/test_mellum_config
 diff --git a/ds4.c b/ds4.c
-index 807786c..8fc7424 100644
+index 807786c3..8fc7424e 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -17484,9 +17484,10 @@ typedef enum {
@@ -360,7 +360,7 @@ index 807786c..8fc7424 100644
      qwen4_graph_free(&g);
      return ok;
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index a3c25c3..293958c 100644
+index a3c25c38..293958cf 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -3621,6 +3621,14 @@ int ds4_gpu_qwen4_moe_reduce_tensor(
@@ -454,7 +454,7 @@ index a3c25c3..293958c 100644
  #ifdef __cplusplus
  }
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 7893431..7f85d14 100644
+index 78934319..7f85d140 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
 @@ -2757,6 +2757,10 @@ static int ds4_gpu_mpp_available(void) {
@@ -725,7 +725,7 @@ index 7893431..7f85d14 100644
 +    return res && mellum_moe(out, res, x, logits, selected, weights, mid, part, model_map, model_size, p, n_tokens);
  }
 diff --git a/metal/mellum.metal b/metal/mellum.metal
-index 9387999..f13492e 100644
+index 93879999..f13492e8 100644
 --- a/metal/mellum.metal
 +++ b/metal/mellum.metal
 @@ -21,19 +21,13 @@ struct ds4_metal_args_mellum_qk_norm_rope {
@@ -1123,7 +1123,7 @@ index 9387999..f13492e 100644
 +    }
 +}
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index c423328..f310746 100644
+index c4233285..f3107468 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -3561,6 +3561,13 @@ static inline qwen4_raw16 qwen4_load_raw16(device const char *row, uint b, uint
@@ -1154,7 +1154,7 @@ index c423328..f310746 100644
          const uint ag = (r.h.x >> 16) | (r.h.y << 16);
          const uint auxs = (r.h.y >> 16) | (r.h.z << 16);
 diff --git a/tests/ds4_test.c b/tests/ds4_test.c
-index caacefa..bf22339 100644
+index caacefad..bf223396 100644
 --- a/tests/ds4_test.c
 +++ b/tests/ds4_test.c
 @@ -755,6 +755,95 @@ static void test_mellum_rewind_frontier_k1_case(ds4_engine *engine, int len) {
@@ -1274,7 +1274,7 @@ index caacefa..bf22339 100644
      {"--qwen4-restore-reuse", "qwen4-restore-reuse", "Qwen restore discards old verifier state and rejects truncated payloads", test_qwen_restore_reused_session},
 diff --git a/tests/mellum_cli_decode_abba.sh b/tests/mellum_cli_decode_abba.sh
 new file mode 100755
-index 0000000..3eb4f39
+index 00000000..3eb4f398
 --- /dev/null
 +++ b/tests/mellum_cli_decode_abba.sh
 @@ -0,0 +1,74 @@
@@ -1354,7 +1354,7 @@ index 0000000..3eb4f39
 +PY
 diff --git a/tests/mellum_cli_prefill_abba.sh b/tests/mellum_cli_prefill_abba.sh
 new file mode 100755
-index 0000000..36ec850
+index 00000000..36ec8508
 --- /dev/null
 +++ b/tests/mellum_cli_prefill_abba.sh
 @@ -0,0 +1,108 @@
@@ -1468,7 +1468,7 @@ index 0000000..36ec850
 +PY
 diff --git a/tests/mellum_heldout_long.tokens b/tests/mellum_heldout_long.tokens
 new file mode 100644
-index 0000000..a61ace1
+index 00000000..a61ace18
 --- /dev/null
 +++ b/tests/mellum_heldout_long.tokens
 @@ -0,0 +1,377 @@
@@ -1851,7 +1851,7 @@ index 0000000..a61ace1
 +3322 4241 61 233 308 3322 4241 97 2288 97 32755 28 233 27 8091 233
 diff --git a/tests/mellum_logits_compare.py b/tests/mellum_logits_compare.py
 new file mode 100644
-index 0000000..b69f879
+index 00000000..b69f8796
 --- /dev/null
 +++ b/tests/mellum_logits_compare.py
 @@ -0,0 +1,88 @@
@@ -1944,7 +1944,7 @@ index 0000000..b69f879
 +if __name__ == '__main__':
 +    sys.exit(main(sys.argv))
 diff --git a/tests/mellum_moe_ref.inc b/tests/mellum_moe_ref.inc
-index 8fbcccf..fbd7a97 100644
+index 8fbcccff..fbd7a97a 100644
 --- a/tests/mellum_moe_ref.inc
 +++ b/tests/mellum_moe_ref.inc
 @@ -83,3 +83,38 @@ static inline void mref_moe_row(const mref_weights *a, const float *x, mref_t *r
@@ -1988,7 +1988,7 @@ index 8fbcccf..fbd7a97 100644
 +}
 diff --git a/tests/mellum_oracle_1100.tokens b/tests/mellum_oracle_1100.tokens
 new file mode 100644
-index 0000000..b3fa26a
+index 00000000..b3fa26a1
 --- /dev/null
 +++ b/tests/mellum_oracle_1100.tokens
 @@ -0,0 +1,71 @@
@@ -2065,7 +2065,7 @@ index 0000000..b3fa26a
 +63698 352 9379 46 4384 5429 385 28 233 27 8091 233
 diff --git a/tests/mellum_oracle_2200.tokens b/tests/mellum_oracle_2200.tokens
 new file mode 100644
-index 0000000..7de3829
+index 00000000..7de38291
 --- /dev/null
 +++ b/tests/mellum_oracle_2200.tokens
 @@ -0,0 +1,140 @@
@@ -2211,18 +2211,20 @@ index 0000000..7de3829
 +309 4860 48 28 233 27 8091 233
 diff --git a/tests/mellum_oracle_compare.sh b/tests/mellum_oracle_compare.sh
 new file mode 100755
-index 0000000..b039e9d
+index 00000000..293a7ad0
 --- /dev/null
 +++ b/tests/mellum_oracle_compare.sh
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,119 @@
 +#!/bin/sh
-+# The external oracle: the port's logits against the pinned M5 Max reference capture, at the oracle positions of
-+# tests/mellum_oracle_{short,1100,2200}.tokens.  Both inputs ship in this patch, so the check runs from the tree:
++# The external oracle: the port's logits against a fresh build of the accepted reference at the oracle
++# positions of tests/mellum_oracle_{short,1100,2200}.tokens.  The token fixtures ship in this patch, so the
++# check runs from the tree:
 +#
 +#   sh tests/mellum_oracle_compare.sh ORACLE_DIR MODEL.gguf [GREEDY_TOKENS]
 +#
-+# The accepted reference is the M5 Max's resident Q8_0 logits recorded at d2d9338; its sha256s are listed in
-+# docs/reports/mellum-engine-evidence.md.  A capture from any other build is not this oracle.
++# The accepted reference is the M5 Max build of d2d9338 in ORACLE_DIR: the script runs that tree's
++# tests/mellum_trace and compares the resulting logits with this engine's.  A build of any other commit is not
++# this oracle.
 +set -u
 +[ $# -ge 2 ] || { echo "usage: $0 ORACLE_DIR MODEL.gguf [GREEDY_TOKENS]" >&2; exit 2; }
 +ORACLE=$(cd "$1" && pwd) || exit 2
@@ -2334,7 +2336,7 @@ index 0000000..b039e9d
 +exit "$fail"
 diff --git a/tests/mellum_oracle_short.tokens b/tests/mellum_oracle_short.tokens
 new file mode 100644
-index 0000000..88ece4e
+index 00000000..88ece4e2
 --- /dev/null
 +++ b/tests/mellum_oracle_short.tokens
 @@ -0,0 +1,4 @@
@@ -2344,7 +2346,7 @@ index 0000000..88ece4e
 +255 99 66776 12619 901 27764 6253 48 28 233 27 8091 233
 diff --git a/tests/mellum_prompts/prompt_2048.txt b/tests/mellum_prompts/prompt_2048.txt
 new file mode 100644
-index 0000000..d35c426
+index 00000000..d35c426c
 --- /dev/null
 +++ b/tests/mellum_prompts/prompt_2048.txt
 @@ -0,0 +1,97 @@
@@ -2447,7 +2449,7 @@ index 0000000..d35c426
 +Summarize the text above in three sentences.
 \ No newline at end of file
 diff --git a/tests/mellum_trace.c b/tests/mellum_trace.c
-index c708830..232d75d 100644
+index c7088308..232d75d0 100644
 --- a/tests/mellum_trace.c
 +++ b/tests/mellum_trace.c
 @@ -24,21 +24,26 @@
@@ -2590,7 +2592,7 @@ index c708830..232d75d 100644
      }
 diff --git a/tests/test_mellum_cli.sh b/tests/test_mellum_cli.sh
 new file mode 100755
-index 0000000..54b9345
+index 00000000..54b93452
 --- /dev/null
 +++ b/tests/test_mellum_cli.sh
 @@ -0,0 +1,53 @@
@@ -2648,7 +2650,7 @@ index 0000000..54b9345
 +[ "$fail" -eq 0 ] && echo "mellum-cli: PASS" || echo "mellum-cli: FAILED"
 +exit "$fail"
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index daacfca..c112857 100644
+index daacfca2..c1128576 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
 @@ -352,6 +352,7 @@ static uint64_t expect_per_row(void) {
@@ -2672,7 +2674,7 @@ index daacfca..c112857 100644
  static uint64_t sum_requests(uint32_t ctx, uint32_t cap, uint32_t *n_out) {
 diff --git a/tests/test_mellum_fastpath.sh b/tests/test_mellum_fastpath.sh
 new file mode 100755
-index 0000000..ba808fe
+index 00000000..ba808fed
 --- /dev/null
 +++ b/tests/test_mellum_fastpath.sh
 @@ -0,0 +1,123 @@
@@ -2800,7 +2802,7 @@ index 0000000..ba808fe
 +[ "$fail" -eq 0 ] && echo "mellum-fastpath: PASS" || echo "mellum-fastpath: FAILED"
 +exit "$fail"
 diff --git a/tests/test_mellum_kernels.c b/tests/test_mellum_kernels.c
-index 9bc023b..df80d59 100644
+index 9bc023b5..df80d59c 100644
 --- a/tests/test_mellum_kernels.c
 +++ b/tests/test_mellum_kernels.c
 @@ -570,6 +570,10 @@ typedef struct {
@@ -3118,7 +3120,7 @@ index 9bc023b..df80d59 100644
      test_prefill_equals_decode();
 diff --git a/tests/test_mellum_runners.sh b/tests/test_mellum_runners.sh
 new file mode 100755
-index 0000000..c9a8516
+index 00000000..c9a8516a
 --- /dev/null
 +++ b/tests/test_mellum_runners.sh
 @@ -0,0 +1,71 @@

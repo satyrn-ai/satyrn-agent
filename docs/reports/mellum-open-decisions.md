@@ -11,10 +11,11 @@ The spec's §4 table puts `DS4_MELLUM_EXACT_PREFILL` in patch 0003 and its §9 a
   against them), so in 0003 it has nothing to disable;
 - `test-mellum-fastpath` is the 0004 target; running it at 0003 fails at "no rule to make target".
 
-Current state: 0003's acceptance is the kernel suite (662 checks at that point), the trace driver's
+Current state: 0003's acceptance is the kernel suite (509 checks at that point), the trace driver's
 untraced-versus-traced equality, the rewind cases and the 64-id comparison; 0004 carries the diagnostic, the
-fast-path target and the 45-check suite. The port's exact prefill is byte-equal to its decode at 2,200 tokens
-(the reference's own flag does not disable its attention tiles — see `mellum-engine-evidence.md`).
+fast-path target and the 45-check suite. The port's exact prefill is byte-equal to its decode at 2,200 tokens;
+the reference's diagnostic disables the same tiled thresholds, so exact-prefill comparisons are exact (see
+`mellum-engine-evidence.md`).
 
 **Question:** accept the move and amend §4/§9, or restore the flag and target to 0003 with the thresholds they
 disable? Recommendation: accept the move; the dependency order is real, not stylistic.
@@ -51,6 +52,13 @@ table as a `.inc` file. That choice is not listed among the deviations.
 Keeping the reference's `.inc` files would shrink the `ds4.c` region the coming qwen35 rebase must resolve, allow a
 straight file-by-file diff against `d2d9338` (the closest thing to Koudai's byte-identity gate), and make later
 updates from the still-moving `ds4-mellum` cheaper. The cost is a larger series now.
+
+A second, concrete rebase surface is independent of the `.inc` choice: 0003 wraps
+`ds4_gpu_qwen4_attn_decode_tensor` / `ds4_gpu_qwen4_attn_decode_rows_tensor` in static `_impl(..., bool ungated)`
+helpers (public signatures unchanged). qwen35 patch 0005 inserts `ds4_gpu_qwen35_attn_verify_tensor` immediately
+after the old `_rows_tensor` closing brace as hunk context, so that hunk will conflict even though the callers
+still compile. Task 17's cherry-pick procedure resolves it; the rebase owner should expect this function-level
+collision in addition to the `ds4.c` region.
 
 ## 5. S4 driver slot count — closed
 

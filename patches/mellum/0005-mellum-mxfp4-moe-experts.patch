@@ -1,4 +1,4 @@
-From 3f04b4a9a57af4cab9a6a75198121b6127075ae6 Mon Sep 17 00:00:00 2001
+From d05d8c53755e520c6f72407dc2e19ea23e8b697d Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:30 -0500
 Subject: [PATCH 5/6] mellum: mxfp4 moe experts
@@ -24,7 +24,7 @@ Carried-commits: 0adf6bafb1f17e642124b60b183575864f118629 989dc7c8dada6685007733
  create mode 100644 tests/mellum_heldout_unicode.tokens
 
 diff --git a/Makefile b/Makefile
-index 63cd6ba..13293ec 100644
+index 63cd6bae..13293ecb 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -1479,3 +1479,4 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
@@ -33,7 +33,7 @@ index 63cd6ba..13293ec 100644
  	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))
 +
 diff --git a/ds4.c b/ds4.c
-index 8fc7424..9c4d91b 100644
+index 8fc7424e..9c4d91b7 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -5703,8 +5703,22 @@ static void weights_validate_qwen4_layout(
@@ -140,7 +140,7 @@ index 8fc7424..9c4d91b 100644
  }
  
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 293958c..7c1b1e2 100644
+index 293958cf..7c1b1e20 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
 @@ -3833,7 +3833,8 @@ int ds4_gpu_mellum_attn_full_rows_tensor(
@@ -163,7 +163,7 @@ index 293958c..7c1b1e2 100644
      uint64_t router_offset;
      uint64_t gate_offset;
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 7f85d14..6323896 100644
+index 7f85d140..63238966 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
 @@ -50989,7 +50989,7 @@ static int mellum_moe(
@@ -176,7 +176,7 @@ index 7f85d14..6323896 100644
          p->n_expert == 0u || p->n_expert > 512u || p->n_used == 0u || p->n_used > p->n_expert || p->n_used > 16u) {
          return 0;
 diff --git a/tests/ds4_test.c b/tests/ds4_test.c
-index bf22339..e39ab93 100644
+index bf223396..e39ab93f 100644
 --- a/tests/ds4_test.c
 +++ b/tests/ds4_test.c
 @@ -872,7 +872,8 @@ static void test_mellum_rewind(void) {
@@ -501,7 +501,7 @@ index bf22339..e39ab93 100644
  #else
 diff --git a/tests/mellum_heldout_unicode.tokens b/tests/mellum_heldout_unicode.tokens
 new file mode 100644
-index 0000000..2bd1796
+index 00000000..2bd1796f
 --- /dev/null
 +++ b/tests/mellum_heldout_unicode.tokens
 @@ -0,0 +1,15 @@
@@ -521,7 +521,7 @@ index 0000000..2bd1796
 +3108 21349 59273 25573 8876 73673 34435 65 43851 255 28312 35178 2949 25459 701 1459
 +1409 21625 28 233 27 8091 233
 diff --git a/tests/mellum_moe_ref.inc b/tests/mellum_moe_ref.inc
-index fbd7a97..e2d62d7 100644
+index fbd7a97a..e2d62d7b 100644
 --- a/tests/mellum_moe_ref.inc
 +++ b/tests/mellum_moe_ref.inc
 @@ -1,8 +1,10 @@
@@ -662,7 +662,7 @@ index fbd7a97..e2d62d7 100644
      }
  }
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index c112857..d0b257c 100644
+index c1128576..d0b257ce 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
 @@ -1156,6 +1156,9 @@ int main(void) {
@@ -676,7 +676,7 @@ index c112857..d0b257c 100644
      expect_refused(MF_DOWN_Q4K, "ffn_down_exps", "ffn_down_exps not Q8_0");
      expect_refused(MF_UP_Q4K, "ffn_up_exps", "ffn_up_exps not Q8_0");
 diff --git a/tests/test_mellum_kernels.c b/tests/test_mellum_kernels.c
-index df80d59..60f957a 100644
+index df80d59c..60f957a1 100644
 --- a/tests/test_mellum_kernels.c
 +++ b/tests/test_mellum_kernels.c
 @@ -1327,7 +1327,7 @@ static ds4_gpu_mellum_moe moe_params(const moe_arena_t *a, uint64_t router_off)
