@@ -10,7 +10,7 @@ class ConfigurationError(SatyrnError, ValueError):
 
 
 class MissingDrafterPath(ConfigurationError):
-    """DFlash ON has no usable drafter path."""
+    """A required drafter path is missing or a supplied path is blank."""
 
 
 class DFlashUnavailable(SatyrnError):

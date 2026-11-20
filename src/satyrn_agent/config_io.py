@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 _CONFIG_FIELDS = {"dflash", "drafter_path", "draft_tokens", "sampling", "think_budget"}
 _SAMPLING_FIELDS = {"temperature", "top_k", "top_p", "min_p"}
 _DFLASH_MODES = {"auto", "on", "off"}
+_REQUIRED_DRAFTER_MESSAGE = "drafter_path is required and must be non-empty when dflash is on"
 _THINK_BUDGET_FIELDS = {"max_tokens", "bias", "close", "until_first_write"}
 _THINK_CLOSE_MODES = {"bias", "force"}
 
@@ -66,14 +67,10 @@ def _document(value: object) -> ConfigDocument:
     if path is not None and not isinstance(path, str):
         raise TypeError("drafter_path must be a string or None")
     if isinstance(path, str) and not path.strip():
-        message = (
-            "drafter_path is required and must be non-empty when dflash is on"
-            if value.get("dflash") == "on"
-            else "drafter_path must be non-empty"
-        )
+        message = _REQUIRED_DRAFTER_MESSAGE if value.get("dflash") == "on" else "drafter_path must be non-empty"
         raise MissingDrafterPath(message)
     if value.get("dflash") == "on" and path is None:
-        raise MissingDrafterPath("drafter_path is required and must be non-empty when dflash is on")
+        raise MissingDrafterPath(_REQUIRED_DRAFTER_MESSAGE)
     if "sampling" in value:
         _sampling(value["sampling"])
     if (budget := value.get("think_budget")) is not None:

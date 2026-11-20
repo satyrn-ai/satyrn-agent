@@ -77,7 +77,7 @@ def _resolve_path(value: object, project_dir: Path) -> object:
     if not isinstance(value, str):
         return value
     if not value.strip():
-        return ""
+        return value
     path = Path(value).expanduser()
     return str(path if path.is_absolute() else project_dir / path)
 
