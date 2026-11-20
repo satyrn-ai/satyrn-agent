@@ -91,6 +91,7 @@ def test_external_full_config_converts_modes_paths_and_values() -> None:
         ({"dflash": "on"}, ConfigurationError, "drafter_path"),
         ({"dflash": "on", "drafter_path": ""}, ConfigurationError, "non-empty"),
         ({"drafter_path": ""}, ConfigurationError, "drafter_path must be non-empty"),
+        ({"drafter_path": "   "}, ConfigurationError, "drafter_path must be non-empty"),
         ({"sampling": {"temperature": True}}, TypeError, "temperature"),
         ({"sampling": {"temperature": 10**1000}}, ConfigurationError, "finite"),
         ({"draft_tokens": 1.5}, TypeError, "draft_tokens"),
