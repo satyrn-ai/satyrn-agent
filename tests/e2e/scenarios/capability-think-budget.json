@@ -31,7 +31,7 @@
           258,
           258
         ],
-        "native_position": 512,
+        "native_position": 536,
         "rng": 12793040940332582595,
         "metrics": {
           "committed_blocks": 3,
@@ -42,13 +42,13 @@
         },
         "metadata": [
           {
-            "position": 509,
+            "position": 533,
             "think_tokens": 0,
             "sampled_tokens": [],
             "parser_state": "SEARCH"
           },
           {
-            "position": 510,
+            "position": 534,
             "think_tokens": 1,
             "sampled_tokens": [
               11
@@ -56,7 +56,7 @@
             "parser_state": "SEARCH"
           },
           {
-            "position": 511,
+            "position": 535,
             "think_tokens": 2,
             "sampled_tokens": [
               11,
