@@ -206,7 +206,7 @@ wheels = [
 [[package]]
 name = "ds4py"
 version = "0.1.0"
-source = { git = "https://github.com/rochecompaan/ds4-py.git?rev=6406374872065cc167b7bac79128a90daba096b3#6406374872065cc167b7bac79128a90daba096b3" }
+source = { git = "https://github.com/rochecompaan/ds4-py.git?rev=7d80c7c62a36d536521c657fe15d6b4aca28e1dd#7d80c7c62a36d536521c657fe15d6b4aca28e1dd" }
 dependencies = [
     { name = "anyio" },
     { name = "typing-extensions" },
@@ -1037,7 +1037,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ds4py", extras = ["agent"], git = "https://github.com/rochecompaan/ds4-py.git?rev=6406374872065cc167b7bac79128a90daba096b3" },
+    { name = "ds4py", extras = ["agent"], git = "https://github.com/rochecompaan/ds4-py.git?rev=7d80c7c62a36d536521c657fe15d6b4aca28e1dd" },
     { name = "pydantic-ai-slim", specifier = "==2.59.0" },
     { name = "typing-extensions", specifier = ">=4.16.0,<5" },
 ]
