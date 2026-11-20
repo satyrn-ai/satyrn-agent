@@ -142,6 +142,15 @@ def test_collection_constraints_are_enforced(tmp_path: Path, field: str) -> None
         load_scenario(write_document(tmp_path / f"{field}.json", document))
 
 
+@pytest.mark.parametrize("drafter_path", ["", "   "])
+def test_empty_drafter_is_rejected_by_scenario_schema(tmp_path: Path, drafter_path: str) -> None:
+    document = valid_document()
+    document["config"] = {"dflash": "auto", "drafter_path": drafter_path}
+
+    with pytest.raises(ValueError, match="scenario does not match"):
+        load_scenario(write_document(tmp_path / "empty-drafter.json", document))
+
+
 def test_on_without_drafter_is_rejected_by_scenario_schema(tmp_path: Path) -> None:
     document = valid_document()
     document["config"] = {"dflash": "on"}
