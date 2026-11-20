@@ -28,7 +28,7 @@ series in addition to the test suite.
 ## Agent package
 
 The package uses the ds4-py companion APIs at commit
-`95d52cbb9f189c9a940e777e9fab6baa15eac622` with the `agent` extra. Installing it registers eight
+`6406374872065cc167b7bac79128a90daba096b3` with the `agent` extra. Installing it registers eight
 optional bindings through `ds4py.bindings`. Rebuild the ds4 ABI manifest after
 installing or updating the package so the new probes are recorded.
 
