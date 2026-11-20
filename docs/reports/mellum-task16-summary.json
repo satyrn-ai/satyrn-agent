@@ -3172,6 +3172,20 @@
     "resident_identical": true,
     "streamed_identical": true,
     "resident_equals_streamed": true,
-    "note": "q8, context 32768, stream-bytes 6442450944 (6 GiB); greedy ids"
+    "resident_slots": 0,
+    "streamed_slots": 979,
+    "current_tree": "8b8ef87a",
+    "note": "q8, context 32768, stream-bytes 6442450944 (6 GiB); greedy ids; rerun on the .inc series"
+  },
+  "mxfp4_resident_streamed_parity": {
+    "runs_per_mode": 3,
+    "tokens_compared": 512,
+    "resident_identical": true,
+    "streamed_identical": true,
+    "resident_equals_streamed": true,
+    "resident_slots": 0,
+    "streamed_slots": 652,
+    "current_tree": "8b8ef87a",
+    "note": "mxfp4, context 32768, stream-bytes 2147483648 (2 GiB); greedy ids; rerun on the .inc series"
   }
 }

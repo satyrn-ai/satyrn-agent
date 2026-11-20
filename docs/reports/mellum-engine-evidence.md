@@ -106,6 +106,10 @@ prompt's SHA-256 is `f3b0e01b…6806`. Resident ids agree across all three runs,
 three, and resident equals streamed at all 512 positions. Raw runs and ids are in
 `mellum-task16-summary.json`.
 
+MXFP4 was rerun on the `.inc` tree `8b8ef87a`: three resident and three streamed 512-token runs, resident ids
+agree 3/3, streamed ids agree 3/3, and resident equals streamed at all 512 positions. The streamed runs use 652
+slots at 2 GiB; the summary records them in `mxfp4_resident_streamed_parity`.
+
 ## Per-prefix acceptance on the published Q8 model
 
 Each prefix was rebuilt from the pinned upstream plus `patches/common` and patches `0001..N` in its own clone,
