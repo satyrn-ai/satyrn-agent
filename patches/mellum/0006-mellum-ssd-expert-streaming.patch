@@ -1,4 +1,4 @@
-From 26081c49667763f3a2240f8ac51ec3c1fc6b3be3 Mon Sep 17 00:00:00 2001
+From f2c40f41c3390026d10fa46a4d329de1f30edfca Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:32 -0500
 Subject: [PATCH 6/6] mellum: ssd expert streaming
@@ -170,7 +170,7 @@ index 13293ecb..e0fda632 100644
 +ifeq ($(UNAME_S),Darwin)
 +endif
 diff --git a/ds4.c b/ds4.c
-index 7906cadd..bea85320 100644
+index 4ac64d5e..2294f925 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -42,6 +42,20 @@
@@ -251,7 +251,7 @@ index 7906cadd..bea85320 100644
      free(g->host_logits);
      memset(g, 0, sizeof(*g));
  }
-@@ -72032,7 +72082,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -72306,7 +72356,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
          if (!backend_ok || opt->tp.role != DS4_TP_NONE || opt->cuda_tensor_parallel ||
              (gpu_cfg && gpu_cfg->n_gpus > 1) ||
              opt->distributed.role != DS4_DISTRIBUTED_NONE || load_slice ||
@@ -261,7 +261,7 @@ index 7906cadd..bea85320 100644
              (opt->mtp_path && opt->mtp_path[0])) {
              fprintf(stderr, "ds4: %s requires Metal or single-GPU CUDA (or --cpu --first-token-test); "
                              "tensor parallelism, pipeline execution, SSD streaming, DSpark, "
-@@ -72744,12 +72795,32 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -73018,12 +73069,32 @@ static int ds4_engine_open_internal(ds4_engine **out,
                  e->dspark_confidence_threshold = 0.4f;
          }
  #endif
@@ -296,7 +296,7 @@ index 7906cadd..bea85320 100644
              ds4_engine_close(e);
              *out = NULL;
              return 1;
-@@ -72898,7 +72969,33 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -73172,7 +73243,33 @@ static int ds4_engine_open_internal(ds4_engine **out,
                  }
              }
          }
@@ -330,7 +330,7 @@ index 7906cadd..bea85320 100644
  #if !defined(__APPLE__) && !defined(DS4_ROCM_BUILD)
          if (e->backend == DS4_BACKEND_CUDA &&
              !load_slice && !tp_shard && !e->ssd_streaming && !ds4_model_is_qwen4()) {
-@@ -72936,6 +73033,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
+@@ -73210,6 +73307,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
              bool spans_ok = false;
              if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_DEEPSEEK41) {
                  spans_ok = weights_model_map_decode_static_spans(&e->weights, true, true, &spans);
@@ -339,7 +339,7 @@ index 7906cadd..bea85320 100644
              } else if (load_slice) {
                  if (e->ssd_streaming_static_decode_map) {
                      spans_ok = weights_model_map_decode_runtime_slice_spans(
-@@ -74238,6 +74337,14 @@ bool ds4_engine_is_deepseek41(ds4_engine *e) {
+@@ -74512,6 +74611,14 @@ bool ds4_engine_is_deepseek41(ds4_engine *e) {
  
  void ds4_engine_close(ds4_engine *e) {
      if (!e) return;
@@ -354,7 +354,7 @@ index 7906cadd..bea85320 100644
      ds4_engine_tp_unbind(e);
  #if !defined(DS4_NO_GPU) && !defined(__APPLE__) && !defined(DS4_ROCM_BUILD)
      /* Built at open but never bound. */
-@@ -75104,6 +75211,11 @@ void ds4_session_set_cancel(ds4_session *s, ds4_session_cancel_fn fn, void *ud)
+@@ -75378,6 +75485,11 @@ void ds4_session_set_cancel(ds4_session *s, ds4_session_cancel_fn fn, void *ud)
      if (!s) return;
      s->cancel = fn;
      s->cancel_ud = ud;
@@ -366,7 +366,7 @@ index 7906cadd..bea85320 100644
  }
  
  static bool ds4_session_cancelled(ds4_session *s) {
-@@ -76961,12 +77073,23 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
+@@ -77235,12 +77347,23 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
              }
              uint32_t chunk = (uint32_t)(prompt->len - i);
              if (chunk > s->qwen4_graph.cap_tokens) chunk = s->qwen4_graph.cap_tokens;
@@ -483,7 +483,7 @@ index 7c1b1e20..a3654b7f 100644
          ds4_gpu_tensor *out, const ds4_gpu_tensor *x, ds4_gpu_tensor *logits,
          ds4_gpu_tensor *selected, ds4_gpu_tensor *weights, ds4_gpu_tensor *mid, ds4_gpu_tensor *part,
 diff --git a/ds4_mellum_graph.inc b/ds4_mellum_graph.inc
-index 35fbb287..aa032921 100644
+index e19c93e5..f903eccd 100644
 --- a/ds4_mellum_graph.inc
 +++ b/ds4_mellum_graph.inc
 @@ -24,12 +24,30 @@ static uint32_t mellum_tiled_min_rows(const ds4_qwen4_gpu_graph *g) {
@@ -811,7 +811,7 @@ index 35fbb287..aa032921 100644
      const uint32_t pos0 = g->pos, n_layer = DS4_N_LAYER, E = DS4_N_EMBD, V = DS4_N_VOCAB;
      const uint32_t q_dim = DS4_N_HEAD * DS4_N_HEAD_DIM, kv_dim = DS4_N_HEAD_KV * DS4_N_HEAD_DIM;
      const uint32_t qk_dim = q_dim + kv_dim;
-@@ -385,6 +626,77 @@ static bool mellum_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+@@ -385,4 +626,75 @@ static bool mellum_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
  #endif
  }
  
@@ -887,8 +887,6 @@ index 35fbb287..aa032921 100644
 +}
 +
  
- /* host side: embedding rows tiled into R and the PLE n-gram gather */
- static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds4_weights *w,
 diff --git a/ds4_mellum_graph_alloc.inc b/ds4_mellum_graph_alloc.inc
 index f9c09920..c337610b 100644
 --- a/ds4_mellum_graph_alloc.inc

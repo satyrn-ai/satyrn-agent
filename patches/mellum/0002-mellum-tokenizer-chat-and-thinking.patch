@@ -1,4 +1,4 @@
-From 23b5ef34127aceabc5b7408a96394d6cc4e6a7c2 Mon Sep 17 00:00:00 2001
+From 67540d8c282a775ffac1660d5f8aeb0fbf04814a Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:23 -0500
 Subject: [PATCH 2/6] mellum: tokenizer, chat and thinking

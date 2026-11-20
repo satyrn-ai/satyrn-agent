@@ -12,19 +12,19 @@ blob already in the Hugging Face cache. The existing file in `~/models` was not 
 
 ## Patch discipline checkpoint
 
-Six patches export from commits `7d25b709`..`26081c49` (the current `From` headers), each exactly its own
+Six patches export from commits `eb8d34b2`..`f2c40f41` (the current `From` headers), each exactly its own
 delta, authored `pauleveritt <pauleveritt@me.com>`, with the three required trailers. Applying them in order
-reconstructs tree `8b8ef87a` from a pristine clone, and `ds4-check --model mellum --build` passes. The
+reconstructs tree `ca243153` from a pristine clone, and `ds4-check --model mellum --build` passes. The
 per-prefix table below is authoritative for the current export; older ledger entries that name `cd3911c3`,
-`3130743c…` or `5e05d49a` describe superseded exports. Re-verified 2026-11-20 by materializing each prefix from
-a pristine clone of the pin plus `patches/common` and patches `0001..N`: `d607f0f0`, `9974c264`, `3784419c`,
-`a761e859`, `1808b824`, `8b8ef87a`.
+`3130743c…`, `5e05d49a` or `8b8ef87a` describe superseded exports. Re-verified 2026-11-20 by materializing each prefix from
+a pristine clone of the pin plus `patches/common` and patches `0001..N`: `d607f0f0`, `9974c264`, `dc4d8de4`,
+`e7b75728`, `4fb50372`, `ca243153`.
 
 The series now uses the reference's `.inc` layout, per Koudai's ruling: 0001 adds `ds4_mellum_config.inc` and
 `ds4_mellum_plan.inc`, 0002 adds `ds4_mellum_tokenizer.inc` (and keeps `ds4_mellum_unicode.inc`), 0003 adds
 `ds4_mellum_graph_alloc.inc`, `ds4_mellum_graph.inc` and `ds4_mellum_test_hooks.inc`, and 0004–0006 extend the
-graph and hook files. About 1,700 lines moved out of `ds4.c`; the resulting patch file lists match the spec's §4
-ledger.
+graph and hook files. About 1,700 lines moved out of `ds4.c`; `ds4_mellum_graph.inc` stays Mellum-only and the
+shared Qwen4 graph functions stay in `ds4.c`, matching `d2d9338`. The patch file lists match the spec's §4 ledger.
 
 ## 64 greedy token ids match the fork (0003), historical
 
@@ -99,7 +99,7 @@ The MXFP4 file verifies: sha256 `cf09584a…8166`, 7,029,537,056 bytes. These ar
 ## SSD streaming (0006) on the exported artifact
 
 Tree `ece0d5fe`, context 32768, 512 greedy tokens, three resident and three streamed processes on Q8_0. The
-current 0006 tree is `8b8ef87a`; its only deltas from `ece0d5fe` are the reference `.inc` relocation, removing
+current 0006 tree is `ca243153`; its only deltas from `ece0d5fe` are the reference `.inc` relocation, removing
 duplicate host-contract test lines from `tests/test_mellum_config.c`, and correcting the oracle-script header, so
 the engine source is unchanged. The
 prompt's SHA-256 is `f3b0e01b…6806`. Resident ids agree across all three runs, streamed ids agree across all
@@ -120,15 +120,15 @@ then built and tested. Model: the SHA-verified Q8_0 file (`69e0ac02…6841f`, 12
 |---|---|---:|---:|---|
 | 0001 | `d607f0f0` | ok | target absent | real-model config: keys validated, every tensor bound; a drafter path refused by name |
 | 0002 | `9974c264` | ok | target absent | tokenizer with the real model: 30/30 ids equal the reference encode |
-| 0003 | `3784419c` | ok | 509 | `ds4_test --mellum-rewind`: OK |
-| 0004 | `a761e859` | ok | 662 | `make test-mellum-fastpath`: 45/45 |
-| 0005 | `1808b824` | ok | 662 | MXFP4 config accepted; mixtures refused by name |
-| 0006 | `8b8ef87a` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
+| 0003 | `dc4d8de4` | ok | 509 | `ds4_test --mellum-rewind`: OK |
+| 0004 | `e7b75728` | ok | 662 | `make test-mellum-fastpath`: 45/45 |
+| 0005 | `4fb50372` | ok | 662 | MXFP4 config accepted; mixtures refused by name |
+| 0006 | `ca243153` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
 
 The check counts belong to their prefix: 0003 is 509, 0004 and 0005 are 662, 0006 is 992. `ds4-check --build`
 links `libds4` only and never compiles the test sources, which is why each prefix above was also built and run
 as a suite. The table was re-run after the `.inc` relocation, not carried over from the inline export. The six
-patches applied in order reconstruct to tree `8b8ef87a` from a pristine clone (`ds4-check --model mellum --build`).
+patches applied in order reconstruct to tree `ca243153` from a pristine clone (`ds4-check --model mellum --build`).
 
 ## Oracle against an immutable `d2d9338` build
 

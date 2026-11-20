@@ -1,4 +1,4 @@
-From d845b040e7e7b5bdf3ba7299922efcd2b3fd6082 Mon Sep 17 00:00:00 2001
+From f80d5117efdfe1234c1320d6b65885cb76e91116 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:28 -0500
 Subject: [PATCH 4/6] mellum: optimized q8 prefill and decode
@@ -82,7 +82,7 @@ index 149d57cc..63cd6bae 100644
  test-mellum: tests/test_mellum_config tests/test_mellum_tokenizer
  	./tests/test_mellum_config
 diff --git a/ds4.c b/ds4.c
-index 077fe104..47062666 100644
+index 320a74c3..790d1564 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -58852,6 +58852,10 @@ typedef struct ds4_qwen4_gpu_graph {
@@ -191,7 +191,7 @@ index a3c25c38..293958cf 100644
  #ifdef __cplusplus
  }
 diff --git a/ds4_mellum_graph.inc b/ds4_mellum_graph.inc
-index bd92ab95..2b7ce255 100644
+index 8f20f215..40e87431 100644
 --- a/ds4_mellum_graph.inc
 +++ b/ds4_mellum_graph.inc
 @@ -1,15 +1,35 @@

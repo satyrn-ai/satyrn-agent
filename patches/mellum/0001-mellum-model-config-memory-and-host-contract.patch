@@ -1,4 +1,4 @@
-From 7d25b7094f877e73704f7af79f29bec785ca4031 Mon Sep 17 00:00:00 2001
+From eb8d34b20c46912168ff0395cf910f8735c6af52 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:21 -0500
 Subject: [PATCH 1/6] mellum: model config, memory and host contract

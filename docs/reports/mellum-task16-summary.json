@@ -2,7 +2,7 @@
   "context": 32768,
   "cwd": "/private/tmp/mellum-task16-final-check/mellum",
   "engine_tree": "ece0d5fe",
-  "engine_tree_note": "Raw runs at ece0d5fe. The current .inc-layout export is tree 8b8ef87a; its engine source is unchanged apart from the .inc relocation and test/header cleanup.",
+  "engine_tree_note": "Raw runs at ece0d5fe. The current .inc-layout export is tree ca243153; its engine source is unchanged apart from the .inc relocation and test/header cleanup.",
   "generated_tokens": 512,
   "hardware": "Apple M5 Max",
   "memory_bytes": 137438953472,
@@ -3174,7 +3174,7 @@
     "resident_equals_streamed": true,
     "resident_slots": 0,
     "streamed_slots": 979,
-    "current_tree": "8b8ef87a",
+    "current_tree": "ca243153",
     "note": "q8, context 32768, stream-bytes 6442450944 (6 GiB); greedy ids; rerun on the .inc series"
   },
   "mxfp4_resident_streamed_parity": {
@@ -3185,7 +3185,7 @@
     "resident_equals_streamed": true,
     "resident_slots": 0,
     "streamed_slots": 652,
-    "current_tree": "8b8ef87a",
+    "current_tree": "ca243153",
     "note": "mxfp4, context 32768, stream-bytes 2147483648 (2 GiB); greedy ids; rerun on the .inc series"
   }
 }

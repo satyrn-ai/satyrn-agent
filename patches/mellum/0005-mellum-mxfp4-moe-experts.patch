@@ -1,4 +1,4 @@
-From ae4547685a5e410eaed84773a601cd84450f1a9f Mon Sep 17 00:00:00 2001
+From 6b88c59af2e3b2af36a08ed4f7656e33980e34d3 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:30 -0500
 Subject: [PATCH 5/6] mellum: mxfp4 moe experts
@@ -36,7 +36,7 @@ index 63cd6bae..13293ecb 100644
  	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))
 +
 diff --git a/ds4.c b/ds4.c
-index 47062666..7906cadd 100644
+index 790d1564..4ac64d5e 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -5703,8 +5703,22 @@ static void weights_validate_qwen4_layout(
@@ -129,7 +129,7 @@ index 87374393..3648f5c2 100644
  
      config_expect_u32("mellum.attention.sliding_window", required_u32(m, "mellum.attention.sliding_window"), 1024u);
 diff --git a/ds4_mellum_graph.inc b/ds4_mellum_graph.inc
-index 2b7ce255..35fbb287 100644
+index 40e87431..e19c93e5 100644
 --- a/ds4_mellum_graph.inc
 +++ b/ds4_mellum_graph.inc
 @@ -33,9 +33,10 @@ static bool mellum_graph_moe(ds4_qwen4_gpu_graph *g, const ds4_model *m, const d
