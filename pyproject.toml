@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Downstream Satyrn agent and ds4 patch tooling"
 requires-python = ">=3.14"
 dependencies = [
-  "ds4py[agent] @ git+https://github.com/rochecompaan/ds4-py.git@95d52cbb9f189c9a940e777e9fab6baa15eac622",
+  "ds4py[agent] @ git+https://github.com/rochecompaan/ds4-py.git@6406374872065cc167b7bac79128a90daba096b3",
   "pydantic-ai-slim==2.59.0",
   "typing-extensions>=4.16.0,<5",
 ]

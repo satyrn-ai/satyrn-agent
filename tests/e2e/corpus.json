@@ -112,7 +112,7 @@
       "prompt": "Call the weather tool for Tokyo, then stop after the tool call.",
       "seed": 3,
       "temperature": 0.0,
-      "max_tokens": 64,
+      "max_tokens": 128,
       "expected_reason": "tool_call_complete",
       "branches": [
         "tentative-parser-state",
@@ -140,7 +140,7 @@
       "seed": 13,
       "temperature": 0.0,
       "max_tokens": 2,
-      "ctx": 135,
+      "ctx": 143,
       "expected_reason": "context_exhausted",
       "branches": [
         "ordinary-anchor-eval",
@@ -152,7 +152,7 @@
       "prompt": "Output only this malformed tool stanza, character for character, without explanation: <tool_call>{\"name\":\"broken\",\"arguments\":{invalid}}</tool_call>",
       "seed": 17,
       "temperature": 0.0,
-      "max_tokens": 64,
+      "max_tokens": 8,
       "think": 0,
       "expected_reason": "parser_error",
       "branches": [
