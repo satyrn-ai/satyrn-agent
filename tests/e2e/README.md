@@ -78,9 +78,7 @@ with a mock, a coverage exclusion, or a post-round skip.
 ## Run
 
 ```bash
-devenv shell -- uv run --frozen pytest tests/abnormal tests/e2e/live \
-  --cov=satyrn_agent --cov-branch --cov-report=term-missing \
-  --cov-fail-under=100
+devenv shell -- uv run --frozen pytest tests/abnormal tests/e2e/live
 ```
 
 The real acceptance gate requires this real-engine run. The model-free 100%
