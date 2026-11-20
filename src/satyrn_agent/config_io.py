@@ -65,9 +65,14 @@ def _document(value: object) -> ConfigDocument:
     path = value.get("drafter_path")
     if path is not None and not isinstance(path, str):
         raise TypeError("drafter_path must be a string or None")
-    if path == "" and value.get("dflash") != "on":
-        raise MissingDrafterPath("drafter_path must be non-empty")
-    if value.get("dflash") == "on" and (path is None or path == ""):
+    if isinstance(path, str) and not path.strip():
+        message = (
+            "drafter_path is required and must be non-empty when dflash is on"
+            if value.get("dflash") == "on"
+            else "drafter_path must be non-empty"
+        )
+        raise MissingDrafterPath(message)
+    if value.get("dflash") == "on" and path is None:
         raise MissingDrafterPath("drafter_path is required and must be non-empty when dflash is on")
     if "sampling" in value:
         _sampling(value["sampling"])
