@@ -1,4 +1,4 @@
-From d05d8c53755e520c6f72407dc2e19ea23e8b697d Mon Sep 17 00:00:00 2001
+From ae4547685a5e410eaed84773a601cd84450f1a9f Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:30 -0500
 Subject: [PATCH 5/6] mellum: mxfp4 moe experts
@@ -12,15 +12,18 @@ Retire-when: upstream supports JetBrains MXFP4_MOE
 Carried-commits: 0adf6bafb1f17e642124b60b183575864f118629 989dc7c8dada668500773328c00d4e851805a842 f6d49a5d57b8566809d53412ac470bd897dd811b 362dca64275b54cd9f6694441618f411fdabd1d5 24175f3845987c0761d4186ec66be7c7735a3f4b 37ccfd165c7d82afd4ef1719c5f0a1acbdac32fd ed405beb79cee502b1c3cf2ce28bd3657118795c 4fa5070983da883b42fc08eb0f0670f4aa4b730a
 ---
  Makefile                            |   1 +
- ds4.c                               |  41 ++--
+ ds4.c                               |  26 ++-
  ds4_gpu.h                           |   5 +-
+ ds4_mellum_config.inc               |   2 +-
+ ds4_mellum_graph.inc                |   9 +-
+ ds4_mellum_test_hooks.inc           |   4 +-
  ds4_metal.m                         |   2 +-
  tests/ds4_test.c                    | 282 ++++++++++++++++++++++++----
  tests/mellum_heldout_unicode.tokens |  15 ++
  tests/mellum_moe_ref.inc            |  87 +++++++--
  tests/test_mellum_config.c          |   3 +
  tests/test_mellum_kernels.c         |   2 +-
- 9 files changed, 373 insertions(+), 65 deletions(-)
+ 12 files changed, 373 insertions(+), 65 deletions(-)
  create mode 100644 tests/mellum_heldout_unicode.tokens
 
 diff --git a/Makefile b/Makefile
@@ -33,7 +36,7 @@ index 63cd6bae..13293ecb 100644
  	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))
 +
 diff --git a/ds4.c b/ds4.c
-index 8fc7424e..9c4d91b7 100644
+index 47062666..7906cadd 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -5703,8 +5703,22 @@ static void weights_validate_qwen4_layout(
@@ -89,56 +92,6 @@ index 8fc7424e..9c4d91b7 100644
      }
  }
  
-@@ -7337,7 +7353,7 @@ static void config_validate_mellum_model(const ds4_model *m) {
-     g_ds4_shape.n_ff_exp = required_u32(m, "mellum.expert_feed_forward_length");
-     config_mellum_range("mellum.expert_feed_forward_length", g_ds4_shape.n_ff_exp, 32u, DS4_MAX_FF_EXP);
-     if (g_ds4_shape.n_ff_exp % 32u) {
--        config_refuse_mellum_key("mellum.expert_feed_forward_length", "must be a multiple of 32 (Q8_0 blocks)");
-+        config_refuse_mellum_key("mellum.expert_feed_forward_length", "must be a multiple of 32 (32-value quantization blocks)");
-     }
- 
-     config_expect_u32("mellum.attention.sliding_window", required_u32(m, "mellum.attention.sliding_window"), 1024u);
-@@ -60543,9 +60559,10 @@ static bool mellum_graph_moe(ds4_qwen4_gpu_graph *g, const ds4_model *m, const d
-     return false;
- #else
-     if (!g || !m || !l || T == 0 || T > g->cap_tokens || !l->ffn_gate_inp || !l->ffn_gate_exps || !l->ffn_up_exps ||
--        !l->ffn_down_exps || l->ffn_gate_inp->type != DS4_TENSOR_F32 || l->ffn_gate_exps->type != DS4_TENSOR_Q8_0 ||
--        l->ffn_up_exps->type != DS4_TENSOR_Q8_0 || l->ffn_down_exps->type != DS4_TENSOR_Q8_0) {
--        return false;
-+        !l->ffn_down_exps || l->ffn_gate_inp->type != DS4_TENSOR_F32 ||
-+        (l->ffn_gate_exps->type != DS4_TENSOR_Q8_0 && l->ffn_gate_exps->type != DS4_TENSOR_MXFP4) ||
-+        l->ffn_up_exps->type != l->ffn_gate_exps->type || l->ffn_down_exps->type != l->ffn_gate_exps->type) {
-+        return false;   /* S6: Q8_0 or MXFP4 experts, one type for gate, up and down */
-     }
-     ds4_gpu_mellum_moe p;
-     memset(&p, 0, sizeof(p));
-@@ -60553,7 +60570,7 @@ static bool mellum_graph_moe(ds4_qwen4_gpu_graph *g, const ds4_model *m, const d
-     p.n_expert = DS4_N_EXPERT;
-     p.n_used = DS4_N_EXPERT_USED;
-     p.ff_dim = DS4_N_FF_EXP;
--    p.expert_type = DS4_TENSOR_Q8_0;
-+    p.expert_type = l->ffn_gate_exps->type;
-     p.router_offset = l->ffn_gate_inp->abs_offset;
-     p.gate_offset = l->ffn_gate_exps->abs_offset;
-     p.up_offset = l->ffn_up_exps->abs_offset;
-@@ -88988,7 +89005,8 @@ bool ds4_test_dspark_prefix_capture(ds4_engine *engine, const ds4_tokens *prompt
-  * through the layer struct mellum_graph_moe reads (so a test's reference does not share the driver's binding),
-  * and false if the layer has a shared-expert tensor. */
- bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void **map,
--                                 uint64_t *router, uint64_t *gate, uint64_t *up, uint64_t *down) {
-+                                 uint64_t *router, uint64_t *gate, uint64_t *up, uint64_t *down,
-+                                 uint32_t *expert_type) {
-     if (!engine || !ds4_model_is_mellum() || layer >= DS4_N_LAYER) return false;
-     const ds4_model *m = &engine->model;
-     const ds4_tensor *r = tensor_by_namef(m, "blk.%u.ffn_gate_inp.weight", layer);
-@@ -89004,6 +89022,7 @@ bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void
-     *gate = g->abs_offset;
-     *up = u->abs_offset;
-     *down = d->abs_offset;
-+    *expert_type = g->type;   /* S6: Q8_0 or MXFP4; the loader made gate, up and down agree */
-     return true;
- }
- 
 diff --git a/ds4_gpu.h b/ds4_gpu.h
 index 293958cf..7c1b1e20 100644
 --- a/ds4_gpu.h
@@ -162,6 +115,68 @@ index 293958cf..7c1b1e20 100644
      uint32_t pad0;
      uint64_t router_offset;
      uint64_t gate_offset;
+diff --git a/ds4_mellum_config.inc b/ds4_mellum_config.inc
+index 87374393..3648f5c2 100644
+--- a/ds4_mellum_config.inc
++++ b/ds4_mellum_config.inc
+@@ -64,7 +64,7 @@ static void config_validate_mellum_model(const ds4_model *m) {
+     g_ds4_shape.n_ff_exp = required_u32(m, "mellum.expert_feed_forward_length");
+     config_mellum_range("mellum.expert_feed_forward_length", g_ds4_shape.n_ff_exp, 32u, DS4_MAX_FF_EXP);
+     if (g_ds4_shape.n_ff_exp % 32u) {
+-        config_refuse_mellum_key("mellum.expert_feed_forward_length", "must be a multiple of 32 (Q8_0 blocks)");
++        config_refuse_mellum_key("mellum.expert_feed_forward_length", "must be a multiple of 32 (32-value quantization blocks)");
+     }
+ 
+     config_expect_u32("mellum.attention.sliding_window", required_u32(m, "mellum.attention.sliding_window"), 1024u);
+diff --git a/ds4_mellum_graph.inc b/ds4_mellum_graph.inc
+index 2b7ce255..35fbb287 100644
+--- a/ds4_mellum_graph.inc
++++ b/ds4_mellum_graph.inc
+@@ -33,9 +33,10 @@ static bool mellum_graph_moe(ds4_qwen4_gpu_graph *g, const ds4_model *m, const d
+     return false;
+ #else
+     if (!g || !m || !l || T == 0 || T > g->cap_tokens || !l->ffn_gate_inp || !l->ffn_gate_exps || !l->ffn_up_exps ||
+-        !l->ffn_down_exps || l->ffn_gate_inp->type != DS4_TENSOR_F32 || l->ffn_gate_exps->type != DS4_TENSOR_Q8_0 ||
+-        l->ffn_up_exps->type != DS4_TENSOR_Q8_0 || l->ffn_down_exps->type != DS4_TENSOR_Q8_0) {
+-        return false;
++        !l->ffn_down_exps || l->ffn_gate_inp->type != DS4_TENSOR_F32 ||
++        (l->ffn_gate_exps->type != DS4_TENSOR_Q8_0 && l->ffn_gate_exps->type != DS4_TENSOR_MXFP4) ||
++        l->ffn_up_exps->type != l->ffn_gate_exps->type || l->ffn_down_exps->type != l->ffn_gate_exps->type) {
++        return false;   /* S6: Q8_0 or MXFP4 experts, one type for gate, up and down */
+     }
+     ds4_gpu_mellum_moe p;
+     memset(&p, 0, sizeof(p));
+@@ -43,7 +44,7 @@ static bool mellum_graph_moe(ds4_qwen4_gpu_graph *g, const ds4_model *m, const d
+     p.n_expert = DS4_N_EXPERT;
+     p.n_used = DS4_N_EXPERT_USED;
+     p.ff_dim = DS4_N_FF_EXP;
+-    p.expert_type = DS4_TENSOR_Q8_0;
++    p.expert_type = l->ffn_gate_exps->type;
+     p.router_offset = l->ffn_gate_inp->abs_offset;
+     p.gate_offset = l->ffn_gate_exps->abs_offset;
+     p.up_offset = l->ffn_up_exps->abs_offset;
+diff --git a/ds4_mellum_test_hooks.inc b/ds4_mellum_test_hooks.inc
+index e3766364..fc2442c5 100644
+--- a/ds4_mellum_test_hooks.inc
++++ b/ds4_mellum_test_hooks.inc
+@@ -4,7 +4,8 @@
+  * through the layer struct mellum_graph_moe reads (so a test's reference does not share the driver's binding),
+  * and false if the layer has a shared-expert tensor. */
+ bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void **map,
+-                                 uint64_t *router, uint64_t *gate, uint64_t *up, uint64_t *down) {
++                                 uint64_t *router, uint64_t *gate, uint64_t *up, uint64_t *down,
++                                 uint32_t *expert_type) {
+     if (!engine || !ds4_model_is_mellum() || layer >= DS4_N_LAYER) return false;
+     const ds4_model *m = &engine->model;
+     const ds4_tensor *r = tensor_by_namef(m, "blk.%u.ffn_gate_inp.weight", layer);
+@@ -20,6 +21,7 @@ bool ds4_test_mellum_moe_weights(ds4_engine *engine, uint32_t layer, const void
+     *gate = g->abs_offset;
+     *up = u->abs_offset;
+     *down = d->abs_offset;
++    *expert_type = g->type;   /* S6: Q8_0 or MXFP4; the loader made gate, up and down agree */
+     return true;
+ }
+ 
 diff --git a/ds4_metal.m b/ds4_metal.m
 index 7f85d140..63238966 100644
 --- a/ds4_metal.m

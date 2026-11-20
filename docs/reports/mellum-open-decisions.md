@@ -2,23 +2,26 @@
 
 Status of the items that cannot be closed inside this worktree, written so they can be raised as they stand.
 
-## 1. Koudai: move the exact-prefill diagnostic and the fast-path target from 0003 to 0004?
+## 1. Exact-prefill diagnostic and fast-path target — resolved: they stay in 0004
 
-The spec's §4 table puts `DS4_MELLUM_EXACT_PREFILL` in patch 0003 and its §9 acceptance for 0003 runs
-`DS4_TEST_MELLUM_MODEL="$Q8" make test-mellum-fastpath`. We shipped both in 0004 instead, because:
+Koudai accepted the move on 2026-11-20; spec §4/§9 now put both in 0004. Remaining action: record the
+published-Q8 exact oracle on the 0003 tree (the 0003 graph is already exact, so the oracle runs there without
+the 0004 diagnostic).
+
+The spec's §4 table originally put `DS4_MELLUM_EXACT_PREFILL` in patch 0003 and its §9 acceptance for 0003 ran
+`DS4_TEST_MELLUM_MODEL="$Q8" make test-mellum-fastpath`. Both shipped in 0004 instead, because:
 
 - the flag exists to disable the tiled/batched thresholds that 0004 introduces (`73544c91`'s diff is written
   against them), so in 0003 it has nothing to disable;
 - `test-mellum-fastpath` is the 0004 target; running it at 0003 fails at "no rule to make target".
 
-Current state: 0003's acceptance is the kernel suite (509 checks at that point), the trace driver's
-untraced-versus-traced equality, the rewind cases and the 64-id comparison; 0004 carries the diagnostic, the
-fast-path target and the 45-check suite. The port's exact prefill is byte-equal to its decode at 2,200 tokens;
-the reference's diagnostic disables the same tiled thresholds, so exact-prefill comparisons are exact (see
-`mellum-engine-evidence.md`).
+0003's acceptance is the kernel suite (509 checks at that point), the trace driver's untraced-versus-traced
+equality, the rewind cases and the 64-id comparison; 0004 carries the diagnostic, the fast-path target and the
+45-check suite. The port's exact prefill is byte-equal to its decode at 2,200 tokens; the reference's diagnostic
+disables the same tiled thresholds, so exact-prefill comparisons are exact (see `mellum-engine-evidence.md`).
 
-**Question:** accept the move and amend §4/§9, or restore the flag and target to 0003 with the thresholds they
-disable? Recommendation: accept the move; the dependency order is real, not stylistic.
+**Ruling:** Koudai accepted the move on 2026-11-20; spec §4/§9 were amended in #26. The dependency order was
+real, not stylistic.
 
 ## 2. Koudai and Roché: PR #24 sequencing
 
@@ -43,15 +46,18 @@ per-machine Metal limit, planned bytes, peak, swap before/after and n, recorded 
 What is ready: the ported A/B/B/A runners and (with 0006) `tools/mellum_s4_measure` produce those fields; the
 acceptance procedure is Task 20.
 
-## 4. Open question for Koudai: inline `.inc` files or plain `ds4.c`?
+## 4. `.inc` files vs inline `ds4.c` — resolved: restore the reference layout
 
-Spec §4's ledger names `ds4_mellum_config.inc`, `ds4_mellum_plan.inc`, `ds4_mellum_graph.inc` and friends. This
-port puts Mellum's code directly in `ds4.c`, as the qwen35 series does, and carries only the generated Unicode
-table as a `.inc` file. That choice is not listed among the deviations.
+Koudai ruled on 2026-11-20: restore the reference's `ds4_mellum_*.inc` layout before Task 17. Done in this
+series: 0001 adds `config`/`plan`, 0002 adds `tokenizer`/`unicode`, 0003 adds `graph_alloc`/`graph`/`test_hooks`,
+and 0004–0006 extend the graph and hooks files. This moves about 1,700 lines out of `ds4.c` and matches the
+spec's §4 ledger.
 
-Keeping the reference's `.inc` files would shrink the `ds4.c` region the coming qwen35 rebase must resolve, allow a
-straight file-by-file diff against `d2d9338` (the closest thing to Koudai's byte-identity gate), and make later
-updates from the still-moving `ds4-mellum` cheaper. The cost is a larger series now.
+The reference's `.inc` layout shrinks the `ds4.c` region the coming qwen35 rebase must resolve, allows a
+file-by-file diff against `d2d9338` (the closest thing to Koudai's byte-identity gate), and makes later updates
+from the still-moving `ds4-mellum` cheaper. The series now carries `ds4_mellum_config.inc`,
+`ds4_mellum_plan.inc`, `ds4_mellum_tokenizer.inc`, `ds4_mellum_graph_alloc.inc`, `ds4_mellum_graph.inc` and
+`ds4_mellum_test_hooks.inc`; only `ds4_mellum_unicode.inc` and `ds4_mellum_stream.[ch]` were already separate.
 
 A second, concrete rebase surface is independent of the `.inc` choice: 0003 wraps
 `ds4_gpu_qwen4_attn_decode_tensor` / `ds4_gpu_qwen4_attn_decode_rows_tensor` in static `_impl(..., bool ungated)`

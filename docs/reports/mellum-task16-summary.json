@@ -2,6 +2,7 @@
   "context": 32768,
   "cwd": "/private/tmp/mellum-task16-final-check/mellum",
   "engine_tree": "ece0d5fe",
+  "engine_tree_note": "Raw runs at ece0d5fe. The current .inc-layout export is tree 8b8ef87a; its engine source is unchanged apart from the .inc relocation and test/header cleanup.",
   "generated_tokens": 512,
   "hardware": "Apple M5 Max",
   "memory_bytes": 137438953472,

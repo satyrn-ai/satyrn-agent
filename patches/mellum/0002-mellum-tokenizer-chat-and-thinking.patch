@@ -1,4 +1,4 @@
-From 6cd2f4d047c5a88a706bf06575c866d21aed7d74 Mon Sep 17 00:00:00 2001
+From 23b5ef34127aceabc5b7408a96394d6cc4e6a7c2 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:23 -0500
 Subject: [PATCH 2/6] mellum: tokenizer, chat and thinking
@@ -14,9 +14,10 @@ Retire-when: upstream renders and stops Mellum 2.1 chats
 Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7cc1be8309d630991fe b5f05300a54591f1922926286b31529228a84233 5cdf14cdf6ab26e5cd466347051bc1dcb34aab14 835c6b08c7c159784463796350809cc30bdd8539 d1a98ca532c2ee9981563719e9af474b2f778938 0df162041eab77ee0ec4a357a591f3fb1ba019db 81050b372233bf221a0b4179b2b01de6afc5e341 05cddb2bc6d96baae3b1a4da11afdab76108265c 2eda52f8d44c827314dc7e53ba88b2774f346873 88cb9ac20d32baf1252517c51631c20ea5d5009f d35666971b3471f3ab1099f273e3b2acecd2c454 77b6ac83919ae797c9af081d13b4d6b5e2a7062e c8f8198fc102f2e5c71c28b87dfae8ae5581e3fc aef990e90ecc5fc4d5ba5792cb3105f0a028b940 9710f5036c11a97099ab5b06d9ac472d64b07963 006983dca4974fd78d8414a03a816e78914249ce 19054eb5359565a6d6390c348e9a840ca365a527 6b377f20ac31c9401cc35d4b83d2fc0807494776 0d5f2e73e28e677cd45764a2ebc4fe910400515a ac8cf98501405c3c7abfde74cced4e2d55725bba cf63c43b1622cb0f43783a95e925a2d102dff0f8 4ba0969087986e1a8ebed4dc1b2695669210c4bb 1d8af568face2e403ea3073682c303f4de92c1a5
 ---
  Makefile                            |  18 +-
- ds4.c                               | 317 +++++++++-
+ ds4.c                               | 194 +++++-
  ds4.h                               |  16 +
  ds4_cli.c                           |  12 +
+ ds4_mellum_tokenizer.inc            | 126 ++++
  ds4_mellum_unicode.inc              | 903 ++++++++++++++++++++++++++++
  ds4_prompt_prefix.h                 |  18 +-
  tests/gen_mellum_chat_ids.py        | 257 ++++++++
@@ -27,7 +28,8 @@ Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7
  tests/mellum_tool_text.h            |  95 +++
  tests/test_mellum_config.c          | 471 +++++++++++++++
  tests/test_mellum_tokenizer.c       | 137 +++++
- 14 files changed, 3040 insertions(+), 32 deletions(-)
+ 15 files changed, 3043 insertions(+), 32 deletions(-)
+ create mode 100644 ds4_mellum_tokenizer.inc
  create mode 100644 ds4_mellum_unicode.inc
  create mode 100644 tests/gen_mellum_chat_ids.py
  create mode 100644 tests/gen_mellum_tokenizer_cases.py
@@ -38,7 +40,7 @@ Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7
  create mode 100644 tests/test_mellum_tokenizer.c
 
 diff --git a/Makefile b/Makefile
-index 108f27e..ffc0cb4 100644
+index 108f27e9..ffc0cb4f 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -746,7 +746,7 @@ test-qwen4-cuda: tests/test_qwen4_cuda
@@ -95,7 +97,7 @@ index 108f27e..ffc0cb4 100644
  	rm -f tests/test_web_recovery
  	rm -f tests/test_metal_ssd_experts
 diff --git a/ds4.c b/ds4.c
-index cb9cd1d..61e9c36 100644
+index 4b9ec77f..3491f440 100644
 --- a/ds4.c
 +++ b/ds4.c
 @@ -1041,6 +1041,11 @@ static bool ds4_model_is_mellum(void) {
@@ -110,7 +112,7 @@ index cb9cd1d..61e9c36 100644
  /* Mellum's attention pattern: three sliding-window layers, then one full
   * layer, i.e. layer il slides unless il % 4 == 3.  The validator checks this
   * rule against the GGUF's sliding_window_pattern array. */
-@@ -43599,6 +43604,10 @@ struct ds4_vocab {
+@@ -43285,6 +43290,10 @@ struct ds4_vocab {
      int im_start_id;
      int im_end_id;
      int endoftext_id;
@@ -121,10 +123,441 @@ index cb9cd1d..61e9c36 100644
      str_i32_table token_to_id;
      str_i32_table merge_rank;
  };
-@@ -44617,11 +44626,139 @@ static void bpe_tokenize_text_qwen35(const ds4_vocab *vocab, const char *text, t
+@@ -44303,11 +44312,16 @@ static void bpe_tokenize_text_qwen35(const ds4_vocab *vocab, const char *text, t
   * word (for example ">;\n").  Splitting those newlines separately changes the
   * token stream for code prompts and produces wrong long-context logits.
   */
++#include "ds4_mellum_tokenizer.inc"
+ static void bpe_tokenize_text(const ds4_vocab *vocab, const char *text, token_vec *out) {
+     if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
+         bpe_tokenize_text_glm4(vocab, text, out);
+         return;
+     }
++    if (ds4_model_is_mellum()) {
++        bpe_tokenize_text_mellum(vocab, text, out);
++        return;
++    }
+     if (ds4_model_is_qwen4()) {
+         bpe_tokenize_text_qwen35(vocab, text, out);
+         return;
+@@ -44399,7 +44413,7 @@ static int vocab_lookup_optional(const ds4_vocab *vocab, const char *text) {
+ 
+ /* Load token strings, special token ids, and merge ranks from GGUF metadata. */
+ 
+-static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
++static void vocab_load_ids(ds4_vocab *vocab, const ds4_model *model) {
+     memset(vocab, 0, sizeof(*vocab));
+ 
+     ds4_array_ref tokens;
+@@ -44509,7 +44523,63 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
+     vocab->dsml_id = vocab_lookup(vocab, "｜DSML｜");
+ }
+ 
++/* Mellum's ids 3-20 are the corpus markers (<filename>, <fim_*>, ...): in the
++ * file they are CONTROL, in a reply they are content.  A CONTROL token not named
++ * here is protocol (fail-closed): a host refuses it as an unexpected stop. */
++static const char *const MELLUM_MARKER_SPELLINGS[] = {
++    "<commit_before>", "<commit_after>", "<commit_msg>", "<empty_output>", "<filename>",
++    "<fim_prefix>", "<fim_middle>", "<fim_suffix>", "<fim_pad>", "<gh_stars>",
++    "<issue_start>", "<issue_comment>", "<issue_closed>",
++    "<jupyter_text>", "<jupyter_code>", "<jupyter_start>", "<jupyter_output>", "<reponame>",
++};
++
++static bool vocab_spelling_in(const ds4_str *s, const char *const *list, size_t n) {
++    for (size_t i = 0; i < n; i++) {
++        const size_t len = strlen(list[i]);
++        if (s->len == len && memcmp(s->ptr, list[i], len) == 0) return true;
++    }
++    return false;
++}
++
++/* Fill vocab->stop_class.  Other models keep their stops exactly: eos is EOS,
++ * <|endoftext|> (Qwen) is EOS-alt, GLM's role ids are protocol. */
++static void vocab_classify_stops(ds4_vocab *vocab, const ds4_model *model) {
++    vocab->stop_class = xcalloc((size_t)vocab->n_vocab, 1);
++    uint8_t *cls = vocab->stop_class;
++    if (ds4_model_is_mellum()) {
++        /* 2.1 classes by token_type: CONTROL (3) tokens are markers or protocol
++         * by spelling; 23, 24 and 29-32 are USER_DEFINED (4) and are none. */
++        ds4_array_ref types;
++        if (!model_get_array(model, "tokenizer.ggml.token_type", &types) ||
++            types.type != GGUF_VALUE_INT32 || types.len != (uint64_t)vocab->n_vocab) {
++            ds4_die("tokenizer.ggml.token_type must be an int32 array with one entry per token (Mellum stops)");
++        }
++        ds4_cursor tc = cursor_at(model, types.data_pos);
++        for (int i = 0; i < vocab->n_vocab; i++) {
++            int32_t type = 0;
++            if (!cursor_read(&tc, &type, sizeof(type))) ds4_die(tc.error);
++            if (type != 3) continue;
++            cls[i] = vocab_spelling_in(&vocab->token[i], MELLUM_MARKER_SPELLINGS,
++                                       sizeof(MELLUM_MARKER_SPELLINGS) / sizeof(MELLUM_MARKER_SPELLINGS[0]))
++                         ? DS4_STOP_MARKER : DS4_STOP_PROTOCOL;
++        }
++    } else if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
++        const int roles[4] = { vocab->system_id, vocab->user_id, vocab->assistant_id, vocab->observation_id };
++        for (int r = 0; r < 4; r++) {
++            if (roles[r] >= 0 && roles[r] < vocab->n_vocab) cls[roles[r]] = DS4_STOP_PROTOCOL;
++        }
++    }
++    if (vocab->endoftext_id >= 0 && vocab->endoftext_id < vocab->n_vocab) cls[vocab->endoftext_id] = DS4_STOP_EOS_ALT;
++    if (vocab->eos_id >= 0 && vocab->eos_id < vocab->n_vocab) cls[vocab->eos_id] = DS4_STOP_EOS;
++}
++
++static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
++    vocab_load_ids(vocab, model);
++    vocab_classify_stops(vocab, model);
++}
++
+ static void vocab_free(ds4_vocab *vocab) {
++    free(vocab->stop_class);
+     free(vocab->token);
+     table_free(&vocab->token_to_id);
+     table_free(&vocab->merge_rank);
+@@ -44562,7 +44632,8 @@ static void chat_push_think_prefix(const ds4_vocab *vocab,
+             token_vec_push(out, vocab->system_id);
+             bpe_tokenize_text(vocab, effort, out);
+         }
+-    } else if (think_mode == DS4_THINK_MAX) {
++    } else if (think_mode == DS4_THINK_MAX && !ds4_model_is_mellum()) {
++        /* DeepSeek's preamble; Mellum 2.1's template has no effort text */
+         bpe_tokenize_text(vocab, DS4_REASONING_EFFORT_MAX_PREFIX, out);
+     }
+ }
+@@ -44615,12 +44686,48 @@ static void qwen4_chat_system(const ds4_vocab *vocab, const char *system, ds4_th
+     qwen4_chat_close(vocab, out);
+ }
+ 
++/* Mellum 2.1's generation prompt: its template adds nothing after the
++ * assistant tag when thinking is on (the model writes <think> itself) and an
++ * empty think block when off.  Qwen's prefix opens <think> itself. */
++static void mellum_chat_assistant_prefix(const ds4_vocab *vocab, ds4_think_mode think_mode, token_vec *out) {
++    qwen4_chat_open(vocab, "assistant", out);
++    if (!ds4_think_mode_enabled(think_mode)) {
++        token_vec_push(out, vocab->think_start_id);
++        bpe_tokenize_text(vocab, "\n\n", out);
++        token_vec_push(out, vocab->think_end_id);
++        bpe_tokenize_text(vocab, "\n\n", out);
++    }
++}
++
++/* Mellum 2.1's system turn: the caller's text, or none.  Its template has no
++ * reasoning-effort instruction, which Qwen's system turn prepends. */
++static void tokenize_rendered_chat_vocab(const ds4_vocab *vocab, const char *text, token_vec *out);
++
++static void mellum_chat_system(const ds4_vocab *vocab, const char *system, token_vec *out) {
++    if (!system || !system[0]) return;
++    qwen4_chat_open(vocab, "system", out);
++    tokenize_rendered_chat_vocab(vocab, system, out);   /* as ds4_chat_append_message's system turn */
++    qwen4_chat_close(vocab, out);
++}
++
+ static void encode_chat_prompt(
+         const ds4_vocab *vocab,
+         const char      *system,
+         const char      *prompt,
+         ds4_think_mode   think_mode,
+         token_vec       *out) {
++    if (ds4_model_is_mellum()) {
++        if (vocab->im_start_id < 0 || vocab->im_end_id < 0 ||
++            vocab->think_start_id < 0 || vocab->think_end_id < 0) {
++            ds4_die("this tokenizer does not provide Mellum's chat markers");
++        }
++        mellum_chat_system(vocab, system, out);
++        qwen4_chat_open(vocab, "user", out);
++        bpe_tokenize_text(vocab, prompt, out);
++        qwen4_chat_close(vocab, out);
++        mellum_chat_assistant_prefix(vocab, think_mode, out);
++        return;
++    }
+     if (ds4_model_is_qwen4()) {
+         if (vocab->im_start_id < 0 || vocab->im_end_id < 0 ||
+             vocab->think_start_id < 0 || vocab->think_end_id < 0) {
+@@ -44813,6 +44920,14 @@ static void bpe_tokenize_tool_response_text(ds4_vocab *vocab, const char *conten
+     bpe_tokenize_wrapped_payload_text(vocab, content, "</tool_response>", out);
+ }
+ 
++/* A qwen4 tool message's <tool_response> wrapper.  Mellum's template text encodes it as the
++ * vocabulary's added tokens 31 and 32, which plain BPE text would not give; Flash Next keeps
++ * the text form it always had. */
++static void qwen4_tool_response_tag(ds4_vocab *vocab, const char *tag, token_vec *out) {
++    if (ds4_model_is_mellum()) tokenize_rendered_chat_vocab(vocab, tag, out);
++    else bpe_tokenize_text(vocab, tag, out);
++}
++
+ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role, const char *content) {
+     ds4_vocab *vocab = &e->vocab;
+     if (!role) role = "user";
+@@ -44821,14 +44936,17 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
+     if (ds4_model_is_qwen4()) {
+         if (!strcmp(role, "tool") || !strcmp(role, "function")) {
+             qwen4_chat_open(vocab, "user", tokens);
+-            bpe_tokenize_text(vocab, "<tool_response>\n", tokens);
++            qwen4_tool_response_tag(vocab, "<tool_response>\n", tokens);
+             bpe_tokenize_tool_response_text(vocab, content, tokens);
+-            bpe_tokenize_text(vocab, "\n</tool_response>", tokens);
++            qwen4_tool_response_tag(vocab, "\n</tool_response>", tokens);
+         } else {
+             const char *name = (!strcmp(role, "system") || !strcmp(role, "developer")) ? "system" :
+                                !strcmp(role, "assistant") ? "assistant" : "user";
+             qwen4_chat_open(vocab, name, tokens);
+-            if (!strcmp(name, "assistant")) {
++            /* Mellum's system turn carries the host's tools block, whose <tool_call> and
++             * </tool_call> the template's text encodes as tokens 29 and 30.  User text stays
++             * plain BPE, as for every model. */
++            if (!strcmp(name, "assistant") || (ds4_model_is_mellum() && !strcmp(name, "system"))) {
+                 tokenize_rendered_chat_vocab(vocab, content, tokens);
+             } else {
+                 bpe_tokenize_text(vocab, content, tokens);
+@@ -44883,7 +45001,32 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
+     }
+ }
+ 
++int ds4_chat_append_tool_results(ds4_engine *e, ds4_tokens *tokens,
++                                 const char *const *parts, size_t n) {
++    if (!e || !tokens || !parts || n == 0) return 0;
++    for (size_t i = 0; i < n; i++) if (!parts[i]) return 0;
++    if (ds4_model_is_mellum()) {
++        /* 2.1's template merges consecutive tool messages into one user turn, a
++         * <tool_response> block per result. */
++        ds4_vocab *vocab = &e->vocab;
++        qwen4_chat_open(vocab, "user", tokens);
++        for (size_t i = 0; i < n; i++) {
++            qwen4_tool_response_tag(vocab, i ? "\n<tool_response>\n" : "<tool_response>\n", tokens);
++            bpe_tokenize_tool_response_text(vocab, parts[i], tokens);
++            qwen4_tool_response_tag(vocab, "\n</tool_response>", tokens);
++        }
++        qwen4_chat_close(vocab, tokens);
++        return 1;
++    }
++    for (size_t i = 0; i < n; i++) ds4_chat_append_message(e, tokens, "tool", parts[i]);
++    return 1;
++}
++
+ void ds4_chat_append_assistant_prefix(ds4_engine *e, ds4_tokens *tokens, ds4_think_mode think_mode) {
++    if (ds4_model_is_mellum()) {
++        mellum_chat_assistant_prefix(&e->vocab, think_mode, tokens);
++        return;
++    }
+     if (ds4_model_is_qwen4()) {
+         qwen4_chat_assistant_prefix(&e->vocab, think_mode, tokens);
+         return;
+@@ -45004,23 +45147,24 @@ char *ds4_token_text(ds4_engine *e, int token, size_t *len) {
+     return out;
+ }
+ 
++static int vocab_token_stop_class(const ds4_vocab *vocab, int token) {
++    if (!vocab || !vocab->stop_class || token < 0 || token >= vocab->n_vocab) return DS4_STOP_NONE;
++    return vocab->stop_class[token];
++}
++
+ static bool vocab_token_is_generation_stop(const ds4_vocab *vocab, int token) {
+-    if (!vocab || token < 0) return false;
+-    if (token == vocab->eos_id) return true;
+-    if (vocab->endoftext_id >= 0 && token == vocab->endoftext_id) return true;
+-    if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
+-        return (vocab->system_id >= 0 && token == vocab->system_id) ||
+-               (vocab->user_id >= 0 && token == vocab->user_id) ||
+-               (vocab->assistant_id >= 0 && token == vocab->assistant_id) ||
+-               (vocab->observation_id >= 0 && token == vocab->observation_id);
+-    }
+-    return false;
++    const int cls = vocab_token_stop_class(vocab, token);
++    return cls == DS4_STOP_EOS || cls == DS4_STOP_EOS_ALT || cls == DS4_STOP_PROTOCOL;
+ }
+ 
+ int ds4_token_eos(ds4_engine *e) {
+     return e->vocab.eos_id;
+ }
+ 
++int ds4_token_stop_class(ds4_engine *e, int token) {
++    return e ? vocab_token_stop_class(&e->vocab, token) : DS4_STOP_NONE;
++}
++
+ bool ds4_token_is_stop(ds4_engine *e, int token) {
+     return e ? vocab_token_is_generation_stop(&e->vocab, token) : false;
+ }
+@@ -59940,7 +60084,7 @@ static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *
+     if (all_rows && T > g->n_logit_rows) return false;
+     for (uint32_t t = 0; t < T; t++) {
+         if (tokens[t] < 0 || tokens[t] >= (int)DS4_N_VOCAB) {
+-            fprintf(stderr, "ds4: Qwen3.8 token id %d is outside the vocabulary\n", tokens[t]);
++            fprintf(stderr, "ds4: %s token id %d is outside the vocabulary\n", ds4_qwen4_family_name(), tokens[t]);
+             return false;
+         }
+     }
+@@ -60473,7 +60617,7 @@ static int generate_qwen4_metal_argmax(
+     }
+     const double t_prefill1 = now_sec();
+     if (!ok) {
+-        fprintf(stderr, "ds4: Qwen3.8 prefill failed\n");
++        fprintf(stderr, "ds4: %s prefill failed\n", ds4_qwen4_family_name());
+         free(logits);
+         qwen4_graph_free(g);
+         free(g);
+@@ -60488,7 +60632,7 @@ static int generate_qwen4_metal_argmax(
+         n_generated++;
+         if (i == n_predict - 1 || g->pos + 1u >= g->ctx_cap) break;
+         if (!qwen4_graph_forward_token(g, model, weights, token, logits)) {
+-            fprintf(stderr, "ds4: Qwen3.8 decode failed at position %u\n", g->pos);
++            fprintf(stderr, "ds4: %s decode failed at position %u\n", ds4_qwen4_family_name(), g->pos);
+             free(logits);
+             qwen4_graph_free(g);
+             free(g);
+@@ -60499,7 +60643,7 @@ static int generate_qwen4_metal_argmax(
+     if (done) done(emit_ud);
+     const double prefill_s = t_prefill1 - t_prefill0;
+     const double decode_s = t_decode1 - t_decode0;
+-    ds4_log(stderr, DS4_LOG_TIMING, "ds4: Qwen3.8 prefill: %.2f t/s, generation: %.2f t/s\n",
++    ds4_log(stderr, DS4_LOG_TIMING, "ds4: %s prefill: %.2f t/s, generation: %.2f t/s\n", ds4_qwen4_family_name(),
+             prefill_s > 0.0 ? (double)prompt->len / prefill_s : 0.0,
+             decode_s > 0.0 ? (double)n_generated / decode_s : 0.0);
+     free(logits);
+@@ -73872,7 +74016,7 @@ int ds4_chat_append_multimodal_message(
+         const int old_len = tokens->len;
+         ds4_vocab *vocab = &e->vocab;
+         qwen4_chat_open(vocab, "user", tokens);
+-        if (tool) bpe_tokenize_text(vocab, "<tool_response>\n", tokens);
++        if (tool) qwen4_tool_response_tag(vocab, "<tool_response>\n", tokens);
+         size_t moved = 0;
+         for (size_t i = 0; i <= image_count; i++) {
+             const char *text = text_parts[i] ? text_parts[i] : "";
+@@ -73889,7 +74033,7 @@ int ds4_chat_append_multimodal_message(
+             }
+             moved++;
+         }
+-        if (tool) bpe_tokenize_text(vocab, "\n</tool_response>", tokens);
++        if (tool) qwen4_tool_response_tag(vocab, "\n</tool_response>", tokens);
+         qwen4_chat_close(vocab, tokens);
+         return 1;
+     }
+@@ -74688,7 +74832,7 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
+     if (ds4_model_is_qwen4()) {
+         if ((e->backend != DS4_BACKEND_METAL && e->backend != DS4_BACKEND_CUDA) ||
+             e->distributed.role != DS4_DISTRIBUTED_NONE) {
+-            fprintf(stderr, "ds4: Qwen3.8 sessions require single-host Metal or CUDA\n");
++            fprintf(stderr, "ds4: %s sessions require single-host Metal or CUDA\n", ds4_qwen4_family_name());
+             free(s);
+             return 1;
+         }
+@@ -77148,7 +77292,7 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
+             s->checkpoint_valid = false;
+             if (!qwen4_graph_forward_tokens(&s->qwen4_graph, &e->model, &e->weights,
+                                             prompt->v + i, chunk, s->logits, false)) {
+-                snprintf(err, errlen, "Qwen3.8 prefill failed at token %d", i);
++                snprintf(err, errlen, "%s prefill failed at token %d", ds4_qwen4_family_name(), i);
+                 s->checkpoint_valid = false;
+                 prefill_rc = 1;
+                 break;
+@@ -79338,7 +79482,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
+ #ifdef DS4_HAS_QWEN4_GPU
+     if (ds4_session_is_qwen4(s)) {
+         if (!s->qwen4_graph_ready) {
+-            if (errlen) snprintf(err, errlen, "Qwen3.8 graph is not initialized");
++            if (errlen) snprintf(err, errlen, "%s graph is not initialized", ds4_qwen4_family_name());
+             return 1;
+         }
+         if (qwen4_session_replay_if_stale(s, err, errlen) != 0) return 1;
+@@ -79348,7 +79492,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
+         }
+         if (!s->glm_spec_inside) { s->glm_mtp_have = 0; s->glm_mtp_have2 = false; }
+         if (!qwen4_graph_forward_token(&s->qwen4_graph, &e->model, &e->weights, token, s->logits)) {
+-            if (errlen) snprintf(err, errlen, "Qwen3.8 decode failed");
++            if (errlen) snprintf(err, errlen, "%s decode failed", ds4_qwen4_family_name());
+             s->checkpoint_valid = false;
+             return 1;
+         }
+diff --git a/ds4.h b/ds4.h
+index 0dd82239..e8c1e7fc 100644
+--- a/ds4.h
++++ b/ds4.h
+@@ -388,10 +388,26 @@ void ds4_encode_chat_prompt(
+ void ds4_chat_append_max_effort_prefix(ds4_engine *e, ds4_tokens *tokens);
+ void ds4_chat_append_think_prefix(ds4_engine *e, ds4_tokens *tokens, ds4_think_mode mode);
+ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role, const char *content);
++/* Append the results of one assistant turn's tool calls, n of them, as the loaded model's
++ * template renders consecutive tool messages.  Mellum: one user turn with a <tool_response>
++ * block per result.  Other models: one tool message per result, as ds4_chat_append_message.
++ * Returns 0 and appends nothing when n is 0 or a part is NULL. */
++int ds4_chat_append_tool_results(ds4_engine *e, ds4_tokens *tokens,
++                                 const char *const *parts, size_t n);
+ void ds4_chat_append_assistant_prefix(ds4_engine *e, ds4_tokens *tokens, ds4_think_mode think_mode);
+ 
+ char *ds4_token_text(ds4_engine *e, int token, size_t *len);
+ int ds4_token_eos(ds4_engine *e);
++/* What a token does when generated.  EOS, EOS-alt and protocol end a generation
++ * (ds4_token_is_stop); a marker is ordinary content, rendered as its text. */
++enum ds4_stop_class {
++    DS4_STOP_NONE = 0,
++    DS4_STOP_EOS = 1,
++    DS4_STOP_EOS_ALT = 2,
++    DS4_STOP_PROTOCOL = 3,
++    DS4_STOP_MARKER = 4,
++};
++int ds4_token_stop_class(ds4_engine *e, int token);
+ bool ds4_token_is_stop(ds4_engine *e, int token);
+ bool ds4_token_is_thinking_control(ds4_engine *e, int token);
+ bool ds4_token_is_stop_for_think_mode(ds4_engine *e,
+diff --git a/ds4_cli.c b/ds4_cli.c
+index c4529743..c28401b6 100644
+--- a/ds4_cli.c
++++ b/ds4_cli.c
+@@ -386,6 +386,7 @@ typedef struct {
+     bool last_output_newline;
+     char pending[16];
+     size_t pending_len;
++    int n_emitted;          /* tokens printed this turn (the greedy path counts them here) */
+ } token_printer;
+ 
+ static bool bytes_has_prefix(const char *p, size_t n, const char *prefix) {
+@@ -491,8 +492,16 @@ static void token_printer_write_text(token_printer *p, const char *text, size_t
+     }
+ }
+ 
++/* A turn that ran into -n says so: the text simply stops there, and a long
++ * reasoning block can use the whole budget before the answer starts. */
++static void cli_report_token_cap(int generated, int n_predict) {
++    if (n_predict > 0 && generated >= n_predict)
++        fprintf(stderr, "ds4: stopped at the -n cap of %d tokens\n", n_predict);
++}
++
+ static void print_generated_token(void *ud, int token) {
+     token_printer *p = ud;
++    p->n_emitted++;
+     size_t len = 0;
+     char *text = ds4_token_text(p->engine, token, &len);
+     token_printer_write_text(p, text, len);
+@@ -683,6 +692,7 @@ static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, con
+     generation_done(&printer);
+     if (cli_interrupt_requested()) cli_interrupt_clear();
+ 
++    cli_report_token_cap(generated, cfg->gen.n_predict);
+     const double prefill_s = t_prefill1 - t_prefill0;
+     const double decode_s = t_decode1 - t_decode0;
+     ds4_log(stderr,
+@@ -1279,6 +1289,7 @@ static int run_generation(ds4_engine *engine, const cli_config *cfg) {
+                                             &printer,
+                                             cli_prefill_progress_cb,
+                                             &progress);
++            if (rc == 0) cli_report_token_cap(printer.n_emitted, cfg->gen.n_predict);
+         }
+     }
+ 
+@@ -1696,6 +1707,7 @@ static int run_chat_turn(ds4_engine *engine, cli_config *cfg, repl_chat *chat,
+         ds4_tokens_push(&chat->transcript, ds4_token_eos(engine));
+     }
+ 
++    cli_report_token_cap(generated, cfg->gen.n_predict);
+     const double prefill_s = t_prefill1 - t_prefill0;
+     const double decode_s = t_decode1 - t_decode0;
+     if (interrupted) cli_interrupt_clear();
+diff --git a/ds4_mellum_tokenizer.inc b/ds4_mellum_tokenizer.inc
+new file mode 100644
+index 00000000..70b51730
+--- /dev/null
++++ b/ds4_mellum_tokenizer.inc
+@@ -0,0 +1,126 @@
++/* Mellum 2.1, included by ds4.c where this code sits: not a separate translation unit. */
++
 +/* Mellum 2.1 pre-tokenization (tokenizer.ggml.pre = "mellum2"), as the
 + * snapshot's tokenizer.json `pre_tokenizer` has it: Digits(individual_digits)
 + * then ByteLevel(use_regex) with GPT-2's expression
@@ -249,431 +682,9 @@ index cb9cd1d..61e9c36 100644
 +    mellum_segment_pieces(text, strlen(text), mellum_emit_piece, &m);
 +}
 +
- static void bpe_tokenize_text(const ds4_vocab *vocab, const char *text, token_vec *out) {
-     if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
-         bpe_tokenize_text_glm4(vocab, text, out);
-         return;
-     }
-+    if (ds4_model_is_mellum()) {
-+        bpe_tokenize_text_mellum(vocab, text, out);
-+        return;
-+    }
-     if (ds4_model_is_qwen4()) {
-         bpe_tokenize_text_qwen35(vocab, text, out);
-         return;
-@@ -44713,7 +44850,7 @@ static int vocab_lookup_optional(const ds4_vocab *vocab, const char *text) {
- 
- /* Load token strings, special token ids, and merge ranks from GGUF metadata. */
- 
--static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
-+static void vocab_load_ids(ds4_vocab *vocab, const ds4_model *model) {
-     memset(vocab, 0, sizeof(*vocab));
- 
-     ds4_array_ref tokens;
-@@ -44823,7 +44960,63 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
-     vocab->dsml_id = vocab_lookup(vocab, "｜DSML｜");
- }
- 
-+/* Mellum's ids 3-20 are the corpus markers (<filename>, <fim_*>, ...): in the
-+ * file they are CONTROL, in a reply they are content.  A CONTROL token not named
-+ * here is protocol (fail-closed): a host refuses it as an unexpected stop. */
-+static const char *const MELLUM_MARKER_SPELLINGS[] = {
-+    "<commit_before>", "<commit_after>", "<commit_msg>", "<empty_output>", "<filename>",
-+    "<fim_prefix>", "<fim_middle>", "<fim_suffix>", "<fim_pad>", "<gh_stars>",
-+    "<issue_start>", "<issue_comment>", "<issue_closed>",
-+    "<jupyter_text>", "<jupyter_code>", "<jupyter_start>", "<jupyter_output>", "<reponame>",
-+};
-+
-+static bool vocab_spelling_in(const ds4_str *s, const char *const *list, size_t n) {
-+    for (size_t i = 0; i < n; i++) {
-+        const size_t len = strlen(list[i]);
-+        if (s->len == len && memcmp(s->ptr, list[i], len) == 0) return true;
-+    }
-+    return false;
-+}
-+
-+/* Fill vocab->stop_class.  Other models keep their stops exactly: eos is EOS,
-+ * <|endoftext|> (Qwen) is EOS-alt, GLM's role ids are protocol. */
-+static void vocab_classify_stops(ds4_vocab *vocab, const ds4_model *model) {
-+    vocab->stop_class = xcalloc((size_t)vocab->n_vocab, 1);
-+    uint8_t *cls = vocab->stop_class;
-+    if (ds4_model_is_mellum()) {
-+        /* 2.1 classes by token_type: CONTROL (3) tokens are markers or protocol
-+         * by spelling; 23, 24 and 29-32 are USER_DEFINED (4) and are none. */
-+        ds4_array_ref types;
-+        if (!model_get_array(model, "tokenizer.ggml.token_type", &types) ||
-+            types.type != GGUF_VALUE_INT32 || types.len != (uint64_t)vocab->n_vocab) {
-+            ds4_die("tokenizer.ggml.token_type must be an int32 array with one entry per token (Mellum stops)");
-+        }
-+        ds4_cursor tc = cursor_at(model, types.data_pos);
-+        for (int i = 0; i < vocab->n_vocab; i++) {
-+            int32_t type = 0;
-+            if (!cursor_read(&tc, &type, sizeof(type))) ds4_die(tc.error);
-+            if (type != 3) continue;
-+            cls[i] = vocab_spelling_in(&vocab->token[i], MELLUM_MARKER_SPELLINGS,
-+                                       sizeof(MELLUM_MARKER_SPELLINGS) / sizeof(MELLUM_MARKER_SPELLINGS[0]))
-+                         ? DS4_STOP_MARKER : DS4_STOP_PROTOCOL;
-+        }
-+    } else if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
-+        const int roles[4] = { vocab->system_id, vocab->user_id, vocab->assistant_id, vocab->observation_id };
-+        for (int r = 0; r < 4; r++) {
-+            if (roles[r] >= 0 && roles[r] < vocab->n_vocab) cls[roles[r]] = DS4_STOP_PROTOCOL;
-+        }
-+    }
-+    if (vocab->endoftext_id >= 0 && vocab->endoftext_id < vocab->n_vocab) cls[vocab->endoftext_id] = DS4_STOP_EOS_ALT;
-+    if (vocab->eos_id >= 0 && vocab->eos_id < vocab->n_vocab) cls[vocab->eos_id] = DS4_STOP_EOS;
-+}
-+
-+static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
-+    vocab_load_ids(vocab, model);
-+    vocab_classify_stops(vocab, model);
-+}
-+
- static void vocab_free(ds4_vocab *vocab) {
-+    free(vocab->stop_class);
-     free(vocab->token);
-     table_free(&vocab->token_to_id);
-     table_free(&vocab->merge_rank);
-@@ -44876,7 +45069,8 @@ static void chat_push_think_prefix(const ds4_vocab *vocab,
-             token_vec_push(out, vocab->system_id);
-             bpe_tokenize_text(vocab, effort, out);
-         }
--    } else if (think_mode == DS4_THINK_MAX) {
-+    } else if (think_mode == DS4_THINK_MAX && !ds4_model_is_mellum()) {
-+        /* DeepSeek's preamble; Mellum 2.1's template has no effort text */
-         bpe_tokenize_text(vocab, DS4_REASONING_EFFORT_MAX_PREFIX, out);
-     }
- }
-@@ -44929,12 +45123,48 @@ static void qwen4_chat_system(const ds4_vocab *vocab, const char *system, ds4_th
-     qwen4_chat_close(vocab, out);
- }
- 
-+/* Mellum 2.1's generation prompt: its template adds nothing after the
-+ * assistant tag when thinking is on (the model writes <think> itself) and an
-+ * empty think block when off.  Qwen's prefix opens <think> itself. */
-+static void mellum_chat_assistant_prefix(const ds4_vocab *vocab, ds4_think_mode think_mode, token_vec *out) {
-+    qwen4_chat_open(vocab, "assistant", out);
-+    if (!ds4_think_mode_enabled(think_mode)) {
-+        token_vec_push(out, vocab->think_start_id);
-+        bpe_tokenize_text(vocab, "\n\n", out);
-+        token_vec_push(out, vocab->think_end_id);
-+        bpe_tokenize_text(vocab, "\n\n", out);
-+    }
-+}
-+
-+/* Mellum 2.1's system turn: the caller's text, or none.  Its template has no
-+ * reasoning-effort instruction, which Qwen's system turn prepends. */
-+static void tokenize_rendered_chat_vocab(const ds4_vocab *vocab, const char *text, token_vec *out);
-+
-+static void mellum_chat_system(const ds4_vocab *vocab, const char *system, token_vec *out) {
-+    if (!system || !system[0]) return;
-+    qwen4_chat_open(vocab, "system", out);
-+    tokenize_rendered_chat_vocab(vocab, system, out);   /* as ds4_chat_append_message's system turn */
-+    qwen4_chat_close(vocab, out);
-+}
-+
- static void encode_chat_prompt(
-         const ds4_vocab *vocab,
-         const char      *system,
-         const char      *prompt,
-         ds4_think_mode   think_mode,
-         token_vec       *out) {
-+    if (ds4_model_is_mellum()) {
-+        if (vocab->im_start_id < 0 || vocab->im_end_id < 0 ||
-+            vocab->think_start_id < 0 || vocab->think_end_id < 0) {
-+            ds4_die("this tokenizer does not provide Mellum's chat markers");
-+        }
-+        mellum_chat_system(vocab, system, out);
-+        qwen4_chat_open(vocab, "user", out);
-+        bpe_tokenize_text(vocab, prompt, out);
-+        qwen4_chat_close(vocab, out);
-+        mellum_chat_assistant_prefix(vocab, think_mode, out);
-+        return;
-+    }
-     if (ds4_model_is_qwen4()) {
-         if (vocab->im_start_id < 0 || vocab->im_end_id < 0 ||
-             vocab->think_start_id < 0 || vocab->think_end_id < 0) {
-@@ -45127,6 +45357,14 @@ static void bpe_tokenize_tool_response_text(ds4_vocab *vocab, const char *conten
-     bpe_tokenize_wrapped_payload_text(vocab, content, "</tool_response>", out);
- }
- 
-+/* A qwen4 tool message's <tool_response> wrapper.  Mellum's template text encodes it as the
-+ * vocabulary's added tokens 31 and 32, which plain BPE text would not give; Flash Next keeps
-+ * the text form it always had. */
-+static void qwen4_tool_response_tag(ds4_vocab *vocab, const char *tag, token_vec *out) {
-+    if (ds4_model_is_mellum()) tokenize_rendered_chat_vocab(vocab, tag, out);
-+    else bpe_tokenize_text(vocab, tag, out);
-+}
-+
- void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role, const char *content) {
-     ds4_vocab *vocab = &e->vocab;
-     if (!role) role = "user";
-@@ -45135,14 +45373,17 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
-     if (ds4_model_is_qwen4()) {
-         if (!strcmp(role, "tool") || !strcmp(role, "function")) {
-             qwen4_chat_open(vocab, "user", tokens);
--            bpe_tokenize_text(vocab, "<tool_response>\n", tokens);
-+            qwen4_tool_response_tag(vocab, "<tool_response>\n", tokens);
-             bpe_tokenize_tool_response_text(vocab, content, tokens);
--            bpe_tokenize_text(vocab, "\n</tool_response>", tokens);
-+            qwen4_tool_response_tag(vocab, "\n</tool_response>", tokens);
-         } else {
-             const char *name = (!strcmp(role, "system") || !strcmp(role, "developer")) ? "system" :
-                                !strcmp(role, "assistant") ? "assistant" : "user";
-             qwen4_chat_open(vocab, name, tokens);
--            if (!strcmp(name, "assistant")) {
-+            /* Mellum's system turn carries the host's tools block, whose <tool_call> and
-+             * </tool_call> the template's text encodes as tokens 29 and 30.  User text stays
-+             * plain BPE, as for every model. */
-+            if (!strcmp(name, "assistant") || (ds4_model_is_mellum() && !strcmp(name, "system"))) {
-                 tokenize_rendered_chat_vocab(vocab, content, tokens);
-             } else {
-                 bpe_tokenize_text(vocab, content, tokens);
-@@ -45197,7 +45438,32 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
-     }
- }
- 
-+int ds4_chat_append_tool_results(ds4_engine *e, ds4_tokens *tokens,
-+                                 const char *const *parts, size_t n) {
-+    if (!e || !tokens || !parts || n == 0) return 0;
-+    for (size_t i = 0; i < n; i++) if (!parts[i]) return 0;
-+    if (ds4_model_is_mellum()) {
-+        /* 2.1's template merges consecutive tool messages into one user turn, a
-+         * <tool_response> block per result. */
-+        ds4_vocab *vocab = &e->vocab;
-+        qwen4_chat_open(vocab, "user", tokens);
-+        for (size_t i = 0; i < n; i++) {
-+            qwen4_tool_response_tag(vocab, i ? "\n<tool_response>\n" : "<tool_response>\n", tokens);
-+            bpe_tokenize_tool_response_text(vocab, parts[i], tokens);
-+            qwen4_tool_response_tag(vocab, "\n</tool_response>", tokens);
-+        }
-+        qwen4_chat_close(vocab, tokens);
-+        return 1;
-+    }
-+    for (size_t i = 0; i < n; i++) ds4_chat_append_message(e, tokens, "tool", parts[i]);
-+    return 1;
-+}
-+
- void ds4_chat_append_assistant_prefix(ds4_engine *e, ds4_tokens *tokens, ds4_think_mode think_mode) {
-+    if (ds4_model_is_mellum()) {
-+        mellum_chat_assistant_prefix(&e->vocab, think_mode, tokens);
-+        return;
-+    }
-     if (ds4_model_is_qwen4()) {
-         qwen4_chat_assistant_prefix(&e->vocab, think_mode, tokens);
-         return;
-@@ -45318,23 +45584,24 @@ char *ds4_token_text(ds4_engine *e, int token, size_t *len) {
-     return out;
- }
- 
-+static int vocab_token_stop_class(const ds4_vocab *vocab, int token) {
-+    if (!vocab || !vocab->stop_class || token < 0 || token >= vocab->n_vocab) return DS4_STOP_NONE;
-+    return vocab->stop_class[token];
-+}
-+
- static bool vocab_token_is_generation_stop(const ds4_vocab *vocab, int token) {
--    if (!vocab || token < 0) return false;
--    if (token == vocab->eos_id) return true;
--    if (vocab->endoftext_id >= 0 && token == vocab->endoftext_id) return true;
--    if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
--        return (vocab->system_id >= 0 && token == vocab->system_id) ||
--               (vocab->user_id >= 0 && token == vocab->user_id) ||
--               (vocab->assistant_id >= 0 && token == vocab->assistant_id) ||
--               (vocab->observation_id >= 0 && token == vocab->observation_id);
--    }
--    return false;
-+    const int cls = vocab_token_stop_class(vocab, token);
-+    return cls == DS4_STOP_EOS || cls == DS4_STOP_EOS_ALT || cls == DS4_STOP_PROTOCOL;
- }
- 
- int ds4_token_eos(ds4_engine *e) {
-     return e->vocab.eos_id;
- }
- 
-+int ds4_token_stop_class(ds4_engine *e, int token) {
-+    return e ? vocab_token_stop_class(&e->vocab, token) : DS4_STOP_NONE;
-+}
-+
- bool ds4_token_is_stop(ds4_engine *e, int token) {
-     return e ? vocab_token_is_generation_stop(&e->vocab, token) : false;
- }
-@@ -60254,7 +60521,7 @@ static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *
-     if (all_rows && T > g->n_logit_rows) return false;
-     for (uint32_t t = 0; t < T; t++) {
-         if (tokens[t] < 0 || tokens[t] >= (int)DS4_N_VOCAB) {
--            fprintf(stderr, "ds4: Qwen3.8 token id %d is outside the vocabulary\n", tokens[t]);
-+            fprintf(stderr, "ds4: %s token id %d is outside the vocabulary\n", ds4_qwen4_family_name(), tokens[t]);
-             return false;
-         }
-     }
-@@ -60787,7 +61054,7 @@ static int generate_qwen4_metal_argmax(
-     }
-     const double t_prefill1 = now_sec();
-     if (!ok) {
--        fprintf(stderr, "ds4: Qwen3.8 prefill failed\n");
-+        fprintf(stderr, "ds4: %s prefill failed\n", ds4_qwen4_family_name());
-         free(logits);
-         qwen4_graph_free(g);
-         free(g);
-@@ -60802,7 +61069,7 @@ static int generate_qwen4_metal_argmax(
-         n_generated++;
-         if (i == n_predict - 1 || g->pos + 1u >= g->ctx_cap) break;
-         if (!qwen4_graph_forward_token(g, model, weights, token, logits)) {
--            fprintf(stderr, "ds4: Qwen3.8 decode failed at position %u\n", g->pos);
-+            fprintf(stderr, "ds4: %s decode failed at position %u\n", ds4_qwen4_family_name(), g->pos);
-             free(logits);
-             qwen4_graph_free(g);
-             free(g);
-@@ -60813,7 +61080,7 @@ static int generate_qwen4_metal_argmax(
-     if (done) done(emit_ud);
-     const double prefill_s = t_prefill1 - t_prefill0;
-     const double decode_s = t_decode1 - t_decode0;
--    ds4_log(stderr, DS4_LOG_TIMING, "ds4: Qwen3.8 prefill: %.2f t/s, generation: %.2f t/s\n",
-+    ds4_log(stderr, DS4_LOG_TIMING, "ds4: %s prefill: %.2f t/s, generation: %.2f t/s\n", ds4_qwen4_family_name(),
-             prefill_s > 0.0 ? (double)prompt->len / prefill_s : 0.0,
-             decode_s > 0.0 ? (double)n_generated / decode_s : 0.0);
-     free(logits);
-@@ -74186,7 +74453,7 @@ int ds4_chat_append_multimodal_message(
-         const int old_len = tokens->len;
-         ds4_vocab *vocab = &e->vocab;
-         qwen4_chat_open(vocab, "user", tokens);
--        if (tool) bpe_tokenize_text(vocab, "<tool_response>\n", tokens);
-+        if (tool) qwen4_tool_response_tag(vocab, "<tool_response>\n", tokens);
-         size_t moved = 0;
-         for (size_t i = 0; i <= image_count; i++) {
-             const char *text = text_parts[i] ? text_parts[i] : "";
-@@ -74203,7 +74470,7 @@ int ds4_chat_append_multimodal_message(
-             }
-             moved++;
-         }
--        if (tool) bpe_tokenize_text(vocab, "\n</tool_response>", tokens);
-+        if (tool) qwen4_tool_response_tag(vocab, "\n</tool_response>", tokens);
-         qwen4_chat_close(vocab, tokens);
-         return 1;
-     }
-@@ -75002,7 +75269,7 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
-     if (ds4_model_is_qwen4()) {
-         if ((e->backend != DS4_BACKEND_METAL && e->backend != DS4_BACKEND_CUDA) ||
-             e->distributed.role != DS4_DISTRIBUTED_NONE) {
--            fprintf(stderr, "ds4: Qwen3.8 sessions require single-host Metal or CUDA\n");
-+            fprintf(stderr, "ds4: %s sessions require single-host Metal or CUDA\n", ds4_qwen4_family_name());
-             free(s);
-             return 1;
-         }
-@@ -77462,7 +77729,7 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
-             s->checkpoint_valid = false;
-             if (!qwen4_graph_forward_tokens(&s->qwen4_graph, &e->model, &e->weights,
-                                             prompt->v + i, chunk, s->logits, false)) {
--                snprintf(err, errlen, "Qwen3.8 prefill failed at token %d", i);
-+                snprintf(err, errlen, "%s prefill failed at token %d", ds4_qwen4_family_name(), i);
-                 s->checkpoint_valid = false;
-                 prefill_rc = 1;
-                 break;
-@@ -79652,7 +79919,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
- #ifdef DS4_HAS_QWEN4_GPU
-     if (ds4_session_is_qwen4(s)) {
-         if (!s->qwen4_graph_ready) {
--            if (errlen) snprintf(err, errlen, "Qwen3.8 graph is not initialized");
-+            if (errlen) snprintf(err, errlen, "%s graph is not initialized", ds4_qwen4_family_name());
-             return 1;
-         }
-         if (qwen4_session_replay_if_stale(s, err, errlen) != 0) return 1;
-@@ -79662,7 +79929,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
-         }
-         if (!s->glm_spec_inside) { s->glm_mtp_have = 0; s->glm_mtp_have2 = false; }
-         if (!qwen4_graph_forward_token(&s->qwen4_graph, &e->model, &e->weights, token, s->logits)) {
--            if (errlen) snprintf(err, errlen, "Qwen3.8 decode failed");
-+            if (errlen) snprintf(err, errlen, "%s decode failed", ds4_qwen4_family_name());
-             s->checkpoint_valid = false;
-             return 1;
-         }
-diff --git a/ds4.h b/ds4.h
-index 0dd8223..e8c1e7f 100644
---- a/ds4.h
-+++ b/ds4.h
-@@ -388,10 +388,26 @@ void ds4_encode_chat_prompt(
- void ds4_chat_append_max_effort_prefix(ds4_engine *e, ds4_tokens *tokens);
- void ds4_chat_append_think_prefix(ds4_engine *e, ds4_tokens *tokens, ds4_think_mode mode);
- void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role, const char *content);
-+/* Append the results of one assistant turn's tool calls, n of them, as the loaded model's
-+ * template renders consecutive tool messages.  Mellum: one user turn with a <tool_response>
-+ * block per result.  Other models: one tool message per result, as ds4_chat_append_message.
-+ * Returns 0 and appends nothing when n is 0 or a part is NULL. */
-+int ds4_chat_append_tool_results(ds4_engine *e, ds4_tokens *tokens,
-+                                 const char *const *parts, size_t n);
- void ds4_chat_append_assistant_prefix(ds4_engine *e, ds4_tokens *tokens, ds4_think_mode think_mode);
- 
- char *ds4_token_text(ds4_engine *e, int token, size_t *len);
- int ds4_token_eos(ds4_engine *e);
-+/* What a token does when generated.  EOS, EOS-alt and protocol end a generation
-+ * (ds4_token_is_stop); a marker is ordinary content, rendered as its text. */
-+enum ds4_stop_class {
-+    DS4_STOP_NONE = 0,
-+    DS4_STOP_EOS = 1,
-+    DS4_STOP_EOS_ALT = 2,
-+    DS4_STOP_PROTOCOL = 3,
-+    DS4_STOP_MARKER = 4,
-+};
-+int ds4_token_stop_class(ds4_engine *e, int token);
- bool ds4_token_is_stop(ds4_engine *e, int token);
- bool ds4_token_is_thinking_control(ds4_engine *e, int token);
- bool ds4_token_is_stop_for_think_mode(ds4_engine *e,
-diff --git a/ds4_cli.c b/ds4_cli.c
-index c452974..c28401b 100644
---- a/ds4_cli.c
-+++ b/ds4_cli.c
-@@ -386,6 +386,7 @@ typedef struct {
-     bool last_output_newline;
-     char pending[16];
-     size_t pending_len;
-+    int n_emitted;          /* tokens printed this turn (the greedy path counts them here) */
- } token_printer;
- 
- static bool bytes_has_prefix(const char *p, size_t n, const char *prefix) {
-@@ -491,8 +492,16 @@ static void token_printer_write_text(token_printer *p, const char *text, size_t
-     }
- }
- 
-+/* A turn that ran into -n says so: the text simply stops there, and a long
-+ * reasoning block can use the whole budget before the answer starts. */
-+static void cli_report_token_cap(int generated, int n_predict) {
-+    if (n_predict > 0 && generated >= n_predict)
-+        fprintf(stderr, "ds4: stopped at the -n cap of %d tokens\n", n_predict);
-+}
-+
- static void print_generated_token(void *ud, int token) {
-     token_printer *p = ud;
-+    p->n_emitted++;
-     size_t len = 0;
-     char *text = ds4_token_text(p->engine, token, &len);
-     token_printer_write_text(p, text, len);
-@@ -683,6 +692,7 @@ static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, con
-     generation_done(&printer);
-     if (cli_interrupt_requested()) cli_interrupt_clear();
- 
-+    cli_report_token_cap(generated, cfg->gen.n_predict);
-     const double prefill_s = t_prefill1 - t_prefill0;
-     const double decode_s = t_decode1 - t_decode0;
-     ds4_log(stderr,
-@@ -1279,6 +1289,7 @@ static int run_generation(ds4_engine *engine, const cli_config *cfg) {
-                                             &printer,
-                                             cli_prefill_progress_cb,
-                                             &progress);
-+            if (rc == 0) cli_report_token_cap(printer.n_emitted, cfg->gen.n_predict);
-         }
-     }
- 
-@@ -1696,6 +1707,7 @@ static int run_chat_turn(ds4_engine *engine, cli_config *cfg, repl_chat *chat,
-         ds4_tokens_push(&chat->transcript, ds4_token_eos(engine));
-     }
- 
-+    cli_report_token_cap(generated, cfg->gen.n_predict);
-     const double prefill_s = t_prefill1 - t_prefill0;
-     const double decode_s = t_decode1 - t_decode0;
-     if (interrupted) cli_interrupt_clear();
 diff --git a/ds4_mellum_unicode.inc b/ds4_mellum_unicode.inc
 new file mode 100644
-index 0000000..d79b737
+index 00000000..d79b7377
 --- /dev/null
 +++ b/ds4_mellum_unicode.inc
 @@ -0,0 +1,903 @@
@@ -1581,7 +1592,7 @@ index 0000000..d79b737
 +}
 +
 diff --git a/ds4_prompt_prefix.h b/ds4_prompt_prefix.h
-index ad439d4..1bd5932 100644
+index ad439d44..1bd5932c 100644
 --- a/ds4_prompt_prefix.h
 +++ b/ds4_prompt_prefix.h
 @@ -4,6 +4,7 @@
@@ -1620,7 +1631,7 @@ index ad439d4..1bd5932 100644
  }
 diff --git a/tests/gen_mellum_chat_ids.py b/tests/gen_mellum_chat_ids.py
 new file mode 100644
-index 0000000..6544606
+index 00000000..65446068
 --- /dev/null
 +++ b/tests/gen_mellum_chat_ids.py
 @@ -0,0 +1,257 @@
@@ -1883,7 +1894,7 @@ index 0000000..6544606
 +    main(sys.argv[1])
 diff --git a/tests/gen_mellum_tokenizer_cases.py b/tests/gen_mellum_tokenizer_cases.py
 new file mode 100644
-index 0000000..943d6ad
+index 00000000..943d6add
 --- /dev/null
 +++ b/tests/gen_mellum_tokenizer_cases.py
 @@ -0,0 +1,138 @@
@@ -2027,7 +2038,7 @@ index 0000000..943d6ad
 +    sys.exit(main())
 diff --git a/tests/gen_mellum_unicode.py b/tests/gen_mellum_unicode.py
 new file mode 100644
-index 0000000..3f0e357
+index 00000000..3f0e3577
 --- /dev/null
 +++ b/tests/gen_mellum_unicode.py
 @@ -0,0 +1,336 @@
@@ -2369,7 +2380,7 @@ index 0000000..3f0e357
 +    sys.exit(main())
 diff --git a/tests/mellum_chat_ids.inc b/tests/mellum_chat_ids.inc
 new file mode 100644
-index 0000000..52dec4a
+index 00000000..52dec4a6
 --- /dev/null
 +++ b/tests/mellum_chat_ids.inc
 @@ -0,0 +1,223 @@
@@ -2598,7 +2609,7 @@ index 0000000..52dec4a
 +};
 diff --git a/tests/mellum_tokenizer_cases.inc b/tests/mellum_tokenizer_cases.inc
 new file mode 100644
-index 0000000..fb85675
+index 00000000..fb85675f
 --- /dev/null
 +++ b/tests/mellum_tokenizer_cases.inc
 @@ -0,0 +1,131 @@
@@ -2735,7 +2746,7 @@ index 0000000..fb85675
 +};
 diff --git a/tests/mellum_tool_text.h b/tests/mellum_tool_text.h
 new file mode 100644
-index 0000000..8934c45
+index 00000000..8934c458
 --- /dev/null
 +++ b/tests/mellum_tool_text.h
 @@ -0,0 +1,95 @@
@@ -2835,7 +2846,7 @@ index 0000000..8934c45
 +
 +#endif
 diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
-index 6a016fb..40ada9a 100644
+index 6a016fb2..40ada9a1 100644
 --- a/tests/test_mellum_config.c
 +++ b/tests/test_mellum_config.c
 @@ -7,6 +7,14 @@
@@ -3346,7 +3357,7 @@ index 6a016fb..40ada9a 100644
      check_real_model();
 diff --git a/tests/test_mellum_tokenizer.c b/tests/test_mellum_tokenizer.c
 new file mode 100644
-index 0000000..60e0079
+index 00000000..60e00790
 --- /dev/null
 +++ b/tests/test_mellum_tokenizer.c
 @@ -0,0 +1,137 @@
