@@ -154,7 +154,7 @@ the generic GLM/DeepSeek execution path and do not add a second copy of
 | Existing series | Overlap | Required resolution |
 | --- | --- | --- |
 | `common/0001` host extensions | Adds `ds4_engine_sampling_defaults`; Mellum adds its own defaults and `ds4_engine_is_mellum` | Extend the one existing API. Native Mellum defaults are temperature 1.0, top-p 1.0, top-k 0, min-p 0 (`ds4.c:73808-73820`; `ds4.h:312-317`) |
-| `common/0001` payload predicate | It returns true for every non-distributed qwen4 (`patches/common/0001...patch:20-22`); Mellum is also qwen4 but all payload/snapshot operations refuse | `patches/mellum` must make the predicate false for Mellum and test stripped save/rendered switch. This is a semantic conflict, not optional hardening |
+| `common/0001` payload predicate | It returns true for every non-distributed qwen4 (`patches/common/0001...patch:20-22`); Mellum is also qwen4 but all payload/snapshot operations refuse | `patches/mellum` must make the predicate false for Mellum and test native payload refusal; Task 19 tests the real stripped save/rendered switch flow in §7. This is a semantic conflict, not optional hardening |
 | `common/0002-0003` Metal versions | `ds4_metal.m` also changes substantially | Preserve the 3.2/4.0 language-version hunks while rebasing Mellum kernels and streaming |
 | `qwen35/0001-0008` dense Qwen | Same `ds4.c`, `ds4.h`, `ds4_gpu.h`, `ds4_metal.m`, `metal/qwen4.metal`, `Makefile`, and Qwen tests | Follow the accepted order `common -> mellum -> qwen35`; rebase and re-export qwen35 after Mellum. Guard shared predicates with `!ds4_model_is_mellum()` where Qwen behavior is not valid for Mellum |
 | `qwen35/0002,0004` chat and sampling | Qwen special-token rendering and default restoration touch Mellum's native chat/default functions | Keep Mellum's `<|im_start|>`, `<|im_end|>`, think, tool-response, and min-p behavior distinct; run both families' fixtures |
@@ -334,6 +334,16 @@ patches/
   qwen35/  # the then-current series, including #24, rebased after mellum
 ```
 
+The core Mellum code uses the reference's
+`ds4_mellum_config.inc`, `ds4_mellum_graph_alloc.inc`, `ds4_mellum_graph.inc`,
+`ds4_mellum_plan.inc`, `ds4_mellum_test_hooks.inc`, and `ds4_mellum_tokenizer.inc`
+layout. Restore these six files before Task 17. The generated
+`ds4_mellum_unicode.inc` and the separate `ds4_mellum_stream.[ch]` stay as they are.
+`ds4_mellum_graph_alloc.inc` and `ds4_mellum_graph.inc` follow the patch boundary:
+0003 carries exact allocation, graph and rewind, while 0004 adds the thresholds,
+optimized paths and exact-prefill diagnostic. Re-export the patches, rerun the §4
+per-prefix checks and record the new trees before Task 17.
+
 Every patch message carries `Upstream:`, `Retire-when:`, and
 `Carried-commits:`. The table defines the first two trailers verbatim and the
 source ledger for the third. During export, replace the ledger description
@@ -344,8 +354,8 @@ command; do not invent an abbreviated or incomplete trailer.
 | --- | --- | --- | --- |
 | 0001 | Recognition, hyperparameter/tensor validation, Q8 binding, memory plan/session allocation, `ds4_engine_is_mellum`, sampling defaults, payload refusal and false support predicate | `not offered, fork only` / `upstream runs Mellum 2.1 with this host contract` | `git rev-list --reverse c97964b..d2d9338 -- ds4_mellum_config.inc ds4_mellum_plan.inc` plus host hunks selected from `ds4.c ds4.h` |
 | 0002 | `mellum2` tokenizer and Unicode tables, special-token/stop classes, native system/assistant/tool-response rendering, think on/off, imported-history behavior, CLI text/cap handling | `not offered, fork only` / `upstream renders and stops Mellum 2.1 chats` | `git rev-list --reverse c97964b..d2d9338 -- ds4_mellum_tokenizer.inc ds4_mellum_unicode.inc ds4_cli.c ds4_prompt_prefix.h` plus native-chat hunks from `ds4.c ds4.h` |
-| 0003 | Exact Q8 Metal graph, allocation, sliding/full attention, MoE, logits, exact-prefill diagnostic, session rewind and frontier | `not offered, fork only` / `upstream runs an exact Mellum 2.1 Metal graph` | `git rev-list --reverse c97964b..d2d9338 -- ds4_mellum_graph_alloc.inc ds4_mellum_graph.inc ds4_mellum_test_hooks.inc metal/mellum.metal` plus exact-graph/rewind hunks from `ds4.c ds4.h ds4_gpu.h ds4_metal.m metal/qwen4.metal` |
-| 0004 | Tiled Q8 prefill experts/projections/attention, Metal 4 opt-in, sliding decode loads and fused small kernels, fast-path tests | `not offered, fork only` / `upstream has equivalent Mellum fast paths` | Topic commits selected by `git log --reverse --format=%H --grep='tiled\|batched\|fused\|two keys\|tensor.tile' c97964b..d2d9338` plus their review fixes |
+| 0003 | Exact Q8 Metal graph, allocation, sliding/full attention, MoE, logits, session rewind and frontier | `not offered, fork only` / `upstream runs an exact Mellum 2.1 Metal graph` | `git rev-list --reverse c97964b..d2d9338 -- ds4_mellum_graph_alloc.inc ds4_mellum_graph.inc ds4_mellum_test_hooks.inc metal/mellum.metal` plus exact-graph/rewind hunks from `ds4.c ds4.h ds4_gpu.h ds4_metal.m metal/qwen4.metal` |
+| 0004 | Tiled Q8 prefill experts/projections/attention, Metal 4 opt-in, sliding decode loads and fused small kernels, `DS4_MELLUM_EXACT_PREFILL` and `test-mellum-fastpath` | `not offered, fork only` / `upstream has equivalent Mellum fast paths` | Topic commits selected by `git log --reverse --format=%H --grep='tiled\|batched\|fused\|two keys\|tensor.tile' c97964b..d2d9338` plus their review fixes |
 | 0005 | MXFP4_MOE expert loading and kernels, uniform-expert validation, half-size slot arithmetic, numerical fixtures | `not offered, fork only` / `upstream supports JetBrains MXFP4_MOE` | `git log --reverse --format=%H --grep='MXFP4\|mxfp4' c97964b..d2d9338` limited to product/test commits, excluding research-only notes |
 | 0006 | Stream config, uncached descriptor, slot cache, stop/resume and overlapped loads, grouped prefill, read-fault handling | `not offered, fork only` / `upstream streams Mellum experts with equivalent behavior` | `git rev-list --reverse c97964b..d2d9338 -- ds4_mellum_stream.c ds4_mellum_stream.h` plus streaming hunks from `ds4.c ds4.h ds4_metal.m ds4_mellum_graph.inc` |
 
@@ -384,8 +394,8 @@ acceptance below.
 | --- | --- |
 | 0001 | `make tests/test_mellum_config && ./tests/test_mellum_config` passes model-free. Then run `DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_config > "$OUT/patch-0001-real.log" 2>&1` and require real validation/binding and the startup memory line, with no skip message for those sections. A host test proves `ds4_engine_is_mellum && ds4_engine_is_qwen4` and payload support is false |
 | 0002 | Run `make tests/test_mellum_config tests/test_mellum_tokenizer`, then `DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_config > "$OUT/patch-0002-config.log" 2>&1` and `DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_tokenizer > "$OUT/patch-0002-tokenizer.log" 2>&1`. Require 30/30 real tokenizer cases and every generated chat/history/tool-result case. The logs must not contain `skip ids` or a skip message for the required real-model sections. Token ids pin `<think>=23`, `</think>=24`, EOS=28 (`tests/test_mellum_config.c:565-622`) |
-| 0003 | `make test-mellum-kernels && DS4_TEST_MELLUM_MODEL="$Q8" make test-mellum-fastpath` passes; exact prefill/decode and 64 greedy tokens match the reference oracle; `make ds4_test && DS4_TEST_MELLUM_MODEL="$Q8" ./ds4_test --mellum-rewind` builds the current binary and has zero differing logit words at the frontier |
-| 0004 | Fast-path 45/45 and numerical caps from `MELLUM.md` pass; the Mac Studio n=6 baseline medians are within 10% of §2.3 and Qwen kernel tests pass |
+| 0003 | `make test-mellum-kernels` passes; run the published-Q8 exact prefill/decode and 64 greedy-id reference oracle on the 0003 tree and record the command, tree and result before optimization; `make ds4_test && DS4_TEST_MELLUM_MODEL="$Q8" ./ds4_test --mellum-rewind` builds the current binary and has zero differing logit words at the frontier |
+| 0004 | `DS4_TEST_MELLUM_MODEL="$Q8" make test-mellum-fastpath` reports 45/45 and numerical caps from `MELLUM.md` pass; the Mac Studio n=6 baseline medians are within 10% of §2.3 and Qwen kernel tests pass |
 | 0005 | Both SHA-verified files load, unsupported/mixed quants fail by name, MXFP4 reference logits pass, and Q8 resident medians do not regress by more than 10% (n=6) |
 | 0006 | `make test-mellum-stream` passes; streamed and resident greedy ids agree for 512 tokens in 3/3 runs per quant; the 16 GB and 8 GB physical gates in §8 pass |
 
@@ -623,9 +633,13 @@ Metal recommended working-set limit, planned bytes, Metal peak, host footprint,
 swap before/after, first token, prefill, generation, command, commit, and `n`.
 Never treat a startup plan alone as a peak measurement.
 
+All four physical rows are acceptance blockers, not optional measurements. Koudai
+owns the 36, 24, and 16 GB rows; Paul owns the 8 GB row. A pending row does not
+count as a pass.
+
 | Target | Required configuration and test | Acceptance |
 | --- | --- | --- |
-| 36 GB, Mac Studio M4 Max (this machine) | Both quants resident. Repeat §2.3 at its measured context 3072 with prefill/decode n=6. On this same Mac Studio, measure ds4-mellum `d2d9338` and then the port at context 32768 with the 2,686-token coding request n=3 | Port medians are within 10% of the same-machine reference. Exact greedy ids match. Metal peak is no more than 5% above the same-machine reference, with no swap growth |
+| 36 GB, Mac Studio M4 Max (Koudai's machine) | Both quants resident. Repeat §2.3 at its measured context 3072 with prefill/decode n=6. On this same Mac Studio, measure ds4-mellum `d2d9338` and then the port at context 32768 with the 2,686-token coding request n=3 | Port medians are within 10% of the same-machine reference. Exact greedy ids match. Metal peak is no more than 5% above the same-machine reference, with no swap growth |
 | 24 GB, MacBook Air M3 | Both quants resident at 32768; Q8 and MXFP4 n=3 each | §2.5 proves that both run and match ids, with Metal peaks 13.032 GiB Q8 and 7.317 GiB MXFP4. The reference run's swap grew by 596.87 MiB, so it does not pass. Require a controlled port run below the machine's limit, no swap growth, and exact ids |
 | 16 GB, Mac mini M1 | MXFP4 resident first; then Q8 streamed with `--ssd-streaming --ssd-streaming-cache-experts 6GB`. Copy only the quant currently tested; remove nothing else on the machine | The M5 Max 32K reference Metal peaks are 7.29 GiB MXFP4 and 12.78 GiB Q8 (`MELLUM.md:63-64`). Against the estimated 10.67 GiB limit, MXFP4 is the resident choice and Q8 needs streaming (`ROADMAP.md:181-191`). Require measured limit/peak/no swap and resident-vs-streamed exact ids. Do not intentionally run resident Q8 into swap |
 | 8 GB streaming case | MXFP4 only, `--ssd-streaming --ssd-streaming-cache-experts 2GB`, context 32768, apps closed | The reference is 5.85 t/s, 19.4 s first token, 3.86 GiB Metal peak, no swap growth, n=3 (`README.md:217`; `ROADMAP.md:323-327`). Require no swap, peak below the physical limit, exact resident/streamed ids, and generation at least 5.0 t/s. Do not use 2.5 GiB; it exceeds the measured limit by 68,976,640 bytes (`ROADMAP.md:331-332`) |
@@ -640,6 +654,20 @@ The 24 GB reference baseline is complete in §2.5. Its controlled port no-swap
 acceptance remains pending after the reference run's swap growth. The 8 GB row
 is a required run on its physical target, not a claim that this design session
 measured that machine.
+
+Tasks 10-16 are not acceptance-complete until every physical row and the following missing evidence are recorded:
+
+- 0001's `patch-0001-real.log` with the startup memory line and no required
+  skip, and 0002's `patch-0002-config.log` and `patch-0002-tokenizer.log` with
+  every generated chat/history/tool-result case and no required skip;
+- 0003's published-Q8 exact prefill/decode and 64 greedy-id oracle on the 0003 tree;
+- 0004's current Qwen kernel result and physical M4 Max performance;
+- 0005's current-export MXFP4 reference logits, Q8 non-regression, and the Task 15 MXFP4 pair;
+- 0006's MXFP4 resident-versus-streamed 512-token ids in 3/3 runs.
+
+This series-level acceptance rule does not change §4's per-patch order. The
+missing evidence must name the final export, model hash, host, command and raw
+output location.
 
 ## 9. Small implementation tasks for Paul
 
@@ -686,15 +714,17 @@ test first for behavior changes, and run its check before starting the next.
     Check: §4 patch 0001 plus `ds4-check --model mellum --build`.
 11. Engine patch 0002. Tokenizer/chat/thinking. Check: §4 patch 0002.
 12. Engine patch 0003a. Exact Q8 allocation/attention/MoE/forward. Check:
-    model-free kernels and exact oracle before optimization.
-13. Engine patch 0003b. Rewind/frontier and stripped persistence behavior.
-    Check: zero-logit-difference rewind plus real stripped save/rendered switch.
-14. Engine patch 0004. Optimized Q8. Check: numerical caps, 45/45 fast
-    paths, and Mac Studio n=6 performance.
+    model-free kernels and the published-Q8 exact prefill/decode and 64 greedy-id
+    oracle before optimization, recorded on the 0003 tree.
+13. Engine patch 0003b. Rewind/frontier and native payload refusal.
+    Check: zero-logit-difference rewind and native payload refusal.
+14. Engine patch 0004. Optimized Q8, including `DS4_MELLUM_EXACT_PREFILL` and
+    `test-mellum-fastpath`. Check: numerical caps, 45/45 fast paths, and Mac
+    Studio n=6 performance.
 15. Engine patch 0005. MXFP4. Check: both GGUF identities, reference logits,
     and Q8 non-regression.
 16. Engine patch 0006. SSD streaming. Check: scheduler unit tests, 3/3
-    exact streamed runs, and physical 16/8 GB gates.
+    exact streamed runs per quant, and physical 16/8 GB gates.
 17. Qwen prefix. After #24 merges, rebase/re-export its complete qwen35
     series, not only 0001-0008. Check: `ds4-check --model qwen35 --build`,
     `ds4-check --build`, and Qwen kernel/DFlash live regressions.
@@ -702,8 +732,9 @@ test first for behavior changes, and run its check before starting the next.
     Satyrn's recommended-sampling layer. Check: precedence test and real native
     default report match §5.
 19. Satyrn controls. Add Mellum DFlash/footer, think-budget and persistence
-    scenarios. Check: model-free 100% line+branch gate and real Metal controls.
-20. Memory matrix. Run §8 on physical targets. Check: publish command/raw
+    scenarios. Check: model-free 100% line+branch gate and real Metal controls,
+    including the real stripped save/rendered switch.
+20. Memory matrix. Koudai runs the 36, 24, and 16 GB rows and Paul runs the 8 GB row. Check: publish command/raw
     output/n for each row; pending rows do not count as passes.
 21. Tool comparison. Run §6's 120 tasks and record Koudai's auto-profile
     ruling. Check: reproducible table includes every run and the selected
@@ -723,8 +754,8 @@ test first for behavior changes, and run its check before starting the next.
    reviews and merges ds4-py.
 4. satyrn-agent `feat/mellum-support`. Paul ports the engine series,
    rebases qwen35, pins the companion commits, integrates controls and runs
-   acceptance. Koudai reviews. Keep engine patch commits separate from harness
-   behavior commits.
+   acceptance assigned to him in §8. Koudai reviews and owns the 36, 24 and 16 GB
+   physical rows. Keep engine patch commits separate from harness behavior commits.
 5. Open the ds4-mellum tracking issue "Port Mellum 2.1 to satyrn-agent"
    with the spec PR link. Paul tracks the work there; do not push to
    `pauleveritt/ds4-mellum`.
@@ -768,7 +799,14 @@ Implementation is also a satyrn-agent branch, `feat/mellum-support`, with
    merges them. Paul owns the satyrn-agent port.
 2. Koudai chooses `auto -> pi` or `auto -> native` only after the
    n=30/profile/quant comparison. No default choice is needed before then.
-3. Paul owns the physical 8 GB streaming acceptance run. It remains pending,
-   not silently waived. The 16 GB MXFP4 and 24 GB reference baselines are
-   complete in §2.4 and §2.5. The 24 GB port no-swap gate remains open after
-   the reference run's observed swap growth.
+3. Koudai owns the physical 36, 24 and 16 GB acceptance runs. Paul owns the
+   physical 8 GB streaming acceptance run. All four rows are acceptance blockers
+   and remain pending until recorded, not silently waived. The 16 GB MXFP4 and
+   24 GB reference baselines are complete in §2.4 and §2.5. The 24 GB port
+   no-swap gate remains open after the reference run's observed swap growth.
+4. `DS4_MELLUM_EXACT_PREFILL` and `test-mellum-fastpath` belong to 0004 because
+   they depend on its thresholds. Patch 0003 retains the published-Q8 exact
+   prefill/decode and 64 greedy-id oracle on its own tree.
+5. The core Mellum code uses the reference's six `ds4_mellum_*.inc` files listed
+   in §4, restored and revalidated before Task 17. The generated Unicode table
+   and the stream files remain separate as they are.
