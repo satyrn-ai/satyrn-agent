@@ -70,7 +70,7 @@ def test_tool_opener_has_exact_tentative_metadata_and_event_parity(live_settings
             wrapper,
             session,
             "Call the weather tool for Tokyo, then stop after the tool call.",
-            max_tokens=64,
+            max_tokens=128,
             sampling=SamplingPolicy(temperature=0.0, top_k=0, top_p=1.0, min_p=0.0, seed=3),
             tools=[definition],
             recorder=recorder,
