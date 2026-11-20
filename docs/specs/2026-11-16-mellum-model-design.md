@@ -633,6 +633,13 @@ Metal recommended working-set limit, planned bytes, Metal peak, host footprint,
 swap before/after, first token, prefill, generation, command, commit, and `n`.
 Never treat a startup plan alone as a peak measurement.
 
+The 36 GB coding request is the fork's `workload-prompt.txt` at
+`docs/superpowers/research/2026-10-28-mellum-s6-c-prereg/workload-prompt.txt`
+on branch `mellum-evidence-2026-10-31`: SHA-256
+`2f34a81791608814feb8e609a28725dac5879c5d2c2eb475eefb12620a73b95a`,
+8,770 bytes and 2,686 rendered tokens. Vendor that exact file as
+`tests/mellum_prompts/prompt_2686.txt` and use it for both the reference and port.
+
 All four physical rows are acceptance blockers, not optional measurements. Koudai
 owns the 36, 24, and 16 GB rows; Paul owns the 8 GB row. A pending row does not
 count as a pass.
