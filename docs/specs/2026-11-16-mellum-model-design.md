@@ -396,7 +396,7 @@ acceptance below.
 | 0002 | Run `make tests/test_mellum_config tests/test_mellum_tokenizer`, then `DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_config > "$OUT/patch-0002-config.log" 2>&1` and `DS4_TEST_MELLUM_MODEL="$Q8" ./tests/test_mellum_tokenizer > "$OUT/patch-0002-tokenizer.log" 2>&1`. Require 30/30 real tokenizer cases and every generated chat/history/tool-result case. The logs must not contain `skip ids` or a skip message for the required real-model sections. Token ids pin `<think>=23`, `</think>=24`, EOS=28 (`tests/test_mellum_config.c:565-622`) |
 | 0003 | `make test-mellum-kernels` passes; run the published-Q8 exact prefill/decode and 64 greedy-id reference oracle on the 0003 tree and record the command, tree and result before optimization; `make ds4_test && DS4_TEST_MELLUM_MODEL="$Q8" ./ds4_test --mellum-rewind` builds the current binary and has zero differing logit words at the frontier |
 | 0004 | `DS4_TEST_MELLUM_MODEL="$Q8" make test-mellum-fastpath` reports 45/45 and numerical caps from `MELLUM.md` pass; the Mac Studio n=6 baseline medians are within 10% of §2.3 and Qwen kernel tests pass |
-| 0005 | Both SHA-verified files load, unsupported/mixed quants fail by name, MXFP4 reference logits pass, and Q8 resident medians do not regress by more than 10% (n=6) |
+| 0005 | Both SHA-verified files load, unsupported/mixed quants fail by name, and MXFP4 reference logits pass. The performance comparison uses the current 0005 export, published MXFP4 file, and immutable `d2d9338` reference through §2.3's prefill/decode runners with n=6 on one machine. Q8 resident medians do not regress by more than 10% (n=6) |
 | 0006 | `make test-mellum-stream` passes; streamed and resident greedy ids agree for 512 tokens in 3/3 runs per quant; the 16 GB and 8 GB physical gates in §8 pass |
 
 Port the relevant model-free tests with each patch rather than deferring all
@@ -662,7 +662,7 @@ Tasks 10-16 are not acceptance-complete until every physical row and the followi
   every generated chat/history/tool-result case and no required skip;
 - 0003's published-Q8 exact prefill/decode and 64 greedy-id oracle on the 0003 tree;
 - 0004's current Qwen kernel result and physical M4 Max performance;
-- 0005's current-export MXFP4 reference logits, Q8 non-regression, and the Task 15 MXFP4 pair;
+- 0005's current-export MXFP4 reference logits and Q8 non-regression, plus the comparison of the current 0005 export, published MXFP4 file, and immutable `d2d9338` reference through §2.3's prefill/decode runners with n=6 on one machine;
 - 0006's MXFP4 resident-versus-streamed 512-token ids in 3/3 runs.
 
 This series-level acceptance rule does not change §4's per-patch order. The
@@ -722,7 +722,8 @@ test first for behavior changes, and run its check before starting the next.
     `test-mellum-fastpath`. Check: numerical caps, 45/45 fast paths, and Mac
     Studio n=6 performance.
 15. Engine patch 0005. MXFP4. Check: both GGUF identities, reference logits,
-    and Q8 non-regression.
+    Q8 non-regression, and the pair using the current 0005 export, published MXFP4 file,
+    and immutable `d2d9338` reference through §2.3's prefill/decode runners with n=6 on one machine.
 16. Engine patch 0006. SSD streaming. Check: scheduler unit tests, 3/3
     exact streamed runs per quant, and physical 16/8 GB gates.
 17. Qwen prefix. After #24 merges, rebase/re-export its complete qwen35
