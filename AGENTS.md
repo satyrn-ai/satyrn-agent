@@ -24,6 +24,15 @@ uv sync --frozen
 uv run --frozen prek install
 ```
 
+The shell is CUDA-free by default. `devenv.nix` adds the pinned CUDA 12.9
+toolchain only when `DS4_CUDA=1`, because its closure is about 1.5 GiB and every
+Linux CI job enters the same shell. Run CUDA builds and tests through
+`tools/ds4-cuda.sh`, which sets the flag:
+
+```bash
+tools/ds4-cuda.sh make -C .ds4/tree CUDA_ARCH=sm_86 test-qwen35-cuda-quant
+```
+
 `devenv.lock` pins the Nix inputs and Python 3.14 interpreter. `uv.lock` pins
 Python tools and packages. `UV_PYTHON_DOWNLOADS=never` prevents uv from
 downloading another interpreter.
