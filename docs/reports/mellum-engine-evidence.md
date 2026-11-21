@@ -215,6 +215,13 @@ from its own tree, `ARMS=AA`, n=6 after the per-block drop:
 Raw runs: `/tmp/mellum-step2-fixed/{port0005,ref}-{prefill,decode}/runs.txt`. The comparison passes
 its 10% gate **only** with the math-mode fix; without it prefill is 2,254-2,330 t/s, 43% down.
 
+**Superseding note (2026-11-21, Nix-canonical).** The pair above was measured with the Xcode
+toolchain. The Nix toolchain is now the only one used for builds and measurements, and it compiles the
+Metal 4 tensor probe out (`tensor_matmul=off`), so under Nix the reference must be rebuilt the same way
+and the pair is instead port 2,327 t/s against a Nix reference's 2,326 t/s prefill — parity, but on the
+slower path. The math-mode fix is still required for determinism and for SDK-26 builds, but its 43% is
+not recoverable under Nix until the Metal 4 detection is runtime-gated (#37).
+
 The fix belongs in common patches 0002/0003: set `options.mathMode = MTLMathModeFast;` next to each
 `languageVersion` assignment. That restores the reference's documented fast default (`fastMathEnabled`
 defaults to YES) while keeping the language pin that the Python-host SDK case needs. Because common is
