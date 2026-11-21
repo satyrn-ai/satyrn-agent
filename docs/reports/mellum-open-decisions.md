@@ -4,9 +4,9 @@ Status of the items that cannot be closed inside this worktree, written so they 
 
 ## 1. Exact-prefill diagnostic and fast-path target — resolved: they stay in 0004
 
-Koudai accepted the move on 2026-11-20; spec §4/§9 now put both in 0004. Remaining action: record the
-published-Q8 exact oracle on the 0003 tree (the 0003 graph is already exact, so the oracle runs there without
-the 0004 diagnostic).
+Koudai accepted the move on 2026-11-20; spec §4/§9 now put both in 0004. The published-Q8 exact oracle
+on the 0003 tree is recorded in `mellum-engine-evidence.md`; the exact graph runs it without the 0004
+diagnostic. Preserve the measured tree and any later relocation-equivalence evidence separately.
 
 The spec's §4 table originally put `DS4_MELLUM_EXACT_PREFILL` in patch 0003 and its §9 acceptance for 0003 ran
 `DS4_TEST_MELLUM_MODEL="$Q8" make test-mellum-fastpath`. Both shipped in 0004 instead, because:
@@ -37,14 +37,16 @@ repository).
 **Question for both:** does #24 land before the Mellum PR opens, and who rebases qwen35 afterwards? The spec
 assigns it to Paul and the review to Koudai.
 
-**Resolved:** #24 merged on 2026-11-21 as `eed5c4f`, before the Mellum PR opened, and Paul rebased qwen35
+**Resolved:** #24 merged on 2026-11-21 as `eed5c4f`, after Mellum PR #29 opened, and Paul rebased qwen35
 in this worktree (Task 17). All eighteen patches now sit on the Mellum tip `f2c40f41` and export from tip
 `320627f2`; the boundary checks, the tooling suite (50/50), and the kernel gates pass. The rebase resolved
 two semantic conflicts in the qwen35 patches in favour of #24: 0002 renders a system turn's `<tool_call>`
 and the `<tool_response>` wrapper as the template's added tokens for every qwen4 shape, and 0004 keeps the
 Qwen family's 0.6 / 20 / 0.95 / 0 defaults. That means Mellum no longer narrows Flash Next's rendering
 to Mellum alone, and `tests/test_mellum_config.c`'s sibling assertions were updated to match. Koudai's
-review of those two resolutions is the remaining step on this item.
+focused review of those two resolutions is recommended before merge. The approvals do not require a
+new design ruling; the missing Make include dependencies and evidence corrections found in the
+[2026-11-21 review](2026-11-21-mellum-review.md) are tracked in the plan's engine closure checklist.
 
 ## 3. Physical acceptance on 36 / 24 / 16 / 8 GB
 
@@ -67,6 +69,11 @@ file-by-file diff against `d2d9338` (the closest thing to Koudai's byte-identity
 from the still-moving `ds4-mellum` cheaper. The series now carries `ds4_mellum_config.inc`,
 `ds4_mellum_plan.inc`, `ds4_mellum_tokenizer.inc`, `ds4_mellum_graph_alloc.inc`, `ds4_mellum_graph.inc` and
 `ds4_mellum_test_hooks.inc`; only `ds4_mellum_unicode.inc` and `ds4_mellum_stream.[ch]` were already separate.
+
+Implementing the ruling also means declaring the includes as Make dependencies: 0001–0003 add
+`MELLUM_DS4_INCS` entries at each introducing boundary and name every `ds4.c` consumer, so an
+incremental build cannot report "up to date" after an include changes. The regression is
+`tests/ds4_series_deps_test.sh`; the review's P1 finding records why the pristine gates missed it.
 
 A second, concrete rebase surface is independent of the `.inc` choice: 0003 wraps
 `ds4_gpu_qwen4_attn_decode_tensor` / `ds4_gpu_qwen4_attn_decode_rows_tensor` in static `_impl(..., bool ungated)`

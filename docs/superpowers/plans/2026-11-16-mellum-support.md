@@ -14,28 +14,56 @@
 
 ## Current checkpoint and open acceptance
 
-Engine patches 0001–0006 are implemented and exported. This is an implementation checkpoint, not
-completion of every patch's acceptance. The [evidence/status table](../../reports/mellum-engine-evidence.md#patch-discipline-checkpoint-2026-11-18)
-supersedes earlier ledger completion claims affected by the Q8 model-provenance correction.
-Required published-file per-prefix config/tokenizer/oracle/rewind/numerical and performance reruns
-remain open, alongside the physical memory matrix and complete Qwen/downstream acceptance.
+Reviewed on 2026-11-21 at satyrn-agent `862ff0b`, against main `eed5c4f` and published
+PR #29 head `8ccc4fc`. See the [deep review](../../reports/2026-11-21-mellum-review.md)
+for findings, verification and the effect of the approvals.
 
-The exact-prefill diagnostic and `test-mellum-fastpath` target are delivered in 0004, although spec §4
-assigns them to 0003. This boundary deviation remains for Koudai's review; it does not remove either
-patch's numerical/oracle acceptance requirements. The spec itself is unchanged.
+**Delivery split:** PR #29 is the engine checkpoint (Tasks 10–17); the Satyrn harness
+integration, controls, tool comparison and final physical acceptance ship separately.
+Approval of the checkpoint does not complete the spec's full acceptance.
 
-The spec's prerequisite that PR #24 merge before Mellum implementation was not followed. PR #24 merged
-on 2026-11-21 as `eed5c4f`, and Task 17 has since rebased the complete 18-patch qwen35 series onto the
-Mellum tip (`f2c40f41`) and re-exported it: every boundary reconstructs from a pristine clone, the shell
-suite passes 50/50, `ds4-check --build` builds each target, and the Qwen kernel and live suites match
-what `eed5c4f`'s own series produces. The single live TUI failure (`max_tokens` on the round after
-`/switch`) reproduces identically on a build of `eed5c4f`'s own series, so it is a pre-existing live-gate
-failure, not a rebase regression. Full-stack Mellum acceptance still does not follow from that: the
-physical rows and the published-file reruns above remain open, as do owner notification and approval of
-the deviations listed here.
+| Work | Current status | Remaining gate |
+| --- | --- | --- |
+| Engine 0001–0006 | Implemented/exported; published-model numerical and tokenizer results recorded | Fix missing Make dependencies for the restored `.inc` files before merge |
+| Exact-prefill placement and reference layout | Koudai's decisions implemented; 0003 exact oracle recorded | Preserve the original measured trees; no new design ruling needed |
+| Task 17 | All 18 qwen35 patches rebased and exported; common/Mellum/full targets reconstruct | Fresh CI after push; focused review of the unreviewed relocation and conflict resolutions |
+| Published-Q8 per-prefix evidence | Recorded; older different-hash measurements remain historical | Reconcile provenance rather than repeat every unchanged gate |
+| Task 15 MXFP4 performance | The corrected table measures 0006, not the required current 0005 export | Current-0005 MXFP4/reference n=6 pair and attributable numerical/Q8 non-regression evidence |
+| Resident/streamed 512-token parity | Both quants reported 3/3 on `8b8ef87a`; raw ledger also contains older `ece0d5fe` runs | Preserve measured tree IDs and record final combined-stack runs with raw IDs |
+| Physical 36/24/16/8 GB matrix | Pending; M4 Max n=1 screen is supplemental | Koudai: 36/24/16 GB; Paul: 8 GB; all spec thresholds still apply |
+| Qwen live suite | Recorded 48 pass, 1 failure after `/switch`, also reported on main's engine | Track the baseline failure explicitly; do not call the full live gate green |
+| ds4-py companions A/B | Not present among the current PRs in `rochecompaan/ds4-py` | Koudai authors, Roché reviews/merges; then Task 18 can consume one reviewed descendant containing both |
 
-The cleanup regenerated engine commit messages with all six source trees unchanged. Historical native
-results retain the original commit/tree provenance; metadata changes are not presented as new model runs.
+Current engine identities are Mellum commit `f2c40f41`, tree `ca243153`, and combined
+commit `320627f2`, tree `ee45405c`. A commit ID is not a tree ID. Record both, plus
+model/prompt hashes, backend, machine, context, command, repetitions and raw artifacts.
+These IDs will change when the build-dependency fix is exported.
+
+Fresh review checks on the combined tree pass: all-files static gate, 50 shell
+tests, 290 model-free cases at 100% coverage, real-model config/chat/tokenizer,
+56 stream checks, 4 trace-stream checks, 992 kernels and the published-Q8 oracle
+(29/1,100/2,200 inputs, 64/64 greedy decode IDs with equal logits). The optimized
+prefill oracle uses tolerance bounds at long prompts; it is not byte-identical
+to the reference there and permits two sampled near-tie top-1 changes at 1,100.
+See the review report for the commands, identities and numerical limits.
+
+The shared-code relocation from `8b8ef87a` to `ca243153` changes only `ds4.c` and
+`ds4_mellum_graph.inc`. Expanding the Mellum includes produces byte-identical `ds4.c`
+(SHA-256 `391d3ba992b840d6669c48af69b6df1c10ea1d6c61a9d6ab8b78c2b58ba22c25`).
+Older results remain useful with their original provenance; this is not a rerun on
+the new export or proof of the later combined qwen35 stack.
+
+Roché explicitly requested proceeding without waiting for CUDA on 2026-11-20.
+PR #24 has since merged as `eed5c4f`. Notify both owners that Task 17 is complete;
+do not schedule another qwen35 rebase unless main changes again. The PR approvals
+remove the need to reopen the settled design decisions. GitHub currently imposes
+no branch-protection review gate; focused review of later changes is a technical
+recommendation, not a requirement to obtain permission again.
+
+The immediate sequence is the engine closure checklist after Task 17, then push,
+fresh CI and the engine checkpoint merge. Run the independent physical/evidence
+work alongside the companion handoff, rather than queueing all of it behind merge.
+The full product acceptance remains open until all required rows and live gates pass.
 
 ## Global Constraints
 
@@ -67,7 +95,7 @@ results retain the original commit/tree provenance; metadata changes are not pre
 
 # Part A — ds4-py companions (handoff to Koudai)
 
-Repo `satyrn-ai/ds4-py` at `95d52cbb9f189c9a940e777e9fab6baa15eac622`. Tasks 1–6 are companion PR A (Hermes), tasks 7–9 companion PR B (tool profiles). Both PRs use ds4-py's own conventions: plans in `docs/plans/`, devenv, `uv run --frozen --extra agent`, and the portable gate `uv run --frozen --extra agent pytest -m "not build and not live" -q`.
+Repo `rochecompaan/ds4-py`. The original plan used `95d52cbb9f189c9a940e777e9fab6baa15eac622`; Satyrn now pins `7d80c7c62a36d536521c657fe15d6b4aca28e1dd`. Reconcile these file/API references against the current reviewed companion base before implementation. Tasks 1–6 are companion PR A (Hermes), tasks 7–9 companion PR B (tool profiles). Both PRs use ds4-py's own conventions: plans in `docs/plans/`, devenv, `uv run --frozen --extra agent`, and the portable gate `uv run --frozen --extra agent pytest -m "not build and not live" -q`.
 
 ### Task 1: Mellum identity and family precedence
 
@@ -305,7 +333,7 @@ Expected: FAIL — unexpected keyword `tool_profile`.
 
 - [ ] **Step 3: Implement the plumbing**
 
-Thread the value through options, runtime and composition; `auto` maps existing families to `native` and Mellum to `pi` (a development hypothesis, not a claimed result).
+Thread the value through options, runtime and composition. Existing families keep `auto -> native`; explicit `native` and `pi` enable the comparison on Mellum. Planning choice: retain the existing native fallback for provisional Mellum `auto` behavior until the ruling; run the comparison with explicit profiles. This is not the accepted Mellum default: Koudai decides it after the comparison, per spec §6/§11.
 
 - [ ] **Step 4: Run and verify GREEN, then commit**
 
@@ -361,11 +389,11 @@ git commit -m "feat(agent): expose read, bash, edit and write for the pi profile
 
 **Interfaces:**
 - Consumes: tasks 7–8.
-- Produces: `auto` resolves to `pi` for a Mellum `EngineInfo` and to `native` otherwise; explicit values always win.
+- Produces: explicit `native`/`pi` selection for Mellum and unchanged `auto -> native` for existing families. The permanent Mellum `auto` mapping and its regression assertion are completed only after Koudai's measured ruling in the tool-comparison task.
 
 - [ ] **Step 1: Write the failing selection tests**
 
-Assert `auto` with `is_mellum=True` exposes the four Pi names, `auto` with a Qwen fixture exposes the native names, and explicit `native`/`pi` override both.
+Assert a Mellum fixture exposes exactly the four Pi names under explicit `pi`, explicit `native` selects the native tools, and `auto` with a Qwen fixture keeps the native names. Add the final Mellum `auto` assertion after the measured ruling.
 
 - [ ] **Step 2: Run and verify RED**
 
@@ -393,7 +421,7 @@ Work in the task worktree on `feat/mellum-support`. Engine work happens in the d
 
 ### Task 10: Engine patch 0001 — model config, memory and host contract
 
-**Status:** Implemented/exported; required real-model config/host acceptance needs repeating at this prefix with the published Q8 file.
+**Status:** Implemented/exported. Published-Q8 config, binding and host-refusal results are recorded at prefix tree `d607f0f0`; the earlier different-hash runs remain historical.
 
 **Files:**
 - Create: `patches/mellum/0001-mellum-model-config-memory-and-host-contract.patch`
@@ -456,7 +484,7 @@ git commit -m "feat(ds4): carry the Mellum model config and host contract"
 
 ### Task 11: Engine patch 0002 — tokenizer, chat and thinking
 
-**Status:** Implemented/exported; required real-model config/tokenizer/chat acceptance needs repeating at this prefix with the published Q8 file, without skipped sections.
+**Status:** Implemented/exported. Published-Q8 config, chat and 30/30 tokenizer results are recorded at prefix tree `9974c264`.
 
 **Files:**
 - Create: `patches/mellum/0002-mellum-tokenizer-chat-and-thinking.patch`
@@ -494,7 +522,7 @@ git add patches/mellum && git commit -m "feat(ds4): carry the Mellum tokenizer, 
 
 ### Task 12: Engine patch 0003 (part 1) — exact Q8 Metal graph
 
-**Status:** Implemented/exported with Task 13. Per-prefix acceptance at the 0003 clone (`ca4372c6`) passes: config, 509 kernel checks, `ds4_test --mellum-rewind` OK. The published-Q8 oracle is recorded in `docs/reports/mellum-engine-evidence.md`.
+**Status:** Implemented/exported with Task 13. Per-prefix acceptance at the 0003 clone (current tree `dc4d8de4`) passes: config, 509 kernel checks, `ds4_test --mellum-rewind` OK. The published-Q8 oracle is recorded in `docs/reports/mellum-engine-evidence.md`.
 
 **Files:**
 - Create: `patches/mellum/0003-mellum-exact-q8-metal-graph-and-rewind.patch`
@@ -504,7 +532,7 @@ git add patches/mellum && git commit -m "feat(ds4): carry the Mellum tokenizer, 
 
 **Interfaces:**
 - Consumes: patch 0002.
-- Produces: exact Q8 graph, allocation, sliding/full attention, 64 routed experts with top 8, MoE, logits, and trace diagnostics. Rewind lands in task 13 and is squashed into this same patch file. The exact-prefill switch and fast-path target land in Task 14; this differs from spec §4 and remains an open boundary review item.
+- Produces: exact Q8 graph, allocation, sliding/full attention, 64 routed experts with top 8, MoE, logits, and trace diagnostics. Rewind lands in task 13 and is squashed into this same patch file. The exact-prefill switch and fast-path target land in Task 14; Koudai accepted this placement and spec §4/§9 now match it.
 
 - [ ] **Step 1: Port the model-free kernel and oracle tests first**
 
@@ -524,7 +552,7 @@ git add patches/mellum && git commit -m "feat(ds4): run an exact Mellum Q8 Metal
 
 ### Task 13: Engine patch 0003 (part 2) — rewind and frontier
 
-**Status:** Implemented/exported; repeat published-Q8 rewind/frontier/logit acceptance at the 0003 prefix.
+**Status:** Implemented/exported; published-Q8 rewind/frontier and exact-oracle results are recorded. The current prefix is `dc4d8de4`; retain the measured tree and relocation equivalence separately.
 
 **Files:**
 - Modify: `patches/mellum/0003-mellum-exact-q8-metal-graph-and-rewind.patch`
@@ -618,7 +646,7 @@ git add patches/mellum && git commit -m "feat(ds4): add the Mellum Q8 fast paths
 
 ### Task 15: Engine patch 0005 — MXFP4_MOE experts
 
-**Status:** Implemented/exported. Q8 non-regression across 0004→0005→0006 is recorded (3,956/124.40, 3,964/127.78, 3,994/127.87 t/s) against the same-machine reference (3,978/128.32), and the MXFP4 pair (4,085/151.99 against 4,074/152.13). Physical memory rows remain pending.
+**Status:** Implemented/exported. Older Q8 non-regression is recorded. The MXFP4 pair (4,085/151.99 against 4,074/152.13) was measured at 0006, so it does not close spec §4/§8's current-0005 n=6 comparison. Record that comparison, prefix-specific MXFP4 numerical evidence and attributable Q8 non-regression; physical rows remain pending.
 
 **Files:**
 - Create: `patches/mellum/0005-mellum-mxfp4-moe-experts.patch`
@@ -650,7 +678,7 @@ git add patches/mellum && git commit -m "feat(ds4): load Mellum MXFP4_MOE expert
 
 ### Task 16: Engine patch 0006 — SSD expert streaming
 
-**Status:** implementation/export and current-machine validation complete; full acceptance remains open for the physical 16 GB / 8 GB gates. See [evidence](../../reports/mellum-engine-evidence.md).
+**Status:** Implemented/exported. Both quants' 3/3 resident/streamed parity is reported at `8b8ef87a`; the JSON currently relabels it as `ca243153` without new raw runs. Correct that provenance and record final combined-stack parity. Physical 16 GB / 8 GB gates remain open. See [evidence](../../reports/mellum-engine-evidence.md).
 
 **Files:**
 - Create: `patches/mellum/0006-mellum-ssd-expert-streaming.patch`
@@ -698,7 +726,7 @@ git add patches/mellum && git commit -m "feat(ds4): stream Mellum experts from t
 - Produces: the complete qwen35 series rebased after `mellum`, with unchanged Qwen behavior.
 - Prerequisite: per spec §2.2 and §10, PR #24 merges **before** Mellum implementation and both owners are told. It changes qwen35 0001–0008, adds 0009–0018, and changes `tools/ds4-check.sh`, so the rebase covers the then-current 18-patch series, not the eight files we have today.
 
-**Status:** done on 2026-11-21 against `eed5c4f` (PR #24 plus #32, merged 08:25:48Z). The eighteen
+**Status:** implementation done on 2026-11-21 against `eed5c4f` (PR #24 plus #32, merged 08:25:48Z). The eighteen
 commits rebase onto `f2c40f41` without merge commits; the export reconstructs every boundary and ends at
 tip `320627f2`. Two semantic conflicts are resolved in the qwen35 patches, where the newer series wins:
 0002 restores #24's rendering of a system turn's `<tool_call>` and of the `<tool_response>` wrapper as
@@ -749,10 +777,75 @@ reconstruction equals the tree at every boundary and all three builds (`common`,
 0 failures), and `pytest tests/abnormal tests/e2e/live` gives 48 passed, 1 failed. The failure is
 `test_harness_tui`'s `error: model response ended with max_tokens` on the round after `/switch`; running
 the same test against a `ds4py build` of `eed5c4f`'s own qwen35 series fails at the same assertion with
-the same message, so Qwen behavior is unchanged by the rebase. The recorded DFlash parity and metric
-cases pass.
+the same message. This supports a baseline-failure attribution, not a fully green live gate or proof
+of every Qwen behavior. Preserve both build identities and track the failing acceptance explicitly.
+The recorded DFlash parity and metric cases pass.
 
 Run the existing Qwen live DFlash and kernel checks and require the recorded numbers to hold. Commit the re-exported series.
+
+### Engine closure before pushing PR #29
+
+This checklist is the current execution order; earlier task steps describe the
+original implementation procedure. The spec's Task 19 (controls and stripped
+save/rendered switch) is included in this plan's Task 18. The plan's Task 19 is
+the spec's Task 21 (tool comparison); keep these names in handoffs.
+
+- [x] **Fix the missing include dependencies, with a failing regression first.**
+
+In the scratch engine, cover changes to `ds4_mellum_config.inc`, `plan.inc`,
+`tokenizer.inc`, `unicode.inc`, `graph_alloc.inc`, `graph.inc` and `test_hooks.inc`
+for every object that compiles or directly includes `ds4.c`, including CPU and
+test-hook objects. With otherwise up-to-date objects, `make -n -W INCLUDE OBJECT`
+must schedule compilation; the review reproducer currently reports "up to date".
+Add dependencies at their introducing patch boundaries, keep `all` as the default
+Make target, re-export the owned Mellum and dependent qwen35 series, and verify
+the six Mellum prefixes still build from pristine trees.
+
+Result: `tests/ds4_series_deps_test.sh` reproduces the review's four cases as
+failures on the old export (every boundary) and passes after the fix. Each
+Mellum patch adds its includes to `MELLUM_DS4_INCS` at its introducing boundary
+(0001 config/plan, 0002 tokenizer/unicode, 0003 graph_alloc/graph/test_hooks);
+the group rule names every `ds4.c` consumer, the two qwen35 test objects join it
+in the patches that add them, and `.DEFAULT_GOAL` stays `all`. Exports: Mellum
+tip `9892cc0a`, combined tip `b4a71c81`. `ds4-check --build` passes for common,
+Mellum and qwen35; the shell suite is 53/53; `make test-mellum`,
+`test-mellum-kernels` (992 checks) and `test-qwen4-kernels` pass.
+
+- [ ] **Reconcile the evidence before claiming current acceptance.**
+
+Keep raw `ece0d5fe`/`8b8ef87a` runs attached to those measured trees; record any
+source-equivalence claim separately. Capture the current-0005 MXFP4/reference
+n=6 comparison. On the final combined export, rebuild the test executables and
+run Mellum config/tokenizer, 992 kernels, rewind, fast paths, the published-Q8
+oracle and 512-token parity (3 resident + 3 streamed per quant), retaining raw
+IDs and exact commit/tree/model/prompt identities. Run Qwen kernel/DFlash/live
+regressions; carry the existing `/switch` failure as an explicit baseline issue
+with the old/new build identities rather than reporting all live tests passing.
+
+- [ ] **Make PR #29 describe the reviewable result, then push without force.**
+
+Base the description on main `eed5c4f`; describe the engine plus Task 17, new
+prefix IDs, the shared-code relocation, the two qwen35 semantic resolutions,
+and the build-dependency fix. Remove the obsolete design questions, "not a
+merge request", and "qwen35 not in this PR" language. Name each pending physical
+or harness acceptance item and its owner. Check the actual remote head remains
+an ancestor before pushing; the inspected local branch descends from `8ccc4fc`.
+
+- [ ] **Require fresh CI for the pushed head before merging the engine checkpoint.**
+
+All checks must describe that head; the existing red result belongs to `8ccc4fc`.
+In particular verify Linux CPU builds as well as local Metal gates. Seek focused
+technical review of the post-approval changes without reopening the accepted
+layout/placement decisions. Notify Koudai and Roché that the full 18-patch rebase
+is complete; notification requires the user's instruction to post. After the
+description is accurate and checks pass, make ready and merge with the existing
+merge-commit convention. Do not claim Tasks 10–16 fully accepted while physical
+or per-prefix performance gates remain open.
+
+Run the physical matrix/current-0005 measurement and companion A/B handoff as
+independent workstreams. Follow with Task 18, the 120-run tool comparison and
+Koudai's default-profile ruling, then full product acceptance. Waiting for the
+small machines need not block preparing the companion or harness work.
 
 ### Task 18: Companion pin, recommended sampling and Mellum control behavior
 
@@ -768,7 +861,7 @@ Run the existing Qwen live DFlash and kernel checks and require the recorded num
 
 **Interfaces:**
 - Consumes: the two ds4-py companion commits (tasks 1–9) for `--tool-profile`, `is_mellum`, and the Hermes protocol; `merge_sampling`.
-- Blocked by: companion PRs A and B merged into `satyrn-ai/ds4-py`. Until they are, pin the reviewed branch heads and record both SHAs in the commit message; do not pin an unreviewed range.
+- Blocked by: companion PRs A and B reviewed and merged into `rochecompaan/ds4-py`, as required by spec §10. Use one reviewed dependency commit containing both companions, and record both PR/commit identities. PR #29 approval does not unblock this dependency.
 - Produces: `MELLUM_RECOMMENDED: SamplingPolicy` (0.6 / 0.95 / 20); `merge_sampling(base, native, recommended, overrides, seed)` with the order `native → recommendation → overrides`; `DFlashUnavailable("Mellum has no DFlash drafter; unset drafter_path")` raised before mutation; `corpus.py` honouring `SATYRN_TEST_CORPUS`.
 
 - [ ] **Step 1: Write the failing sampling-precedence test**
@@ -781,7 +874,7 @@ Run: `devenv shell -- uv run --frozen pytest tests/e2e/model_free/test_engine.py
 
 - [ ] **Step 3: Implement the sampling layer and pin the companions**
 
-Insert the recommendation between native defaults and overrides in `SatyrnEngine.session()`, and update the `ds4py[agent]` pin to the two companion commits.
+Insert the recommendation between native defaults and overrides in `SatyrnEngine.session()`, and update the `ds4py[agent]` pin to one reviewed descendant containing both merged companions.
 
 - [ ] **Step 3b: Define the no-drafter fixture and corpus**
 
@@ -807,7 +900,7 @@ git add pyproject.toml src/satyrn_agent tests/e2e
 git commit -m "feat(satyrn): add Mellum sampling, DFlash and persistence behavior"
 ```
 
-### Task 19: Tool-profile comparison
+### Task 19: Tool-profile comparison (spec Task 21)
 
 **Files:**
 - Create: `tests/e2e/live/mellum_tool_bakeoff.py`
@@ -847,14 +940,14 @@ git add tests/e2e/live/mellum_tool_bakeoff.py tests/e2e/live/fixtures/tool_bakeo
 git commit -m "test(e2e): compare native and pi tool profiles on Mellum"
 ```
 
-### Task 20: Memory matrix on physical targets
+### Task 20: Memory matrix on physical targets (spec Task 20)
 
 **Files:**
 - Create: `docs/reports/mellum-memory-acceptance.md`
 
 **Interfaces:**
 - Consumes: patches 0001–0006 and a built `libds4`.
-- Produces: one row per target with command, commit, machine, `n`, Metal limit, planned bytes, Metal peak, host footprint, swap before/after, first token, prefill and generation.
+- Produces: one row per target with command, commit and tree, model/prompt hashes, machine, `n`, Metal limit, planned bytes, Metal peak, host footprint, swap before/after, first token, prefill and generation. Koudai owns 36/24/16 GB; Paul owns 8 GB. This task consumes the engine and can run independently of Task 18. Capture the limit/startup plan from stderr and swap before/after separately: the C driver JSON does not contain every required field.
 
 - [ ] **Step 0: Pin the inputs**
 
@@ -884,17 +977,17 @@ Both quants resident at 32768, n=3 each. 13.032 GiB Q8 and 7.317 GiB MXFP4 are t
 
 - [ ] **Step 3: 16 GB Mac mini**
 
-MXFP4 resident first, then Q8 streamed with a 6GB expert cache. Copy only the quant under test; touch nothing else. Record the measured Metal limit, planned bytes and peak, require the peak below that limit, no swap growth, and resident-versus-streamed exact ids.
+MXFP4 resident first, then Q8 streamed with a 6GB expert cache (`--stream-bytes 6442450944` in the C driver). Copy only the quant under test; touch nothing else. Record the measured Metal limit, planned bytes and peak, require the peak below that limit, no swap growth, and exact ids against a resident baseline captured on a machine that fits the same model/prompt/context. Do not run resident Q8 on the 16 GB machine to obtain that baseline.
 
 - [ ] **Step 4: 8 GB streaming case**
 
-MXFP4 only, 2GB cache, context 32768, apps closed. Require no swap, peak below the physical limit, exact resident/streamed ids, and generation at least 5.0 t/s.
+Paul runs MXFP4 only, 2GB cache (`--stream-bytes 2147483648` in the C driver), context 32768, apps closed, n=3. Require no swap, peak below the measured Metal limit, exact ids against the same-input resident baseline from a larger machine, and generation at least 5.0 t/s. Do not run a resident baseline on the 8 GB machine.
 
 - [ ] **Step 5: Publish and commit**
 
 Mark the Air's controlled no-swap gate open until it passes, and the 8 GB row pending if unrun. Commit the report.
 
-### Task 21: Final repository gates
+### Task 21: Final repository gates (spec Task 22)
 
 **Files:**
 - Modify: any file a gate failure implicates
@@ -934,4 +1027,4 @@ Run the live Mellum and Qwen suites with no skipped branches. No model-free resu
 git add -A && git commit -m "chore: final Mellum acceptance"
 ```
 
-Open the `satyrn-ai/satyrn-agent` PR for `feat/mellum-support` and run `pr-review-loop`.
+The engine checkpoint is PR #29. Open the follow-up Satyrn integration PR from a new branch based on the merged engine checkpoint, link the remaining acceptance artifacts, and run `pr-review-loop`.
