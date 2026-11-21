@@ -14,6 +14,7 @@ DS4_MODULES=(
     ds4_sync_test
     ds4_export_test
     ds4_check_test
+    ds4_common_math_test
     ds4_series_deps_test
     ds4_e2e_preflight_test
 )

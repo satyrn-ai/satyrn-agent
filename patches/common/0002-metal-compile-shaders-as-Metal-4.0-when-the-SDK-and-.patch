@@ -1,7 +1,7 @@
-From d2c13665b44c92c9915385959e794e280ca7e1c4 Mon Sep 17 00:00:00 2001
+From 9710af08014d753e59495a7ceabed43dc2c46842 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Mon, 12 Oct 2026 11:00:29 +0900
-Subject: [PATCH 2/3] metal: compile shaders as Metal 4.0 when the SDK and OS
+Subject: [PATCH 2/4] metal: compile shaders as Metal 4.0 when the SDK and OS
  are 26 or later
 
 The default language version follows the SDK of the host executable, which hides Metal 4 under old-SDK hosts. Patch by Paul Everitt (ds4-engine PR #206).
