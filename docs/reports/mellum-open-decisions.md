@@ -37,6 +37,15 @@ repository).
 **Question for both:** does #24 land before the Mellum PR opens, and who rebases qwen35 afterwards? The spec
 assigns it to Paul and the review to Koudai.
 
+**Resolved:** #24 merged on 2026-11-21 as `eed5c4f`, before the Mellum PR opened, and Paul rebased qwen35
+in this worktree (Task 17). All eighteen patches now sit on the Mellum tip `f2c40f41` and export from tip
+`320627f2`; the boundary checks, the tooling suite (50/50), and the kernel gates pass. The rebase resolved
+two semantic conflicts in the qwen35 patches in favour of #24: 0002 renders a system turn's `<tool_call>`
+and the `<tool_response>` wrapper as the template's added tokens for every qwen4 shape, and 0004 keeps the
+Qwen family's 0.6 / 20 / 0.95 / 0 defaults. That means Mellum no longer narrows Flash Next's rendering
+to Mellum alone, and `tests/test_mellum_config.c`'s sibling assertions were updated to match. Koudai's
+review of those two resolutions is the remaining step on this item.
+
 ## 3. Physical acceptance on 36 / 24 / 16 / 8 GB
 
 Not run. The machine attached to this work is an Apple M5 Max with 128 GiB, which is not the M4 Max 36 GB target

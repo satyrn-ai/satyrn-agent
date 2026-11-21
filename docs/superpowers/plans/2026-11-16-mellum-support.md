@@ -24,10 +24,15 @@ The exact-prefill diagnostic and `test-mellum-fastpath` target are delivered in 
 assigns them to 0003. This boundary deviation remains for Koudai's review; it does not remove either
 patch's numerical/oracle acceptance requirements. The spec itself is unchanged.
 
-The spec's prerequisite that PR #24 merge before Mellum implementation was not followed. It remains
-open at this checkpoint. The Qwen prefix is not yet rebased, so neither the Qwen-inclusive prefix nor
-the full stack is accepted. Task 17 waits for #24 and consumes its complete then-current series.
-No owner notification or approval of these deviations is asserted.
+The spec's prerequisite that PR #24 merge before Mellum implementation was not followed. PR #24 merged
+on 2026-11-21 as `eed5c4f`, and Task 17 has since rebased the complete 18-patch qwen35 series onto the
+Mellum tip (`f2c40f41`) and re-exported it: every boundary reconstructs from a pristine clone, the shell
+suite passes 50/50, `ds4-check --build` builds each target, and the Qwen kernel and live suites match
+what `eed5c4f`'s own series produces. The single live TUI failure (`max_tokens` on the round after
+`/switch`) reproduces identically on a build of `eed5c4f`'s own series, so it is a pre-existing live-gate
+failure, not a rebase regression. Full-stack Mellum acceptance still does not follow from that: the
+physical rows and the published-file reruns above remain open, as do owner notification and approval of
+the deviations listed here.
 
 The cleanup regenerated engine commit messages with all six source trees unchanged. Historical native
 results retain the original commit/tree provenance; metadata changes are not presented as new model runs.
@@ -693,15 +698,20 @@ git add patches/mellum && git commit -m "feat(ds4): stream Mellum experts from t
 - Produces: the complete qwen35 series rebased after `mellum`, with unchanged Qwen behavior.
 - Prerequisite: per spec §2.2 and §10, PR #24 merges **before** Mellum implementation and both owners are told. It changes qwen35 0001–0008, adds 0009–0018, and changes `tools/ds4-check.sh`, so the rebase covers the then-current 18-patch series, not the eight files we have today.
 
-- [ ] **Step 1: Confirm the qwen35 prefix breaks before the rebase**
+**Status:** done on 2026-11-21 against `eed5c4f` (PR #24 plus #32, merged 08:25:48Z). The eighteen
+commits rebase onto `f2c40f41` without merge commits; the export reconstructs every boundary and ends at
+tip `320627f2`. Two semantic conflicts are resolved in the qwen35 patches, where the newer series wins:
+0002 restores #24's rendering of a system turn's `<tool_call>` and of the `<tool_response>` wrapper as
+the template's added tokens for every qwen4 shape (the Mellum prefix narrows that to Mellum only, which
+predates qwen35 0002 and was never meant to override it), and 0004 keeps the Qwen family's
+0.6 / 20 / 0.95 / 0 defaults. Both changes touch `tests/test_mellum_config.c`, whose Flash Next sibling
+and generic-shape assertions described the Mellum-only prefix; they are updated in the same patches.
 
-```bash
-devenv shell -- ds4-check --model qwen35 --build
-```
+- [x] **Step 1: Confirm the qwen35 prefix breaks before the rebase**
 
-Expected: FAIL — qwen35 patches still apply against the pre-Mellum tree.
+Observed on the pre-rebase tree: `ds4-tools` failed applying qwen35 0001 after the Mellum prefix.
 
-- [ ] **Step 2: Rebase and re-export the whole series**
+- [x] **Step 2: Rebase and re-export the whole series**
 
 `ds4-sync --model qwen35` cannot be the first move: it applies the whole prefix, and Qwen's first patch already fails after Mellum. Instead:
 
@@ -716,23 +726,31 @@ git -C .ds4/tree cherry-pick refs/ds4/common..refs/port/qwen-old
 
 Resolve textual and semantic conflicts, then export the candidate series and prove pristine reconstruction before replacing `patches/qwen35/`. Do not hand-edit patch files.
 
-- [ ] **Step 2b: Re-run the tooling against #24's check script**
+- [x] **Step 2b: Re-run the tooling against #24's check script**
 
 ```bash
 bash tests/ds4_tools_test.sh
 ```
 
-Expected: PASS with #24's `ds4-check.sh` in the tree, before any boundary result is trusted.
+Expected: PASS with #24's `ds4-check.sh` in the tree, before any boundary result is trusted. Result: 50 passed, 0 failed.
 
-- [ ] **Step 3: Prove every boundary**
+- [x] **Step 3: Prove every boundary**
 
 ```bash
 devenv shell -- ds4-check --model qwen35 --build && devenv shell -- ds4-check --build
 ```
 
-Expected: PASS for the qwen35 prefix and every boundary, including the full tree.
+Expected: PASS for the qwen35 prefix and every boundary, including the full tree. Result: the pristine
+reconstruction equals the tree at every boundary and all three builds (`common`, `mellum`, `qwen35`) pass.
 
-- [ ] **Step 4: Run the Qwen regressions**
+- [x] **Step 4: Run the Qwen regressions**
+
+`make test-qwen4-kernels` passes (all qwen4 kernel tests), `make test-mellum-kernels` passes (992 checks,
+0 failures), and `pytest tests/abnormal tests/e2e/live` gives 48 passed, 1 failed. The failure is
+`test_harness_tui`'s `error: model response ended with max_tokens` on the round after `/switch`; running
+the same test against a `ds4py build` of `eed5c4f`'s own qwen35 series fails at the same assertion with
+the same message, so Qwen behavior is unchanged by the rebase. The recorded DFlash parity and metric
+cases pass.
 
 Run the existing Qwen live DFlash and kernel checks and require the recorded numbers to hold. Commit the re-exported series.
 
