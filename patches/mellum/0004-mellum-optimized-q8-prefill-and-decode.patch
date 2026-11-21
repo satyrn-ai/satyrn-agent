@@ -1,4 +1,4 @@
-From 964e343685eccfe0d0823bc9bbb67e9b572c4721 Mon Sep 17 00:00:00 2001
+From 1e519c353d72348358feb916ecd6c7ac604b4898 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:28 -0500
 Subject: [PATCH 4/6] mellum: optimized q8 prefill and decode
@@ -59,7 +59,7 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  create mode 100755 tests/test_mellum_runners.sh
 
 diff --git a/Makefile b/Makefile
-index a4469cb2..43ee7ab6 100644
+index 4419a6e5..920de925 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -1066,6 +1066,18 @@ tests/test_mellum_tokenizer.o: tests/test_mellum_tokenizer.c tests/mellum_tokeni
@@ -97,10 +97,10 @@ index 320a74c3..790d1564 100644
       * attention rows' cache table (one entry per row and layer) and their
       * split partials. */
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index a3c25c38..293958cf 100644
+index ba8ebba1..dd2b2f76 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
-@@ -3621,6 +3621,14 @@ int ds4_gpu_qwen4_moe_reduce_tensor(
+@@ -3627,6 +3627,14 @@ int ds4_gpu_qwen4_moe_reduce_tensor(
          ds4_gpu_tensor *out, const ds4_gpu_tensor *part, const ds4_gpu_tensor *weights,
          const ds4_gpu_tensor *shared_gate, const ds4_gpu_tensor *shared, ds4_gpu_tensor *R, const ds4_gpu_tensor *inj,
          uint32_t n_tokens, uint32_t n_slots, uint32_t part_stride, uint32_t dim, uint32_t n_hc);
@@ -115,7 +115,7 @@ index a3c25c38..293958cf 100644
  /* prefill experts: per-expert token lists, then expert-grouped tiled GEMMs
   * (q8_0/mxfp4/q4_K/q2_K/iq2_xxs) */
  int ds4_gpu_qwen4_moe_build_lists_tensor(
-@@ -3705,6 +3713,13 @@ int ds4_gpu_mellum_qk_norm_rope_tensor(
+@@ -3711,6 +3719,13 @@ int ds4_gpu_mellum_qk_norm_rope_tensor(
          uint64_t q_norm_offset, uint64_t k_norm_offset,
          uint32_t n_tok, uint32_t pos0, int layer_kind,
          const ds4_gpu_mellum_rope *rope);
@@ -129,7 +129,7 @@ index a3c25c38..293958cf 100644
  
  /* Mellum 2.1 sliding-window attention (metal/mellum.metal), one contract for
   * prefill and decode (decode is n_tok == 1):
-@@ -3728,12 +3743,46 @@ int ds4_gpu_mellum_qk_norm_rope_tensor(
+@@ -3734,12 +3749,46 @@ int ds4_gpu_mellum_qk_norm_rope_tensor(
   * ring_commit: n_rows rows of f32 K and V ([n_rows][width]) into the f16
   * rings ([ring_slots][width]), row r at slot (pos0 + r) % ring_slots, and that
   * slot's int32 tag set to pos0 + r.  At most ring_slots rows per call. */
@@ -176,7 +176,7 @@ index a3c25c38..293958cf 100644
  int ds4_gpu_mellum_ring_commit_tensor(
          ds4_gpu_tensor *ring_k, ds4_gpu_tensor *ring_v, ds4_gpu_tensor *ring_pos,
          const ds4_gpu_tensor *k, const ds4_gpu_tensor *v,
-@@ -3808,6 +3857,13 @@ int ds4_gpu_mellum_moe_tensor(
+@@ -3814,6 +3863,13 @@ int ds4_gpu_mellum_moe_tensor(
          ds4_gpu_tensor *out, const ds4_gpu_tensor *x, ds4_gpu_tensor *logits,
          ds4_gpu_tensor *selected, ds4_gpu_tensor *weights, ds4_gpu_tensor *mid, ds4_gpu_tensor *part,
          const void *model_map, uint64_t model_size, const ds4_gpu_mellum_moe *p, uint32_t n_tokens);
@@ -473,7 +473,7 @@ index 5c0fe29c..e3766364 100644
      qwen4_graph_free(&g);
      return ok;
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 78934319..7f85d140 100644
+index abdefa9f..b305d630 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
 @@ -2757,6 +2757,10 @@ static int ds4_gpu_mpp_available(void) {
@@ -487,7 +487,7 @@ index 78934319..7f85d140 100644
  /*
   * Retained Metal4 defaults live here instead of behind user-visible options.
   * The public runtime has one automatic accelerated path plus the global
-@@ -49900,7 +49904,15 @@ static uint32_t qwen4_moe_mm_nt(uint32_t n_tokens, uint32_t type, const char *en
+@@ -49956,7 +49960,15 @@ static uint32_t qwen4_moe_mm_nt(uint32_t n_tokens, uint32_t type, const char *en
   * tiles and its fixture NLL sits within noise of them, so the compensated
   * level stays an env-selectable accuracy option.  0 forces the simdgroup
   * tiles.  Returns the token tile width, 0 for the simdgroup path. */
@@ -503,7 +503,7 @@ index 78934319..7f85d140 100644
      const char *v = getenv("DS4_QWEN4_MOE_MM_NAX");
      /* default 2 for every tensor tier: level 2 matches the simdgroup tiles'
       * operand rounding and differs only by accumulation order, and its
-@@ -49913,7 +49925,7 @@ static long qwen4_moe_mm_nax_level(uint32_t type) {
+@@ -49969,7 +49981,7 @@ static long qwen4_moe_mm_nax_level(uint32_t type) {
  }
  static uint32_t qwen4_moe_mm_nax(uint32_t type) {
      if (!ds4_gpu_mpp_available()) return 0;
@@ -512,7 +512,7 @@ index 78934319..7f85d140 100644
      const long n = qwen4_moe_mm_nax_level(type);
      if (n <= 0) return 0;
      return (n == 1 || n == 4 || n == 6) ? 32u : 64u;
-@@ -50699,12 +50711,12 @@ static double mellum_rope_corr_dim(double head_dim, double n_ctx_orig, double n_
+@@ -50755,12 +50767,12 @@ static double mellum_rope_corr_dim(double head_dim, double n_ctx_orig, double n_
      return head_dim * log(n_ctx_orig / (n_rot * 2.0 * M_PI)) / (2.0 * log(base));
  }
  
@@ -527,7 +527,7 @@ index 78934319..7f85d140 100644
      if (!rope || n_tok == 0u || (layer_kind != DS4_MELLUM_LAYER_SLIDING && layer_kind != DS4_MELLUM_LAYER_FULL) ||
          rope->head_dim != 128u || rope->n_head_q == 0u || rope->n_head_k == 0u ||
          !(rope->freq_base_sliding > 1.0f) || !(rope->freq_base_full > 1.0f) ||
-@@ -50760,12 +50772,77 @@ int ds4_gpu_mellum_qk_norm_rope_tensor(
+@@ -50816,12 +50828,77 @@ int ds4_gpu_mellum_qk_norm_rope_tensor(
                             "mellum k norm")) {
          return 0;
      }
@@ -605,7 +605,7 @@ index 78934319..7f85d140 100644
  /* Commit n_rows rows of a sliding layer's f32 K and V to its f16 ring, row r
   * at slot (pos0 + r) % ring_slots with that slot's tag set to pos0 + r. */
  int ds4_gpu_mellum_ring_commit_tensor(
-@@ -50789,8 +50866,10 @@ int ds4_gpu_mellum_ring_commit_tensor(
+@@ -50845,8 +50922,10 @@ int ds4_gpu_mellum_ring_commit_tensor(
                             MTLSizeMake((n + 255u) / 256u, 1, 1), MTLSizeMake(256, 1, 1));
  }
  
@@ -618,7 +618,7 @@ index 78934319..7f85d140 100644
          ds4_gpu_tensor *out, const ds4_gpu_tensor *q,
          const ds4_gpu_tensor *ring_k, const ds4_gpu_tensor *ring_v, const ds4_gpu_tensor *ring_tags,
          const ds4_gpu_tensor *k16, const ds4_gpu_tensor *v16,
-@@ -50817,10 +50896,79 @@ int ds4_gpu_mellum_attn_swa_tensor(
+@@ -50873,10 +50952,79 @@ int ds4_gpu_mellum_attn_swa_tensor(
          !qwen4_bind_tensor(&b[6], out, q_bytes, "mellum attention output")) {
          return 0;
      }
@@ -699,7 +699,7 @@ index 78934319..7f85d140 100644
  /* a * b * c * d without overflow */
  static bool mellum_moe_bytes(uint64_t *r, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
      uint64_t t;
-@@ -50837,8 +50985,8 @@ static bool mellum_moe_range(uint64_t size, uint64_t offset, uint64_t bytes) {
+@@ -50893,8 +51041,8 @@ static bool mellum_moe_range(uint64_t size, uint64_t offset, uint64_t bytes) {
   * ds4_gpu_matmul_f32_tensor, which picks a different kernel by row count; the top-k, the experts and the reduce
   * are the qwen4 kernels with in_dim = 0 and shared_type = UINT32_MAX, so no shared tensor is bound or read.  The
   * batched moe_mm_* kernels are not used: they stage half operands. */
@@ -710,7 +710,7 @@ index 78934319..7f85d140 100644
          ds4_gpu_tensor *selected, ds4_gpu_tensor *weights, ds4_gpu_tensor *mid, ds4_gpu_tensor *part,
          const void *model_map, uint64_t model_size, const ds4_gpu_mellum_moe *p, uint32_t n_tokens) {
      if (!p || !model_map || n_tokens == 0u || p->expert_type != 8u ||
-@@ -50877,6 +51025,8 @@ int ds4_gpu_mellum_moe_tensor(
+@@ -50933,6 +51081,8 @@ int ds4_gpu_mellum_moe_tensor(
          !qwen4_bind_tensor(&probe[6], out, x_bytes, "mellum moe output")) {
          return 0;
      }
@@ -719,7 +719,7 @@ index 78934319..7f85d140 100644
      ds4_gpu_tensor *router_out[1] = { logits };
      const uint64_t router_off[1] = { p->router_offset };
      const uint32_t router_type[1] = { 0u }; /* F32 */
-@@ -50890,6 +51040,21 @@ int ds4_gpu_mellum_moe_tensor(
+@@ -50946,6 +51096,21 @@ int ds4_gpu_mellum_moe_tensor(
                                          0u, 0u, UINT32_MAX) &&
             ds4_gpu_qwen4_moe_down_tensor(part, mid, selected, model_map, model_size, p->down_offset, p->expert_type,
                                           p->n_expert, n_tokens, p->n_used, p->ff_dim, p->n_embd, 0u, UINT32_MAX) &&

@@ -1,4 +1,4 @@
-From 2575771ec6e860db4e4afaadab8035c7da3a6fe2 Mon Sep 17 00:00:00 2001
+From af1ff7c28d604d924d19a0816c85c720f041aa2a Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:26 -0500
 Subject: [PATCH 3/6] mellum: exact q8 metal graph and rewind
@@ -46,7 +46,7 @@ Carried-commits: 5c3b117390a2cb8bb9aa28b78707dcb3b222ba7e d1c144df01cdfa72f0a737
  create mode 100755 tests/test_mellum_trace.sh
 
 diff --git a/Makefile b/Makefile
-index 23bc6828..a4469cb2 100644
+index 5df88979..4419a6e5 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -9,6 +9,7 @@ endif
@@ -525,10 +525,10 @@ index e8c1e7fc..65a9e19d 100644
  int ds4_session_ctx(ds4_session *s);
  int ds4_session_prefill_cap(ds4_session *s);
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 2965aef9..a3c25c38 100644
+index c5a65076..ba8ebba1 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
-@@ -3668,6 +3668,147 @@ int ds4_gpu_qwen4_mtp_stage_tensor(
+@@ -3674,6 +3674,147 @@ int ds4_gpu_qwen4_mtp_stage_tensor(
  int ds4_gpu_qwen4_mtp_combine_tensor(
          ds4_gpu_tensor *R_out, const ds4_gpu_tensor *proj, uint32_t n_embd, uint32_t n_hc);
  
@@ -1210,10 +1210,10 @@ index 00000000..5c0fe29c
 +    return true;
 +}
 diff --git a/ds4_metal.m b/ds4_metal.m
-index b86815c4..78934319 100644
+index ebfe4f27..abdefa9f 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -4807,6 +4807,7 @@ static NSString *ds4_gpu_full_source(void) {
+@@ -4865,6 +4865,7 @@ static NSString *ds4_gpu_full_source(void) {
          @[@"DS4_METAL_SET_ROWS_SOURCE",   @"metal/set_rows.metal"],
          @[@"DS4_METAL_QWEN4_SOURCE",      @"metal/qwen4.metal"],
          @[@"DS4_METAL_QWEN4_VISION_SOURCE", @"metal/qwen4_vision.metal"],
@@ -1221,7 +1221,7 @@ index b86815c4..78934319 100644
      ];
  
      NSMutableString *source = [NSMutableString stringWithString:base];
-@@ -49247,12 +49248,13 @@ uint64_t ds4_gpu_qwen4_attn_part_floats(uint32_t n_tokens, uint32_t n_head, uint
+@@ -49303,12 +49304,13 @@ uint64_t ds4_gpu_qwen4_attn_part_floats(uint32_t n_tokens, uint32_t n_head, uint
      return (uint64_t)n_tokens * n_head * QWEN4_ATTN_MAX_SPLITS * (2u + head_dim);
  }
  
@@ -1237,7 +1237,7 @@ index b86815c4..78934319 100644
      const uint32_t n_keys = use_sel ? sel_stride : pos0 + n_tokens;
      uint32_t n_splits = 1;
      if (part) {
-@@ -49262,22 +49264,23 @@ int ds4_gpu_qwen4_attn_decode_tensor(
+@@ -49318,22 +49320,23 @@ int ds4_gpu_qwen4_attn_decode_tensor(
      }
      const uint32_t keys_per_split = (n_keys + n_splits - 1) / n_splits;
      struct { uint32_t n_tokens, n_head, n_head_kv, head_dim, pos0, use_sel, sel_stride; float scale;
@@ -1265,7 +1265,7 @@ index b86815c4..78934319 100644
      if (use_sel) {
          if (!qwen4_bind_tensor(&b[4], sel_tokens, (uint64_t)n_tokens * sel_stride * sizeof(int32_t),
                                 "selected tokens") ||
-@@ -49325,6 +49328,25 @@ int ds4_gpu_qwen4_attn_decode_tensor(
+@@ -49381,6 +49384,25 @@ int ds4_gpu_qwen4_attn_decode_tensor(
                            MTLSizeMake(n_head, n_tokens, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -1291,7 +1291,7 @@ index b86815c4..78934319 100644
  /* ---- decode batch: attention over rows ----
   *
   * The caches stay per session, so the rows kernels find each row's through
-@@ -49509,24 +49531,24 @@ int ds4_gpu_qwen4_idx_expand_rows_tensor(
+@@ -49565,24 +49587,24 @@ int ds4_gpu_qwen4_idx_expand_rows_tensor(
                            MTLSizeMake(n_rows, 1, 1), MTLSizeMake(256, 1, 1), 0);
  }
  
@@ -1322,7 +1322,7 @@ index b86815c4..78934319 100644
          !qwen4_bind_tensor(&b[2], sel_tokens, (uint64_t)n_rows * sel_stride * sizeof(int32_t), "rows selected tokens") ||
          !qwen4_bind_tensor(&b[3], n_sel, (uint64_t)n_rows * sizeof(uint32_t), "rows selected counts") ||
          !qwen4_bind_tensor(&b[4], out, q_bytes, "attn rows out") ||
-@@ -49534,6 +49556,7 @@ int ds4_gpu_qwen4_attn_decode_rows_tensor(
+@@ -49590,6 +49612,7 @@ int ds4_gpu_qwen4_attn_decode_rows_tensor(
          !qwen4_bind_rows(&b[6], table, entry0, n_rows)) {
          return 0;
      }
@@ -1330,7 +1330,7 @@ index b86815c4..78934319 100644
      const bool npt8 = head_dim == 256u;
      if (!qwen4_dispatch_resident(npt8 ? QWEN4_K_ATTN_DECODE_ROWS_NPT8 : QWEN4_K_ATTN_DECODE_ROWS_NPT4,
                                   &args, sizeof(args), b, 7,
-@@ -49548,6 +49571,67 @@ int ds4_gpu_qwen4_attn_decode_rows_tensor(
+@@ -49604,6 +49627,67 @@ int ds4_gpu_qwen4_attn_decode_rows_tensor(
                            MTLSizeMake(n_head, n_rows, 1), MTLSizeMake(head_dim, 1, 1), 0);
  }
  
@@ -1398,7 +1398,7 @@ index b86815c4..78934319 100644
  int ds4_gpu_qwen4_moe_mid_tensor(
          ds4_gpu_tensor *mid, const ds4_gpu_tensor *x, const ds4_gpu_tensor *selected,
          const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset,
-@@ -50556,3 +50640,256 @@ int ds4_gpu_qwen4_hc_mix_rows_tensor(ds4_gpu_tensor *mixed, const ds4_gpu_tensor
+@@ -50612,3 +50696,256 @@ int ds4_gpu_qwen4_hc_mix_rows_tensor(ds4_gpu_tensor *mixed, const ds4_gpu_tensor
      return qwen4_dispatch(QWEN4_K_HC_MIX_ROWS, &args, sizeof(args), b, 3,
                            MTLSizeMake((n_embd + 255) / 256, n_tokens, 1), MTLSizeMake(256, 1, 1), 0);
  }

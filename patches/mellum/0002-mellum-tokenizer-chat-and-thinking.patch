@@ -1,4 +1,4 @@
-From 0a92b56ff4093e8a5481bed5b2d70dfc889cbcf1 Mon Sep 17 00:00:00 2001
+From 07e27436ad57d3985b591a9464e156be4abc9ebe Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:23 -0500
 Subject: [PATCH 2/6] mellum: tokenizer, chat and thinking
@@ -40,7 +40,7 @@ Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7
  create mode 100644 tests/test_mellum_tokenizer.c
 
 diff --git a/Makefile b/Makefile
-index af2d5c53..23bc6828 100644
+index 7be6a8db..5df88979 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -81,6 +81,7 @@ all: ds4 ds4-server ds4-bench ds4-eval ds4-agent

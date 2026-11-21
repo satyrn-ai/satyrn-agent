@@ -1,4 +1,4 @@
-From f5463ed186276896923062487a99714ae9195434 Mon Sep 17 00:00:00 2001
+From b3273aeb4f58e6377cf128ffdb541fcfdcd708ef Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:30 -0500
 Subject: [PATCH 5/6] mellum: mxfp4 moe experts
@@ -11,7 +11,6 @@ Upstream: not offered, fork only
 Retire-when: upstream supports JetBrains MXFP4_MOE
 Carried-commits: 0adf6bafb1f17e642124b60b183575864f118629 989dc7c8dada668500773328c00d4e851805a842 f6d49a5d57b8566809d53412ac470bd897dd811b 362dca64275b54cd9f6694441618f411fdabd1d5 24175f3845987c0761d4186ec66be7c7735a3f4b 37ccfd165c7d82afd4ef1719c5f0a1acbdac32fd ed405beb79cee502b1c3cf2ce28bd3657118795c 4fa5070983da883b42fc08eb0f0670f4aa4b730a
 ---
- Makefile                            |   1 +
  ds4.c                               |  26 ++-
  ds4_gpu.h                           |   5 +-
  ds4_mellum_config.inc               |   2 +-
@@ -23,18 +22,9 @@ Carried-commits: 0adf6bafb1f17e642124b60b183575864f118629 989dc7c8dada6685007733
  tests/mellum_moe_ref.inc            |  87 +++++++--
  tests/test_mellum_config.c          |   3 +
  tests/test_mellum_kernels.c         |   2 +-
- 12 files changed, 373 insertions(+), 65 deletions(-)
+ 11 files changed, 372 insertions(+), 65 deletions(-)
  create mode 100644 tests/mellum_heldout_unicode.tokens
 
-diff --git a/Makefile b/Makefile
-index 43ee7ab6..951097e6 100644
---- a/Makefile
-+++ b/Makefile
-@@ -1492,3 +1492,4 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
- 
- gguf-tools/quality-testing/score_official_verify: gguf-tools/quality-testing/score_official_verify.o ds4_verify_test_hooks.o $(filter-out ds4.o,$(CORE_OBJS)) rax.o ds4_gpu_args.o
- 	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))
-+
 diff --git a/ds4.c b/ds4.c
 index 790d1564..4ac64d5e 100644
 --- a/ds4.c
@@ -93,10 +83,10 @@ index 790d1564..4ac64d5e 100644
  }
  
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 293958cf..7c1b1e20 100644
+index dd2b2f76..55522c6f 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
-@@ -3833,7 +3833,8 @@ int ds4_gpu_mellum_attn_full_rows_tensor(
+@@ -3839,7 +3839,8 @@ int ds4_gpu_mellum_attn_full_rows_tensor(
   * Shapes (all f32 unless noted): x and out [n_tokens][n_embd]; logits
   * [n_tokens][n_expert]; selected int32 and weights [n_tokens][n_used]; mid
   * [n_tokens][n_used][ff_dim]; part [n_tokens][n_used][n_embd].  The router is
@@ -106,7 +96,7 @@ index 293958cf..7c1b1e20 100644
   * [n_expert][ff_dim][n_embd], down [n_expert][n_embd][ff_dim], each expert
   * contiguous.  Every offset is into model_map.  Checked before the first
   * dispatch (a refused call writes nothing): sizes, ranges (overflow-safe),
-@@ -3845,7 +3846,7 @@ typedef struct {
+@@ -3851,7 +3852,7 @@ typedef struct {
      uint32_t n_expert;     /* 64 */
      uint32_t n_used;       /* 8 */
      uint32_t ff_dim;       /* 896 */
@@ -178,10 +168,10 @@ index e3766364..fc2442c5 100644
  }
  
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 7f85d140..63238966 100644
+index b305d630..13806a51 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -50989,7 +50989,7 @@ static int mellum_moe(
+@@ -51045,7 +51045,7 @@ static int mellum_moe(
          ds4_gpu_tensor *out, const ds4_gpu_tensor *res, const ds4_gpu_tensor *x, ds4_gpu_tensor *logits,
          ds4_gpu_tensor *selected, ds4_gpu_tensor *weights, ds4_gpu_tensor *mid, ds4_gpu_tensor *part,
          const void *model_map, uint64_t model_size, const ds4_gpu_mellum_moe *p, uint32_t n_tokens) {
