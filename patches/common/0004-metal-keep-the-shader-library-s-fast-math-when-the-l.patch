@@ -1,0 +1,246 @@
+From 9da2a7d6fccffcf7109d810baf402066a5219605 Mon Sep 17 00:00:00 2001
+From: pauleveritt <pauleveritt@me.com>
+Date: Sat, 21 Nov 2026 14:38:18 -0500
+Subject: [PATCH 4/4] metal: keep the shader library's fast math when the
+ language version is pinned
+
+An explicit MTLLanguageVersion changes MTLCompileOptions.mathMode's default,
+which Apple documents as depending on the language standard version.  Pinning
+3.2 (macOS 15+) or 4.0 (macOS 26+) therefore selected strict IEEE-754 on the
+SDKs tested, while the unpinned build kept fast math; the pinned shaders cost
+about 43% of prefill on the same model and prompt.
+
+State the configuration the unpinned reference gets: mathMode fast and
+mathFloatingPointFunctions fast, guarded like the pins.  DS4_METAL_MATH_SAFE
+stays the diagnostic override, now also selecting the precise floating-point
+functions, and it applies after the fast default in the same function so the
+effective configuration has one source.
+
+The engine reports the effective configuration at shader-library init, and
+tests/test_metal_math_options.c checks it model-free in both modes (make
+test-metal-math-options).
+
+Upstream: offer upstream, as part of the language-version pins
+Retire-when: upstream states the math configuration itself
+---
+ .gitignore                      |  1 +
+ Makefile                        |  8 ++++
+ ds4_gpu.h                       |  6 +++
+ ds4_metal.m                     | 76 ++++++++++++++++++++++++++++-----
+ tests/test_metal_math_options.c | 51 ++++++++++++++++++++++
+ 5 files changed, 132 insertions(+), 10 deletions(-)
+ create mode 100644 tests/test_metal_math_options.c
+
+diff --git a/.gitignore b/.gitignore
+index b60b89ce..b3a706e7 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -25,6 +25,7 @@
+ /tests/cuda_long_context_smoke
+ /tests/test_layer_pack
+ /tests/test_metal_session_batch
++/tests/test_metal_math_options
+ /tests/test_metal_tp_spec
+ /tests/test_metal_tp_cancel
+ /tests/test_metal_moe_prefill
+diff --git a/Makefile b/Makefile
+index d4877fbe..5cab2c90 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1419,3 +1419,11 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
+ 
+ gguf-tools/quality-testing/score_official_verify: gguf-tools/quality-testing/score_official_verify.o ds4_verify_test_hooks.o $(filter-out ds4.o,$(CORE_OBJS)) rax.o ds4_gpu_args.o
+ 	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))
++
++tests/test_metal_math_options: tests/test_metal_math_options.c ds4_gpu.h $(CORE_OBJS)
++	$(CC) $(CFLAGS) -I. -o $@ $< $(CORE_OBJS) $(METAL_LDLIBS)
++
++.PHONY: test-metal-math-options
++test-metal-math-options: tests/test_metal_math_options
++	./tests/test_metal_math_options
++	DS4_METAL_MATH_SAFE=1 ./tests/test_metal_math_options --safe
+diff --git a/ds4_gpu.h b/ds4_gpu.h
+index 2965aef9..c5a65076 100644
+--- a/ds4_gpu.h
++++ b/ds4_gpu.h
+@@ -2,6 +2,7 @@
+ #define DS4_GPU_H
+ 
+ #include <stdbool.h>
++#include <stddef.h>
+ #include <stdint.h>
+ #include "ds4_qwen4_vision.h"
+ #include "ds4_gpu_copy.h"
+@@ -46,6 +47,11 @@ typedef struct {
+ int ds4_gpu_init(void);
+ void ds4_gpu_cleanup(void);
+ 
++/* The effective shader-library math configuration (language version, math mode and
++ * floating-point functions), formatted for the run log and the model-free test.
++ * Returns 0 when the build has no Metal shader library. */
++int ds4_gpu_math_config_text(char *buf, size_t n);
++
+ ds4_gpu_tensor *ds4_gpu_tensor_alloc(uint64_t bytes);
+ ds4_gpu_tensor *ds4_gpu_tensor_alloc_managed(uint64_t bytes);
+ ds4_gpu_tensor *ds4_gpu_tensor_view(const ds4_gpu_tensor *base, uint64_t offset, uint64_t bytes);
+diff --git a/ds4_metal.m b/ds4_metal.m
+index b86815c4..ebfe4f27 100644
+--- a/ds4_metal.m
++++ b/ds4_metal.m
+@@ -2819,6 +2819,18 @@ static MTLCompileOptions *ds4_gpu_compile_options(void) {
+      * and <MetalPerformancePrimitives> needs Metal 4.0 (macOS 26), so pin
+      * the matching language version when the OS provides it. */
+     MTLCompileOptions *options = [MTLCompileOptions new];
++    /* An explicit languageVersion changes mathMode's default, which Apple
++     * documents as depending on the language standard version: pinning 3.2 or
++     * 4.0 selected strict IEEE-754 on the SDKs tested, and that cost ~43% of
++     * prefill against the unpinned build.  The unpinned reference gets fast
++     * math (fastMathEnabled documented YES, and mathFloatingPointFunctions
++     * fast by default), so state that configuration explicitly. */
++#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
++    if (@available(macOS 15.0, *)) {
++        options.mathMode = MTLMathModeFast;
++        options.mathFloatingPointFunctions = MTLMathFloatingPointFunctionsFast;
++    }
++#endif
+ #if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
+     if (@available(macOS 15.0, *)) {
+         options.languageVersion = MTLLanguageVersion3_2;
+@@ -2829,9 +2841,55 @@ static MTLCompileOptions *ds4_gpu_compile_options(void) {
+         options.languageVersion = MTLLanguageVersion4_0;
+     }
+ #endif
++    /* DS4_METAL_MATH_SAFE stays the diagnostic override: it applies after the
++     * fast default and pins the whole library to strict IEEE-754. */
++    if (ds4_gpu_env_bool("DS4_METAL_MATH_SAFE") > 0) {
++        if (@available(macOS 15.0, *)) {
++            options.mathMode = MTLMathModeSafe;
++            options.mathFloatingPointFunctions = MTLMathFloatingPointFunctionsPrecise;
++        } else {
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wdeprecated-declarations"
++            options.fastMathEnabled = NO;
++#pragma clang diagnostic pop
++        }
++    }
+     return options;
+ }
+ 
++/* The effective shader-library math configuration, for the run log and
++ * tests/test_metal_math_options.c.  Built from the same compile options the
++ * library uses, so it reflects the pins and the DS4_METAL_MATH_SAFE override. */
++int ds4_gpu_math_config_text(char *buf, size_t n) {
++    if (!buf || n == 0) return 0;
++    MTLCompileOptions *options = ds4_gpu_compile_options();
++    if (!options) return 0;
++    const char *language = "default";
++#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
++    if (@available(macOS 15.0, *)) {
++        if (options.languageVersion == MTLLanguageVersion3_2) language = "3.2";
++    }
++#endif
++#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
++    if (@available(macOS 26.0, *)) {
++        if (options.languageVersion == MTLLanguageVersion4_0) language = "4.0";
++    }
++#endif
++    const char *mode = "legacy";
++    const char *functions = "legacy";
++#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
++    if (@available(macOS 15.0, *)) {
++        mode = options.mathMode == MTLMathModeFast ? "fast"
++             : options.mathMode == MTLMathModeRelaxed ? "relaxed" : "safe";
++        functions = options.mathFloatingPointFunctions == MTLMathFloatingPointFunctionsFast
++                  ? "fast" : "precise";
++    }
++#endif
++    snprintf(buf, n, "language=%s mathMode=%s mathFloatingPointFunctions=%s",
++             language, mode, functions);
++    return 1;
++}
++
+ static int ds4_gpu_compile_tensor_probe(void) {
+ #if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+     if (!g_device) return 0;
+@@ -6938,16 +6996,14 @@ int ds4_gpu_init(void) {
+             // simdgroup_multiply_accumulate path on M5, amplifying the
+             // mismatch. MTLMathModeSafe pins the entire library to strict
+             // IEEE-754 semantics. Diagnostic-only: useful to localize drift
+-            // sources but not to ship as a default.
+-            if (@available(macOS 15.0, *)) {
+-                options.mathMode = MTLMathModeSafe;
+-                fprintf(stderr, "ds4: Metal shader library math mode = safe (strict IEEE-754) by DS4_METAL_MATH_SAFE\n");
+-            } else {
+-#pragma clang diagnostic push
+-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+-                options.fastMathEnabled = NO;
+-#pragma clang diagnostic pop
+-                fprintf(stderr, "ds4: Metal shader library fast-math disabled by DS4_METAL_MATH_SAFE (pre-macOS 15)\n");
++            // sources but not to ship as a default; ds4_gpu_compile_options()
++            // applies it there so the report below sees it.
++            fprintf(stderr, "ds4: Metal shader library math mode = safe (strict IEEE-754) by DS4_METAL_MATH_SAFE\n");
++        }
++        {
++            char math_report[192];
++            if (ds4_gpu_math_config_text(math_report, sizeof math_report)) {
++                fprintf(stderr, "ds4: Metal shader library %s\n", math_report);
+             }
+         }
+ 
+diff --git a/tests/test_metal_math_options.c b/tests/test_metal_math_options.c
+new file mode 100644
+index 00000000..44a534ec
+--- /dev/null
++++ b/tests/test_metal_math_options.c
+@@ -0,0 +1,51 @@
++/* tests/test_metal_math_options.c -- the shader library's math configuration.
++ *
++ * The language-version pins (Metal 3.2 on macOS 15+, 4.0 on macOS 26+) also
++ * change the compiler's default math mode: Apple documents mathMode's default
++ * as depending on the language standard version, and pinning either version
++ * selects strict IEEE-754 on the SDKs tested, which cost ~43% of prefill.  The
++ * engine therefore states the fast configuration the unpinned reference gets,
++ * and DS4_METAL_MATH_SAFE stays the diagnostic override.
++ *
++ * Device-free: the configuration comes from MTLCompileOptions alone, so this
++ * runs before any GGUF is opened.  Usage:
++ *   tests/test_metal_math_options            expect the fast defaults
++ *   tests/test_metal_math_options --safe     expect the safe override
++ */
++#include "../ds4_gpu.h"
++
++#include <stdio.h>
++#include <string.h>
++
++static int failures;
++
++#define CHECK(name, cond)                                                       \
++    do {                                                                        \
++        if (cond) {                                                             \
++            printf("ok   %s\n", name);                                          \
++        } else {                                                                \
++            printf("FAIL %s\n", name);                                          \
++            failures++;                                                         \
++        }                                                                       \
++    } while (0)
++
++int main(int argc, char **argv) {
++    const int want_safe = argc > 1 && !strcmp(argv[1], "--safe");
++    char report[192];
++
++    if (!ds4_gpu_math_config_text(report, sizeof report)) {
++        printf("FAIL no Metal shader-library configuration on this build\n");
++        return 1;
++    }
++    printf("config: %s\n", report);
++
++    CHECK("language version reported",
++          strstr(report, "language=") != NULL);
++    CHECK(want_safe ? "mathMode=safe" : "mathMode=fast",
++          strstr(report, want_safe ? "mathMode=safe" : "mathMode=fast") != NULL);
++    CHECK(want_safe ? "mathFloatingPointFunctions=precise"
++                    : "mathFloatingPointFunctions=fast",
++          strstr(report, want_safe ? "mathFloatingPointFunctions=precise"
++                                   : "mathFloatingPointFunctions=fast") != NULL);
++    return failures ? 1 : 0;
++}
