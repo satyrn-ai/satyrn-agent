@@ -1,4 +1,4 @@
-From 03601a4cc7d43fbcd20dbacbb1b4e63e5b26c8a5 Mon Sep 17 00:00:00 2001
+From 7aa95134e05fd9c6c849d51a5968b86d5bcdbf06 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 10:20:02 +0200
 Subject: [PATCH 09/18] qwen35: dense Q6_K weight products on CUDA
@@ -31,19 +31,19 @@ Carried-commits: none (authored here)
  create mode 100644 tests/test_qwen35_cuda_quant.c
 
 diff --git a/.gitignore b/.gitignore
-index 5bc74787..59525049 100644
+index 72eb643c..c1484dd0 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -117,3 +117,4 @@ __pycache__/
- 
- /tests/test_qwen4_conv_parallel
- /tests/test_q8_prefill_variants
+@@ -126,3 +126,4 @@ __pycache__/
+ /tools/mellum_s4_measure
+ /tests/test_metal_tensor_lifetime
+ /tests/mellum_trace
 +/tests/test_qwen35_cuda_quant
 diff --git a/Makefile b/Makefile
-index e55714f3..e6f80ce2 100644
+index 8f58a64b..fc7d8811 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -747,6 +747,19 @@ tests/test_qwen4_cuda: tests/test_qwen4_cuda.o ds4_cuda.o ds4_image.o $(MMQ_OBJS
+@@ -750,6 +750,19 @@ tests/test_qwen4_cuda: tests/test_qwen4_cuda.o ds4_cuda.o ds4_image.o $(MMQ_OBJS
  .PHONY: test-qwen4-cuda
  test-qwen4-cuda: tests/test_qwen4_cuda
  	./tests/test_qwen4_cuda
@@ -62,7 +62,7 @@ index e55714f3..e6f80ce2 100644
 +	./tests/test_qwen35_cuda_quant
  endif
  
- ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+ ds4.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
 diff --git a/ds4_qwen4_cuda.cuh b/ds4_qwen4_cuda.cuh
 index be52f498..918a82fc 100644
 --- a/ds4_qwen4_cuda.cuh

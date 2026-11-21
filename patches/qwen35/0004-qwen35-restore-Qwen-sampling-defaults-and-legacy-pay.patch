@@ -1,4 +1,4 @@
-From 4947fab960ffbf0323b628a7760a81c1ed2cd09a Mon Sep 17 00:00:00 2001
+From 07f009d33f6cd3596ea0751c8d6defa2d0f222ed Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 6 Oct 2026 15:10:05 +0900
 Subject: [PATCH 04/18] qwen35: restore Qwen sampling defaults and legacy
@@ -8,25 +8,26 @@ Upstream: offer upstream with the libds4 target
 Retire-when: upstream has both
 Carried-commits: 8b70f74
 ---
- ds4.c | 7 ++++++-
- ds4.h | 4 ++--
- 2 files changed, 8 insertions(+), 3 deletions(-)
+ ds4.c                      |  7 ++++++-
+ ds4.h                      |  6 +++---
+ tests/test_mellum_config.c | 11 ++++++-----
+ 3 files changed, 15 insertions(+), 9 deletions(-)
 
 diff --git a/ds4.c b/ds4.c
-index 2becb3ef..00b8eedf 100644
+index 4171a6d2..e838421c 100644
 --- a/ds4.c
 +++ b/ds4.c
-@@ -64053,7 +64053,7 @@ static uint64_t qwen35_payload_tensor_bytes(uint32_t rows);
- #endif
- 
+@@ -64491,7 +64491,7 @@ static uint64_t qwen35_payload_tensor_bytes(uint32_t rows);
  bool ds4_session_supports_payload(ds4_session *s) {
--    return s != NULL && !s->distributed && ds4_session_is_qwen4(s);
-+    return s != NULL;
+     /* Mellum is also a qwen4 engine, but it has no native payload: keep this
+      * predicate false with ds4_session_payload_bytes(). */
+-    return s != NULL && !s->distributed && ds4_session_is_qwen4(s) && !ds4_model_is_mellum();
++    return s != NULL && !ds4_model_is_mellum();
  }
  
  uint64_t ds4_session_payload_bytes(ds4_session *s) {
-@@ -73924,6 +73924,11 @@ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
-     if (ds4_engine_is_glm_dsa(e)) {
+@@ -74461,6 +74461,11 @@ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
+     } else if (ds4_engine_is_glm_dsa(e)) {
          *top_p = 0.95f;
          *min_p = 0.0f;
 +    } else if (ds4_engine_is_qwen4(e)) {
@@ -38,17 +39,49 @@ index 2becb3ef..00b8eedf 100644
  }
  
 diff --git a/ds4.h b/ds4.h
-index 04eb3658..2d2cfc1d 100644
+index 65a9e19d..17c5667b 100644
 --- a/ds4.h
 +++ b/ds4.h
-@@ -309,8 +309,8 @@ bool ds4_engine_is_glm_dsa(ds4_engine *e);
- bool ds4_engine_is_glm53(ds4_engine *e);
+@@ -310,9 +310,9 @@ bool ds4_engine_is_glm53(ds4_engine *e);
  bool ds4_engine_is_qwen4(ds4_engine *e);
- /* The sampler defaults for the loaded model: the generic DS4_DEFAULT_*
-- * values, overridden per family as the CLI does. For hosts that sample
-- * themselves. */
-+ * values, overridden per family as the CLI does (Qwen: 0.6, top_k 20,
-+ * 0.95, 0). For hosts that sample themselves. */
+ /* True for Mellum 2.1, which is also a qwen4 engine: check it first. */
+ bool ds4_engine_is_mellum(ds4_engine *e);
+-/* The loaded model's sampler defaults, for the knobs a caller leaves unset:
+- * DS4_DEFAULT_* with no top_k, except Mellum 2.1 (temperature 1.0, top_p 1.0,
+- * min_p 0, no top_k).  The CLI reads it for the knobs it leaves unset. */
++/* The sampler defaults for the loaded model: generic DS4_DEFAULT_* values,
++ * overridden per family as the CLI does (Mellum 1.0/1.0/min_p 0; Qwen
++ * 0.6/0.95/min_p 0).  For knobs a caller leaves unset. */
  void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
                                    int *top_k, float *top_p, float *min_p);
  /* Qwen3.8 reasoning-effort system instruction for a think mode (NULL when none) */
+diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
+index 472e1057..4c97c482 100644
+--- a/tests/test_mellum_config.c
++++ b/tests/test_mellum_config.c
+@@ -1054,19 +1054,20 @@ static void check_sampling_defaults(void) {
+     g_ds4_shape = DS4_SHAPE_MELLUM;
+     ds4_engine_sampling_defaults(&e, &t, &k, &p, &m);
+     CHECK(t == 1.0f && k == 0 && p == 1.0f && m == 0.0f);
+-    static const ds4_shape *const generic[] = { &DS4_SHAPE_QWEN4_EXP, &DS4_SHAPE_QWEN4_MINI };
+-    for (size_t i = 0; i < sizeof(generic) / sizeof(generic[0]); i++) {
+-        g_ds4_shape = *generic[i];
++    /* the Qwen family's model cards: 0.6, top_k 20, top_p 0.95, min_p 0 (qwen35 0004) */
++    static const ds4_shape *const qwen4_shapes[] = { &DS4_SHAPE_QWEN4_EXP, &DS4_SHAPE_QWEN4_MINI };
++    for (size_t i = 0; i < sizeof(qwen4_shapes) / sizeof(qwen4_shapes[0]); i++) {
++        g_ds4_shape = *qwen4_shapes[i];
+         t = p = m = -1; k = -1;
+         ds4_engine_sampling_defaults(&e, &t, &k, &p, &m);
+-        CHECK(t == DS4_DEFAULT_TEMPERATURE && k == 0 && p == DS4_DEFAULT_TOP_P && m == DS4_DEFAULT_MIN_P);
++        CHECK(t == 0.6f && k == 20 && p == 0.95f && m == 0.0f);
+     }
+     /* the GLM override the base already had is unchanged */
+     g_ds4_shape = DS4_SHAPE_GLM52;
+     t = p = m = -1; k = -1;
+     ds4_engine_sampling_defaults(&e, &t, &k, &p, &m);
+     CHECK(t == DS4_DEFAULT_TEMPERATURE && k == 0 && p == 0.95f && m == 0.0f);
+-    printf("ok   sampling: Mellum (1.0, top_k 0, 1.0, 0.0); Qwen generic; GLM keeps top_p 0.95\n");
++    printf("ok   sampling: Mellum (1.0, top_k 0, 1.0, 0.0); Qwen (0.6, top_k 20, 0.95, 0.0); GLM keeps top_p 0.95\n");
+ }
+ 
+ /* Session save and load refuse Mellum by name at every entry point (the payload layout of its

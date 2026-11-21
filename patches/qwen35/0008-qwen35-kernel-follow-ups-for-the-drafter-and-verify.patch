@@ -1,4 +1,4 @@
-From f47ec5230cd46edeacf9a55769cd9fee6681e674 Mon Sep 17 00:00:00 2001
+From f34f3a0a1923c23019257e1c3a41c6bccf1d003f Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 21:25:08 +0900
 Subject: [PATCH 08/18] qwen35: kernel follow-ups for the drafter and verify
@@ -19,10 +19,10 @@ Carried-commits: b00831d 17a9818 2fefe5f
  7 files changed, 903 insertions(+), 22 deletions(-)
 
 diff --git a/ds4.c b/ds4.c
-index c28fba88..653867b5 100644
+index 964d2c33..3eb26078 100644
 --- a/ds4.c
 +++ b/ds4.c
-@@ -60757,8 +60757,13 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
+@@ -61150,8 +61150,13 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
  /* Dense qwen35 gated GQA attention over positions 0..pos: [q|gate] per head,
   * RMS-normed q and k with partial NeoX rope, f16 K/V, softmax(qk/sqrt(D))v
   * times sigmoid(gate), then the output projection.  attn_slot numbers the
@@ -38,7 +38,7 @@ index c28fba88..653867b5 100644
   *
   * Off a verify, prompt batches (T > 8) take llama.cpp's flash-attention
   * tiling (ds4_gpu_qwen35_attn_fa_tensor) and decode rows (T <= 8) take the
-@@ -60776,7 +60781,13 @@ static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, c
+@@ -61169,7 +61174,13 @@ static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, c
                                            pos0, g->ctx_cap, DS4_ROPE_FREQ_BASE, DS4_RMS_EPS))) {
          return false;
      }
@@ -54,10 +54,10 @@ index c28fba88..653867b5 100644
                                              g->pos3, g->qwen35_verify_table, (uint64_t)attn_slot * 8u,
                                              g->qwen35_verify_part, T, DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM,
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 535be48a..81e41819 100644
+index 9387f7d9..6ccec2f8 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
-@@ -309,6 +309,8 @@ enum {
+@@ -311,6 +311,8 @@ enum {
      DS4_GPU_TEST_OUTPUT_HC_WEIGHTS4 = 1u << 5,
      DS4_GPU_TEST_HC_RMS_SCALE_PROJ = 1u << 6,
      DS4_GPU_TEST_Q6_K_MM_BYTEWISE = 1u << 7,
@@ -66,7 +66,7 @@ index 535be48a..81e41819 100644
  };
  void ds4_gpu_test_set_flags(uint32_t flags);
  void ds4_gpu_release_zero_prefix_prefill_mask_cache(void);
-@@ -821,7 +823,11 @@ int ds4_gpu_matmul_q6_K_tensor(
+@@ -823,7 +825,11 @@ int ds4_gpu_matmul_q6_K_tensor(
   * kernels), for qwen35's verify (Q4_K, Q6_K) and the DFlash drafter (Q4_0,
   * in_dim a multiple of 32).  Its sums are not in the one-row kernels' order, but its
   * tiling depends only on the weight shape, so row t of the output is bitwise
@@ -79,7 +79,7 @@ index 535be48a..81e41819 100644
  int ds4_gpu_matmul_mma_rows_tensor(
          ds4_gpu_tensor       *out,
          const void           *model_map,
-@@ -3611,6 +3617,23 @@ int ds4_gpu_qwen35_attn_verify_tensor(
+@@ -3613,6 +3619,23 @@ int ds4_gpu_qwen35_attn_verify_tensor(
          ds4_gpu_tensor *table, uint64_t entry0, ds4_gpu_tensor *part,
          uint32_t n_tokens, uint32_t n_head, uint32_t n_head_kv, uint32_t head_dim,
          uint32_t pos0, float scale);
@@ -103,7 +103,7 @@ index 535be48a..81e41819 100644
  /* Dense qwen35 prefill attention with llama.cpp's flash-attention tiling
   * (kernel_flash_attn_ext: 8 queries of one head per threadgroup, 64 keys per
   * step): causal over the f16 caches' rows 0..pos0+n_tokens-1, out =
-@@ -3825,7 +3848,9 @@ int ds4_gpu_dflash_conv_tensor(
+@@ -4094,7 +4117,9 @@ int ds4_gpu_dflash_conv_tensor(
  /* Non-causal windowed attention of a block's rows (row t at pos0 + t) over
   * the ring slots holding a committed position tp (0 <= tp < pos0, within
   * window of the row) and over every block row; f16 ring K/V, f32 block K/V,
@@ -115,10 +115,10 @@ index 535be48a..81e41819 100644
          ds4_gpu_tensor *out, const ds4_gpu_tensor *q,
          const ds4_gpu_tensor *k_blk, const ds4_gpu_tensor *v_blk,
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 7d8915c0..39feb0ba 100644
+index cb79f181..096b784f 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -20309,7 +20309,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -20532,7 +20532,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
      while (nt > 1 && (uint64_t)nt > nt_limit) nt /= 2;
  
      char fn_name[64];
@@ -134,7 +134,7 @@ index 7d8915c0..39feb0ba 100644
  
      @autoreleasepool {
          id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
-@@ -48561,6 +48568,8 @@ enum {
+@@ -48806,6 +48813,8 @@ enum {
      QWEN4_K_QWEN35_GDN_HIST_COMMIT,
      QWEN4_K_QWEN35_ATTN_FA,
      QWEN4_K_QWEN35_ATTN_FA_PAD,
@@ -143,7 +143,7 @@ index 7d8915c0..39feb0ba 100644
      QWEN4_K_COUNT,
  };
  
-@@ -48670,6 +48679,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+@@ -48937,6 +48946,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
      "kernel_qwen35_gdn_hist_commit",
      "kernel_qwen35_attn_fa",
      "kernel_qwen35_attn_fa_pad",
@@ -152,7 +152,7 @@ index 7d8915c0..39feb0ba 100644
  };
  
  typedef struct {
-@@ -50072,6 +50083,72 @@ int ds4_gpu_qwen35_attn_verify_tensor(
+@@ -50424,6 +50435,72 @@ int ds4_gpu_qwen35_attn_verify_tensor(
                                                   n_head, n_head_kv, head_dim, 0u, scale);
  }
  
@@ -225,7 +225,7 @@ index 7d8915c0..39feb0ba 100644
  int ds4_gpu_qwen4_moe_mid_tensor(
          ds4_gpu_tensor *mid, const ds4_gpu_tensor *x, const ds4_gpu_tensor *selected,
          const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset,
-@@ -51259,7 +51336,9 @@ int ds4_gpu_dflash_attn_tensor(
+@@ -52433,7 +52510,9 @@ int ds4_gpu_dflash_attn_tensor(
          !qwen4_bind_tensor(&b[6], out, q_bytes, "dflash attention output")) {
          return 0;
      }
@@ -429,10 +429,10 @@ index 13380d61..f40150a9 100644
  template [[host_name("kernel_qwen35_mma_q6_K_f32_nt2")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<2, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
  template [[host_name("kernel_qwen35_mma_q6_K_f32_nt4")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<4, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index 95b77dc1..7364b64c 100644
+index f68f0f0f..412e326c 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
-@@ -3022,6 +3022,245 @@ kernel void kernel_qwen35_attn_fa(
+@@ -3036,6 +3036,245 @@ kernel void kernel_qwen35_attn_fa(
      }
  }
  

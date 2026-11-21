@@ -1,4 +1,4 @@
-From 17f289f3e7ab8528f42debef79a921965fd6df79 Mon Sep 17 00:00:00 2001
+From 2d5b889a5f8551473fa3dc68d0a3c42aeb2038fe Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 13:24:13 +0900
 Subject: [PATCH 07/18] qwen35: flash attention for prompt batches
@@ -17,10 +17,10 @@ Carried-commits: 334a9a3 6d985f6 dccb545
  5 files changed, 690 insertions(+), 6 deletions(-)
 
 diff --git a/ds4.c b/ds4.c
-index 68417d5b..c28fba88 100644
+index 8ddbe8b2..964d2c33 100644
 --- a/ds4.c
 +++ b/ds4.c
-@@ -60758,7 +60758,11 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
+@@ -61151,7 +61151,11 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
   * RMS-normed q and k with partial NeoX rope, f16 K/V, softmax(qk/sqrt(D))v
   * times sigmoid(gate), then the output projection.  attn_slot numbers the
   * attention layers; under a verify, row t takes the key splits of a decode
@@ -33,7 +33,7 @@ index 68417d5b..c28fba88 100644
  static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds4_layer_weights *l,
                                     uint32_t il, uint32_t pos0, uint32_t T, uint32_t attn_slot) {
      const float scale = 1.0f / sqrtf((float)DS4_N_HEAD_DIM);
-@@ -60777,6 +60781,9 @@ static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, c
+@@ -61170,6 +61174,9 @@ static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, c
                                              g->pos3, g->qwen35_verify_table, (uint64_t)attn_slot * 8u,
                                              g->qwen35_verify_part, T, DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM,
                                              pos0, scale) != 0
@@ -44,10 +44,10 @@ index 68417d5b..c28fba88 100644
                                             NULL, NULL, T <= 2u ? g->attn_part : NULL, T,
                                             DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM, pos0, false, 0u, scale) != 0;
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index a2a50b0a..535be48a 100644
+index adf8957e..9387f7d9 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
-@@ -308,6 +308,7 @@ enum {
+@@ -310,6 +310,7 @@ enum {
      DS4_GPU_TEST_MXFP4_DOWN_HALF_LUT = 1u << 4,
      DS4_GPU_TEST_OUTPUT_HC_WEIGHTS4 = 1u << 5,
      DS4_GPU_TEST_HC_RMS_SCALE_PROJ = 1u << 6,
@@ -55,7 +55,7 @@ index a2a50b0a..535be48a 100644
  };
  void ds4_gpu_test_set_flags(uint32_t flags);
  void ds4_gpu_release_zero_prefix_prefill_mask_cache(void);
-@@ -834,7 +835,9 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -836,7 +837,9 @@ int ds4_gpu_matmul_mma_rows_tensor(
  
  /* The same product through the tiled prefill kernel (Metal only): each
   * weight is read once per 32 tokens instead of once per token.  Dense
@@ -66,7 +66,7 @@ index a2a50b0a..535be48a 100644
  int ds4_gpu_matmul_q6_K_mm_tensor(
          ds4_gpu_tensor       *out,
          const void           *model_map,
-@@ -3608,6 +3611,16 @@ int ds4_gpu_qwen35_attn_verify_tensor(
+@@ -3610,6 +3613,16 @@ int ds4_gpu_qwen35_attn_verify_tensor(
          ds4_gpu_tensor *table, uint64_t entry0, ds4_gpu_tensor *part,
          uint32_t n_tokens, uint32_t n_head, uint32_t n_head_kv, uint32_t head_dim,
          uint32_t pos0, float scale);
@@ -84,10 +84,10 @@ index a2a50b0a..535be48a 100644
          ds4_gpu_tensor *gated, ds4_gpu_tensor *normed, const ds4_gpu_tensor *R,
          const ds4_gpu_tensor *key, const ds4_gpu_tensor *value,
 diff --git a/ds4_metal.m b/ds4_metal.m
-index e1fb9989..7d8915c0 100644
+index a5b84a94..cb79f181 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -20412,7 +20412,10 @@ int ds4_gpu_matmul_q6_K_mm_tensor(
+@@ -20635,7 +20635,10 @@ int ds4_gpu_matmul_q6_K_mm_tensor(
                                                         &inner_offset);
          const bool bc_out = (out_dim % 64u) != 0 || (n_tok % 32u) != 0;
          id<MTLComputePipelineState> pipeline =
@@ -99,8 +99,8 @@ index e1fb9989..7d8915c0 100644
          if (!xbuf || !outbuf || !wbuf || !pipeline) return 0;
  
          ds4_gpu_mul_mm_args args = ds4_gpu_make_mm_args(in_dim, out_dim, n_tok, row_bytes);
-@@ -48556,6 +48559,8 @@ enum {
-     QWEN4_K_VIS_BIAS_ACT,
+@@ -48801,6 +48804,8 @@ enum {
+     QWEN4_K_MOE_MM_DOWN_NAXC64_ADDR,
      QWEN4_K_QWEN35_GDN_OUT,
      QWEN4_K_QWEN35_GDN_HIST_COMMIT,
 +    QWEN4_K_QWEN35_ATTN_FA,
@@ -108,8 +108,8 @@ index e1fb9989..7d8915c0 100644
      QWEN4_K_COUNT,
  };
  
-@@ -48663,6 +48668,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
-     "kernel_qwen4_vis_bias_act",
+@@ -48930,6 +48935,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+     "kernel_qwen4_moe_mm_down_naxc64_addr",
      "kernel_qwen35_gdn_out",
      "kernel_qwen35_gdn_hist_commit",
 +    "kernel_qwen35_attn_fa",
@@ -117,7 +117,7 @@ index e1fb9989..7d8915c0 100644
  };
  
  typedef struct {
-@@ -48685,6 +48692,9 @@ static MTLSize qwen4_moe_mm_grid(uint32_t row_blocks, uint32_t n_expert, uint32_
+@@ -48952,6 +48959,9 @@ static MTLSize qwen4_moe_mm_grid(uint32_t row_blocks, uint32_t n_expert, uint32_
  }
  
  static id<MTLComputePipelineState> g_qwen4_pipelines[QWEN4_K_COUNT];
@@ -127,7 +127,7 @@ index e1fb9989..7d8915c0 100644
  #define QWEN4_ATTN_NSG 4
  #define QWEN4_ATTN_MAX_SPLITS 64
  #define QWEN4_ATTN_ROWS_MAX 64     /* decode batch rows the attention rows kernels take */
-@@ -49580,6 +49590,46 @@ int ds4_gpu_qwen35_attn_prep_tensor(
+@@ -49849,6 +49859,46 @@ int ds4_gpu_qwen35_attn_prep_tensor(
                            MTLSizeMake(n_head + n_head_kv, n_tokens, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -174,7 +174,7 @@ index e1fb9989..7d8915c0 100644
  int ds4_gpu_qwen4_idx_block_key_tensor(
          ds4_gpu_tensor *block_key, const ds4_gpu_tensor *ik_cache, const ds4_gpu_tensor *pos3,
          const void *model_map, uint64_t model_size, uint64_t g_ik_offset,
-@@ -50755,6 +50805,8 @@ static void qwen4_batch_release_scratch(void) {
+@@ -51284,6 +51334,8 @@ static void qwen4_batch_release_scratch(void) {
      ds4_gpu_tensor_free(g_qwen4_gdn_slots);
      g_qwen4_dense_mm_partials = g_qwen4_gdn_slots = NULL;
      g_qwen4_dense_mm_partials_bytes = 0;
@@ -184,7 +184,7 @@ index e1fb9989..7d8915c0 100644
  }
  
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index f43df3d4..95b77dc1 100644
+index 96741fd3..f68f0f0f 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -1095,10 +1095,51 @@ kernel void kernel_qwen35_q6_K_matmul_f32(
@@ -242,7 +242,7 @@ index f43df3d4..95b77dc1 100644
  
  /* --- PLE ---------------------------------------------------------------- */
  
-@@ -2704,6 +2745,283 @@ kernel void kernel_qwen4_attn_mm(
+@@ -2718,6 +2759,283 @@ kernel void kernel_qwen4_attn_mm(
      }
  }
  

@@ -1,4 +1,4 @@
-From 84004b1c3390aa52e5ea9b65cc9a2e681c04b9ed Mon Sep 17 00:00:00 2001
+From 613afb4af112d9f3d6025404ba26117607fbd65a Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 12:22:58 +0200
 Subject: [PATCH 13/18] qwen35: compare the dense graph against a
@@ -44,25 +44,25 @@ Retire-when: dense qwen35 runs on CUDA upstream
 Carried-commits: none (authored here)
 ---
  .gitignore                 |   1 +
- Makefile                   |  14 +
+ Makefile                   |  15 ++
  tests/test_qwen35_oracle.c | 508 +++++++++++++++++++++++++++++++++++++
- 3 files changed, 523 insertions(+)
+ 3 files changed, 524 insertions(+)
  create mode 100644 tests/test_qwen35_oracle.c
 
 diff --git a/.gitignore b/.gitignore
-index e09d0a0d..458163fc 100644
+index a085360f..8e042e65 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -121,3 +121,4 @@ __pycache__/
+@@ -130,3 +130,4 @@ __pycache__/
  /tests/test_qwen35_cuda_recurrent
  /tests/test_qwen35_cuda_attention
  /tests/test_qwen35_host
 +/tests/test_qwen35_oracle
 diff --git a/Makefile b/Makefile
-index 7ad37963..a351563d 100644
+index fe688fb2..1b2e4153 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -796,6 +796,20 @@ endif
+@@ -799,6 +799,21 @@ endif
  test-qwen35-host: tests/test_qwen35_host
  	./tests/test_qwen35_host
  
@@ -80,9 +80,10 @@ index 7ad37963..a351563d 100644
 +test-qwen35-oracle: tests/test_qwen35_oracle
 +	./tests/test_qwen35_oracle
 +
- ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
- 	$(CC) $(CFLAGS) -c -o $@ ds4.c
++
  
+ ds4.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+ 	$(CC) $(CFLAGS) -c -o $@ ds4.c
 diff --git a/tests/test_qwen35_oracle.c b/tests/test_qwen35_oracle.c
 new file mode 100644
 index 00000000..eef9bdfd

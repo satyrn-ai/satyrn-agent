@@ -1,4 +1,4 @@
-From 06bd164e5afe8ea8987c76d30278344f12422b34 Mon Sep 17 00:00:00 2001
+From dceeaf2326203616e4c893e181c2632e30000911 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 11:56:27 +0200
 Subject: [PATCH 12/18] qwen35: reach the dense graph on CUDA
@@ -42,26 +42,26 @@ Retire-when: dense qwen35 runs on CUDA upstream
 Carried-commits: none (authored here)
 ---
  .gitignore               |   1 +
- Makefile                 |  14 ++++
+ Makefile                 |  15 +++++
  ds4.c                    | 142 +++++++++++++++++++++++++++++----------
  tests/test_qwen35_host.c | 141 ++++++++++++++++++++++++++++++++++++++
- 4 files changed, 263 insertions(+), 35 deletions(-)
+ 4 files changed, 264 insertions(+), 35 deletions(-)
  create mode 100644 tests/test_qwen35_host.c
 
 diff --git a/.gitignore b/.gitignore
-index f47da096..e09d0a0d 100644
+index 620458f2..a085360f 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -120,3 +120,4 @@ __pycache__/
+@@ -129,3 +129,4 @@ __pycache__/
  /tests/test_qwen35_cuda_quant
  /tests/test_qwen35_cuda_recurrent
  /tests/test_qwen35_cuda_attention
 +/tests/test_qwen35_host
 diff --git a/Makefile b/Makefile
-index 306ec205..7ad37963 100644
+index 32a0e5a0..fe688fb2 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -782,6 +782,20 @@ test-qwen35-cuda-attention: tests/test_qwen35_cuda_attention
+@@ -785,6 +785,21 @@ test-qwen35-cuda-attention: tests/test_qwen35_cuda_attention
  	./tests/test_qwen35_cuda_attention
  endif
  
@@ -79,14 +79,15 @@ index 306ec205..7ad37963 100644
 +test-qwen35-host: tests/test_qwen35_host
 +	./tests/test_qwen35_host
 +
- ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
++
+ ds4.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
  	$(CC) $(CFLAGS) -c -o $@ ds4.c
  
 diff --git a/ds4.c b/ds4.c
-index 653867b5..ea51bd36 100644
+index 3eb26078..5dd2d4d5 100644
 --- a/ds4.c
 +++ b/ds4.c
-@@ -59440,11 +59440,6 @@ static bool qwen35_graph_dense_ok(const ds4_tensor *t) {
+@@ -59816,11 +59816,6 @@ static bool qwen35_graph_dense_ok(const ds4_tensor *t) {
  }
  
  static bool qwen35_graph_weights_supported(const ds4_weights *w) {
@@ -98,15 +99,15 @@ index 653867b5..ea51bd36 100644
      if (!qwen35_graph_dense_ok(w->token_embd) || !qwen35_graph_dense_ok(w->output) || !w->output_norm) {
          fprintf(stderr, "ds4: qwen35 GPU graph: unsupported embedding or output head type\n");
          return false;
-@@ -59473,7 +59468,6 @@ static bool qwen35_graph_weights_supported(const ds4_weights *w) {
+@@ -59849,7 +59844,6 @@ static bool qwen35_graph_weights_supported(const ds4_weights *w) {
          }
      }
      return true;
 -#endif
  }
  
- /* The Metal graph runs a subset of what the loader accepts. */
-@@ -59580,6 +59574,7 @@ static void qwen35_dflash_free(ds4_qwen35_dflash *d) {
+ #include "ds4_mellum_graph_alloc.inc"
+@@ -59958,6 +59952,7 @@ static void qwen35_dflash_free(ds4_qwen35_dflash *d) {
      free(d);
  }
  
@@ -114,7 +115,7 @@ index 653867b5..ea51bd36 100644
  /* The drafter state of a session whose engine holds a drafter: the capture
   * ring (200 MiB at the 27B's width and five taps), the K/V rings (40 MiB),
   * the injection's sub-batch buffers and one draft block's activations. */
-@@ -59622,6 +59617,7 @@ static ds4_qwen35_dflash *qwen35_dflash_alloc(const ds4_dflash_weights *dw, cons
+@@ -60000,6 +59995,7 @@ static ds4_qwen35_dflash *qwen35_dflash_alloc(const ds4_dflash_weights *dw, cons
      }
      return d;
  }
@@ -122,7 +123,7 @@ index 653867b5..ea51bd36 100644
  
  static void qwen4_graph_free(ds4_qwen4_gpu_graph *g) {
      if (!g) return;
-@@ -60418,13 +60414,10 @@ static bool qwen4_graph_linear(ds4_qwen4_gpu_graph *g, const ds4_model *m, const
+@@ -60810,13 +60806,10 @@ static bool qwen4_graph_linear(ds4_qwen4_gpu_graph *g, const ds4_model *m, const
                                             g->snap_after_first ? g->snap_lin_state[il] : NULL, 0u,
                                             g->snap_after_second ? g->snap2_lin_state[il] : NULL, 1u) != 0;
      }
@@ -137,7 +138,7 @@ index 653867b5..ea51bd36 100644
          ok = ds4_gpu_qwen4_gdn_out_tensor(g->lin_o, g->z, m->map, m->size, l->lin_norm->abs_offset, T,
                                            DS4_N_LIN_V_HEAD, DS4_N_LIN_HEAD_DIM, DS4_RMS_EPS) != 0;
      }
-@@ -60753,7 +60746,6 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
+@@ -61146,7 +61139,6 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
      return ds4_gpu_tensor_write(g->ple_emb, 0, row, (uint64_t)T * E * sizeof(float)) != 0;
  }
  
@@ -145,7 +146,7 @@ index 653867b5..ea51bd36 100644
  /* Dense qwen35 gated GQA attention over positions 0..pos: [q|gate] per head,
   * RMS-normed q and k with partial NeoX rope, f16 K/V, softmax(qk/sqrt(D))v
   * times sigmoid(gate), then the output projection.  attn_slot numbers the
-@@ -60781,26 +60773,36 @@ static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, c
+@@ -61174,26 +61166,36 @@ static bool qwen35_graph_attention(ds4_qwen4_gpu_graph *g, const ds4_model *m, c
                                            pos0, g->ctx_cap, DS4_ROPE_FREQ_BASE, DS4_RMS_EPS))) {
          return false;
      }
@@ -196,7 +197,7 @@ index 653867b5..ea51bd36 100644
  /* The verify mode of one qwen35 forward.  The session's DFlash mode MMA
   * takes every forward of 1..8 rows.  Off, the diagnostics decide (read per
   * call, as the attention split keys are, so a tool can switch them per
-@@ -60869,6 +60871,8 @@ static bool qwen35_graph_verify_alloc(ds4_qwen4_gpu_graph *g) {
+@@ -61262,6 +61264,8 @@ static bool qwen35_graph_verify_alloc(ds4_qwen4_gpu_graph *g) {
      return true;
  }
  
@@ -205,7 +206,7 @@ index 653867b5..ea51bd36 100644
  /* Embedding rows dequantized on the host into R, and text rope positions. */
  static bool qwen35_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds4_weights *w,
                                        const int *tokens, uint32_t T) {
-@@ -60882,6 +60886,7 @@ static bool qwen35_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m
+@@ -61275,6 +61279,7 @@ static bool qwen35_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m
             ds4_gpu_tensor_write(g->pos3, (uint64_t)g->pos * 16u, g->host_pos3, (uint64_t)T * 16u);
  }
  
@@ -213,7 +214,7 @@ index 653867b5..ea51bd36 100644
  /* After layer il's FFN residual add, R holds the input of layer il + 1 for
   * every row: llama.cpp's t_layer_inp[il + 1], the drafter's tap when il + 1
   * is one of its target layers.  Rows at positions below cap_from are not
-@@ -60978,6 +60983,74 @@ static void qwen35_dflash_capture_end(ds4_qwen35_dflash *d, uint32_t pos0, uint3
+@@ -61371,6 +61376,74 @@ static void qwen35_dflash_capture_end(ds4_qwen35_dflash *d, uint32_t pos0, uint3
      if (committed) d->feat_end = pos0 + T;
  }
  
@@ -288,7 +289,7 @@ index 653867b5..ea51bd36 100644
  /* Dense qwen35 forward, the layer order of llama.cpp's qwen35 graph:
   *   R += mixer(rmsnorm(R) * attn_norm)
   *   R += down(silu(gate(x)) * up(x)),  x = rmsnorm(R) * post_attention_norm
-@@ -60988,17 +61061,17 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+@@ -61381,17 +61454,17 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
                                          const int *tokens, uint32_t T, float *logits_out, bool all_rows) {
      const uint32_t pos0 = g->pos, E = DS4_N_EMBD, F = DS4_N_FF_DENSE;
      const uint32_t n_trunk = DS4_N_LAYER - DS4_N_NEXTN_PREDICT;
@@ -311,7 +312,7 @@ index 653867b5..ea51bd36 100644
      uint32_t attn_slot = 0;
      for (uint32_t il = 0; il < n_trunk && ok; il++) {
          const ds4_layer_weights *l = &w->layer[il];
-@@ -61020,7 +61093,7 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+@@ -61413,7 +61486,7 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
          }
          if (ok) ok = qwen4_graph_apply_steering_ffn(g, il, T);
          if (ok) ok = ds4_gpu_add_tensor(g->R, g->R, g->blk, T * E) != 0;
@@ -320,7 +321,7 @@ index 653867b5..ea51bd36 100644
          if (ok && il == 1u && n_trunk > 2u) ok = ds4_gpu_flush_commands() != 0;
      }
      /* A verify computes every row's logits; off computes the last row's, or
-@@ -61035,7 +61108,7 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+@@ -61428,7 +61501,7 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
               qwen4_graph_gemv(g, g->logits, m, w->output, g->mixed, rows);
          ds4_gpu_tensor_free(src);
      }
@@ -329,7 +330,7 @@ index 653867b5..ea51bd36 100644
      g->qwen35_verify_now = DS4_QWEN35_VERIFY_OFF;
      if (!ds4_gpu_end_commands()) ok = false;
      if (ok && verify != DS4_QWEN35_VERIFY_OFF) {
-@@ -61050,10 +61123,11 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+@@ -61443,10 +61516,11 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
          ok = ds4_gpu_tensor_read(g->logits, 0, logits_out, (uint64_t)rows * DS4_N_VOCAB * sizeof(float)) != 0;
      }
      if (ok && !g->qwen35_no_write_back) g->pos += T;
@@ -342,9 +343,9 @@ index 653867b5..ea51bd36 100644
  /* A DFlash verify of T <= 8 rows at g->pos in the graph's mode (MMA):
   * every row's logits land in qwen35_verify_host; the GDN layers write back
   * neither conv history nor state and keep their rows for qwen35_graph_commit;
-@@ -61228,9 +61302,7 @@ static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *
-         }
-     }
+@@ -61624,9 +61698,7 @@ static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *
+     /* Mellum has its own forward: no hyper-connections, GDN or PLE, and nothing here stages into host_row */
+     if (ds4_model_is_mellum()) return mellum_graph_forward_tokens(g, m, w, tokens, T, logits_out, all_rows);
      /* qwen35 checks all_rows itself, after a verify has grown the logit rows */
 -#if defined(__APPLE__)
      if (ds4_model_is_qwen35()) return qwen35_graph_forward_tokens(g, m, w, tokens, T, logits_out, all_rows);

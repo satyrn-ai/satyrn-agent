@@ -1,4 +1,4 @@
-From 442dbb2ccef3d9b7670245dd92a2fb6ed2f06e5c Mon Sep 17 00:00:00 2001
+From d3b834b95254b63d6f02f1385ea4e9c0248604e2 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 10:31:02 +0200
 Subject: [PATCH 10/18] qwen35: dense recurrent SiLU output on CUDA
@@ -30,19 +30,19 @@ Carried-commits: none (authored here)
  create mode 100644 tests/test_qwen35_cuda_recurrent.c
 
 diff --git a/.gitignore b/.gitignore
-index 59525049..2f7d7bad 100644
+index c1484dd0..939d9802 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -118,3 +118,4 @@ __pycache__/
- /tests/test_qwen4_conv_parallel
- /tests/test_q8_prefill_variants
+@@ -127,3 +127,4 @@ __pycache__/
+ /tests/test_metal_tensor_lifetime
+ /tests/mellum_trace
  /tests/test_qwen35_cuda_quant
 +/tests/test_qwen35_cuda_recurrent
 diff --git a/Makefile b/Makefile
-index e6f80ce2..563b9b73 100644
+index fc7d8811..37acc462 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -760,6 +760,16 @@ tests/test_qwen35_cuda_quant: tests/test_qwen35_cuda_quant.o tests/qwen35_cuda_t
+@@ -763,6 +763,16 @@ tests/test_qwen35_cuda_quant: tests/test_qwen35_cuda_quant.o tests/qwen35_cuda_t
  .PHONY: test-qwen35-cuda-quant
  test-qwen35-cuda-quant: tests/test_qwen35_cuda_quant
  	./tests/test_qwen35_cuda_quant
@@ -58,8 +58,8 @@ index e6f80ce2..563b9b73 100644
 +	./tests/test_qwen35_cuda_recurrent
  endif
  
- ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
-@@ -1094,7 +1104,7 @@ tests/test_dflash_live: tests/test_dflash_live.o $(CORE_OBJS)
+ ds4.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+@@ -1152,7 +1162,7 @@ tests/test_dflash_live: tests/test_dflash_live.o $(CORE_OBJS)
  
  ds4.o ds4_cpu.o ds4_cpu_test_hooks.o ds4_cuda_test_hooks.o ds4_metal.o ds4_cuda.o ds4_rocm.o tests/test_qwen4_cuda.o tests/test_qwen4_kernels.o tests/test_qwen4_ngram_state.o: ds4_qwen4_vision.h
  

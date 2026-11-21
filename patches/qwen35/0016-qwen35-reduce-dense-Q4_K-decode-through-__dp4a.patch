@@ -1,4 +1,4 @@
-From 8044aac8647ed6be8d4b73ba5d20d756ba7cdc8c Mon Sep 17 00:00:00 2001
+From 082ca590d7ecc8946307bfffd83836dda7f184ef Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 19:44:49 +0200
 Subject: [PATCH 16/18] qwen35: reduce dense Q4_K decode through __dp4a

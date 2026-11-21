@@ -1,4 +1,4 @@
-From 10dba23392ee54068466c86f7b176c01d3ab33aa Mon Sep 17 00:00:00 2001
+From 4ec87f49e413d9cb8ffde5395b7b3bb5493ee237 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Fri, 2 Oct 2026 12:46:09 +0900
 Subject: [PATCH 02/18] qwen: chat special tokens and the documented
@@ -10,16 +10,33 @@ Upstream: offer upstream, after narrowing the system-message change so tool text
 Retire-when: upstream renders these tokens and samples Qwen as documented
 Carried-commits: 480df32 14212a9
 ---
- ds4.c       | 14 +++++++++++---
- ds4_agent.c | 21 ++++++++++++++++-----
- ds4_cli.c   | 21 ++++++++++++++++-----
- 3 files changed, 43 insertions(+), 13 deletions(-)
+ ds4.c                      | 20 ++++++++++++--------
+ ds4_agent.c                | 21 ++++++++++++++++-----
+ ds4_cli.c                  |  9 +++++++++
+ tests/test_mellum_config.c | 11 ++++++-----
+ 4 files changed, 43 insertions(+), 18 deletions(-)
 
 diff --git a/ds4.c b/ds4.c
-index e26f1e08..10197fef 100644
+index 5b4f1a1f..c5147593 100644
 --- a/ds4.c
 +++ b/ds4.c
-@@ -44992,15 +44992,23 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
+@@ -45291,12 +45291,10 @@ static void bpe_tokenize_tool_response_text(ds4_vocab *vocab, const char *conten
+     bpe_tokenize_wrapped_payload_text(vocab, content, "</tool_response>", out);
+ }
+ 
+-/* A qwen4 tool message's <tool_response> wrapper.  Mellum's template text encodes it as the
+- * vocabulary's added tokens 31 and 32, which plain BPE text would not give; Flash Next keeps
+- * the text form it always had. */
++/* A qwen4 tool message's <tool_response> wrapper.  The template text encodes it as the
++ * vocabulary's added tokens (31 and 32 in Mellum's), which plain BPE text would not give. */
+ static void qwen4_tool_response_tag(ds4_vocab *vocab, const char *tag, token_vec *out) {
+-    if (ds4_model_is_mellum()) tokenize_rendered_chat_vocab(vocab, tag, out);
+-    else bpe_tokenize_text(vocab, tag, out);
++    tokenize_rendered_chat_vocab(vocab, tag, out);
+ }
+ 
+ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role, const char *content) {
+@@ -45306,6 +45304,11 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
  
      if (ds4_model_is_qwen4()) {
          if (!strcmp(role, "tool") || !strcmp(role, "function")) {
@@ -29,19 +46,19 @@ index e26f1e08..10197fef 100644
 +             * text it never learned as a tool result. The result itself stays
 +             * untrusted text that cannot spell a control token. */
              qwen4_chat_open(vocab, "user", tokens);
--            bpe_tokenize_text(vocab, "<tool_response>\n", tokens);
-+            tokenize_rendered_chat_vocab(vocab, "<tool_response>\n", tokens);
+             qwen4_tool_response_tag(vocab, "<tool_response>\n", tokens);
              bpe_tokenize_tool_response_text(vocab, content, tokens);
--            bpe_tokenize_text(vocab, "\n</tool_response>", tokens);
-+            tokenize_rendered_chat_vocab(vocab, "\n</tool_response>", tokens);
-         } else {
+@@ -45314,10 +45317,11 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
              const char *name = (!strcmp(role, "system") || !strcmp(role, "developer")) ? "system" :
                                 !strcmp(role, "assistant") ? "assistant" : "user";
              qwen4_chat_open(vocab, name, tokens);
--            if (!strcmp(name, "assistant")) {
-+            /* The system message is the host's own trusted text: its
-+             * <tool_call> and the like are the special tokens the model
-+             * emits, as the template renders them. */
+-            /* Mellum's system turn carries the host's tools block, whose <tool_call> and
+-             * </tool_call> the template's text encodes as tokens 29 and 30.  User text stays
++            /* The system message is the host's own trusted text: its <tool_call> and
++             * the like are the special tokens the model emits, as the template renders
++             * them.  Mellum's template encodes those tokens 29 and 30; user text stays
+              * plain BPE, as for every model. */
+-            if (!strcmp(name, "assistant") || (ds4_model_is_mellum() && !strcmp(name, "system"))) {
 +            if (!strcmp(name, "assistant") || !strcmp(name, "system")) {
                  tokenize_rendered_chat_vocab(vocab, content, tokens);
              } else {
@@ -79,34 +96,55 @@ index deadc450..3ff34ba6 100644
  
  static ds4_think_mode effective_think_mode(const agent_config *cfg) {
 diff --git a/ds4_cli.c b/ds4_cli.c
-index af4e2b63..c5c955f1 100644
+index c28401b6..10f6a21d 100644
 --- a/ds4_cli.c
 +++ b/ds4_cli.c
-@@ -529,11 +529,22 @@ static void build_prompt(ds4_engine *engine, const cli_generation_options *gen,
- static void cli_apply_model_sampling_defaults(
-         ds4_engine             *engine,
-         cli_generation_options *gen) {
--    if (!engine || !gen || !ds4_engine_is_glm_dsa(engine)) return;
--
--    if (!gen->temperature_set) gen->temperature = 1.0f;
--    if (!gen->top_p_set) gen->top_p = 0.95f;
--    if (!gen->min_p_set) gen->min_p = 0.0f;
-+    if (!engine || !gen) return;
-+
-+    if (ds4_engine_is_glm_dsa(engine)) {
-+        if (!gen->temperature_set) gen->temperature = 1.0f;
-+        if (!gen->top_p_set) gen->top_p = 0.95f;
-+        if (!gen->min_p_set) gen->min_p = 0.0f;
-+    } else if (ds4_engine_is_qwen4(engine)) {
+@@ -545,6 +545,15 @@ static void cli_apply_model_sampling_defaults(
+         if (!gen->top_p_set) gen->top_p = 0.95f;
+         if (!gen->min_p_set) gen->min_p = 0.0f;
+         return;
++    } else if (ds4_engine_is_qwen4(engine) && !ds4_engine_is_mellum(engine)) {
 +        /* Qwen's documented thinking-mode sampling (the Qwen3 model cards'
 +         * "Best Practices": temperature 0.6, top_p 0.95, top_k 20, min_p 0).
-+         * Before this the family fell through to the generic defaults
-+         * (temperature 1.0, top_p 1.0, min_p 0.05).  This front end has no
-+         * top_k option, so top_k stays unset. */
++         * Mellum keeps its engine table below.  This front end has no top_k
++         * option, so top_k stays unset. */
 +        if (!gen->temperature_set) gen->temperature = 0.6f;
 +        if (!gen->top_p_set) gen->top_p = 0.95f;
 +        if (!gen->min_p_set) gen->min_p = 0.0f;
-+    }
++        return;
+     }
+     /* The engine's table (Mellum: 1.0, 1.0, min_p 0).  This front end has no
+      * top_k option, so top_k stays unset. */
+diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
+index ce4a5c3b..472e1057 100644
+--- a/tests/test_mellum_config.c
++++ b/tests/test_mellum_config.c
+@@ -871,14 +871,15 @@ static void check_mellum_chat_tiny(void) {
+     ds4_tokens_push(&want, 27); push_bytes(&want, "assistant\n"); ds4_tokens_push(&want, 23); push_bytes(&want, "\n");
+     ds4_chat_append_assistant_prefix(&e, &got, DS4_THINK_HIGH);
+     expect_ids("tiny: Flash Next think-on prefix", &got, want.v, want.len);
+-    /* sibling: Flash Next's system text stays plain */
++    /* sibling: the qwen4 tool wrapper and a system turn's <tool_call> are the template's
++     * added tokens for Flash Next too (qwen35 0002 renders both for the family) */
+     got.len = 0;
+     ds4_chat_append_message(&e, &got, "system", "call <tool_call> here");
+-    CHECK(count_id(&got, 29) == 0);
+-    /* sibling: Flash Next's tool message keeps its wrapper as plain text */
++    CHECK(count_id(&got, 29) == 1);
++    /* and its tool message's wrapper is tokens 31 and 32, its content still plain */
+     got.len = 0;
+     ds4_chat_append_message(&e, &got, "tool", "42 files");
+-    CHECK(count_id(&got, 31) == 0 && count_id(&got, 32) == 0);
++    CHECK(count_id(&got, 31) == 1 && count_id(&got, 32) == 1);
+     {   /* and two results are two tool messages, as its template renders them */
+         const char *two[] = {"42 files", "7 dirs"};
+         ds4_tokens each = {0};
+@@ -903,7 +904,7 @@ static void check_mellum_chat_tiny(void) {
+     model_close(&m);
+     unlink(path);
+     printf("ok   chat (tiny vocabulary): prefix arms, no effort turn, tool turn, imported history; Flash Next keeps "
+-           "its prefix, tool text and imported history\n");
++           "its prefix and imported history, and shares the qwen4 tool wrappers\n");
  }
  
- static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, const ds4_tokens *prompt) {
+ static void text_cat(char **buf, size_t *len, const char *s) {
