@@ -1,4 +1,4 @@
-From f2c40f41c3390026d10fa46a4d329de1f30edfca Mon Sep 17 00:00:00 2001
+From 9892cc0ae1f72af047e30d9872412fc34db370f7 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:32 -0500
 Subject: [PATCH 6/6] mellum: ssd expert streaming
@@ -61,7 +61,7 @@ index b60b89ce..dee544d4 100644
 +/tests/test_metal_tensor_lifetime
 +/tests/mellum_trace
 diff --git a/Makefile b/Makefile
-index 13293ecb..e0fda632 100644
+index 951097e6..2bf5c35b 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -27,8 +27,8 @@ DS4_DSPARK_SUPPORT ?= gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf
@@ -86,7 +86,7 @@ index 13293ecb..e0fda632 100644
  CUDA_LDLIBS ?= -lm -Xcompiler -pthread -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart -lcublas
  HIPCC ?= $(shell command -v hipcc 2>/dev/null || echo /opt/rocm/bin/hipcc)
  ROCM_ARCH ?= gfx1151
-@@ -321,7 +321,7 @@ cuda:
+@@ -334,7 +334,7 @@ cuda:
  
  strix-halo:
  	$(MAKE) -B ds4 ds4-server ds4-bench ds4-eval ds4-agent \
@@ -95,7 +95,7 @@ index 13293ecb..e0fda632 100644
  		CFLAGS="$(CFLAGS) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD" \
  		DS4_LINK="$(HIPCC) $(ROCM_CFLAGS)" \
  		DS4_LINK_LIBS="$(ROCM_LDLIBS)"
-@@ -337,7 +337,7 @@ test-rocm:
+@@ -350,7 +350,7 @@ test-rocm:
  		test-session-state \
  		tests/test_layer_pack tests/test_engine_mgpu_placement tests/test_gpu_args tests/test_prompt_prefix \
  		ds4 ds4-server ds4-bench ds4-agent \
@@ -104,7 +104,7 @@ index 13293ecb..e0fda632 100644
  		CFLAGS="$(CFLAGS) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD" \
  		DS4_LINK="$(HIPCC) $(ROCM_CFLAGS)" \
  		DS4_LINK_LIBS="$(ROCM_LDLIBS)"
-@@ -1182,13 +1182,13 @@ ds4_cpu_test_hooks.o: ds4.c ds4.h ds4_image.h ds4_gpu.h ds4_gpu_mgpu.h ds4_layer
+@@ -1195,13 +1195,13 @@ ds4_cpu_test_hooks.o: ds4.c ds4.h ds4_image.h ds4_gpu.h ds4_gpu_mgpu.h ds4_layer
  tests/test_engine_mgpu_placement.o: tests/test_engine_mgpu_placement.c ds4.h ds4_gpu_mgpu.h ds4_layer_pack.h
  	$(CC) $(CFLAGS) -I. -c -o $@ $<
  
@@ -120,7 +120,7 @@ index 13293ecb..e0fda632 100644
  	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
  
  tests/test_session_state.o: tests/test_session_state.c ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_tp.h
-@@ -1480,3 +1480,48 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
+@@ -1493,3 +1493,48 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
  gguf-tools/quality-testing/score_official_verify: gguf-tools/quality-testing/score_official_verify.o ds4_verify_test_hooks.o $(filter-out ds4.o,$(CORE_OBJS)) rax.o ds4_gpu_args.o
  	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))
  

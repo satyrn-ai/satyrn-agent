@@ -1,4 +1,4 @@
-From 6b88c59af2e3b2af36a08ed4f7656e33980e34d3 Mon Sep 17 00:00:00 2001
+From f5463ed186276896923062487a99714ae9195434 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:30 -0500
 Subject: [PATCH 5/6] mellum: mxfp4 moe experts
@@ -27,10 +27,10 @@ Carried-commits: 0adf6bafb1f17e642124b60b183575864f118629 989dc7c8dada6685007733
  create mode 100644 tests/mellum_heldout_unicode.tokens
 
 diff --git a/Makefile b/Makefile
-index 63cd6bae..13293ecb 100644
+index 43ee7ab6..951097e6 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -1479,3 +1479,4 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
+@@ -1492,3 +1492,4 @@ gguf-tools/quality-testing/score_official_verify.o: gguf-tools/quality-testing/s
  
  gguf-tools/quality-testing/score_official_verify: gguf-tools/quality-testing/score_official_verify.o ds4_verify_test_hooks.o $(filter-out ds4.o,$(CORE_OBJS)) rax.o ds4_gpu_args.o
  	$(if $(filter Darwin,$(UNAME_S)),$(CC) $(CFLAGS),$(DS4_LINK)) -o $@ $^ $(if $(filter Darwin,$(UNAME_S)),$(METAL_LDLIBS),$(DS4_LINK_LIBS))

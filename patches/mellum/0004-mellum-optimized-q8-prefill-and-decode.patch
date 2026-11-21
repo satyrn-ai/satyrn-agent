@@ -1,4 +1,4 @@
-From f80d5117efdfe1234c1320d6b65885cb76e91116 Mon Sep 17 00:00:00 2001
+From 964e343685eccfe0d0823bc9bbb67e9b572c4721 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:28 -0500
 Subject: [PATCH 4/6] mellum: optimized q8 prefill and decode
@@ -59,10 +59,10 @@ Carried-commits: f975919012b0437770435f08a09ab8ca88e0655a 66c40c163d57c01249b34f
  create mode 100755 tests/test_mellum_runners.sh
 
 diff --git a/Makefile b/Makefile
-index 149d57cc..63cd6bae 100644
+index a4469cb2..43ee7ab6 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -1053,6 +1053,18 @@ tests/test_mellum_tokenizer.o: tests/test_mellum_tokenizer.c tests/mellum_tokeni
+@@ -1066,6 +1066,18 @@ tests/test_mellum_tokenizer.o: tests/test_mellum_tokenizer.c tests/mellum_tokeni
  tests/test_mellum_tokenizer: tests/test_mellum_tokenizer.o $(filter-out ds4_cpu.o,$(CPU_CORE_OBJS))
  	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -o $@ $^ $(LDLIBS)
  

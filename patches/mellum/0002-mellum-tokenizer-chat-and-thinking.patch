@@ -1,4 +1,4 @@
-From 67540d8c282a775ffac1660d5f8aeb0fbf04814a Mon Sep 17 00:00:00 2001
+From 0a92b56ff4093e8a5481bed5b2d70dfc889cbcf1 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:23 -0500
 Subject: [PATCH 2/6] mellum: tokenizer, chat and thinking
@@ -13,7 +13,7 @@ Upstream: not offered, fork only
 Retire-when: upstream renders and stops Mellum 2.1 chats
 Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7cc1be8309d630991fe b5f05300a54591f1922926286b31529228a84233 5cdf14cdf6ab26e5cd466347051bc1dcb34aab14 835c6b08c7c159784463796350809cc30bdd8539 d1a98ca532c2ee9981563719e9af474b2f778938 0df162041eab77ee0ec4a357a591f3fb1ba019db 81050b372233bf221a0b4179b2b01de6afc5e341 05cddb2bc6d96baae3b1a4da11afdab76108265c 2eda52f8d44c827314dc7e53ba88b2774f346873 88cb9ac20d32baf1252517c51631c20ea5d5009f d35666971b3471f3ab1099f273e3b2acecd2c454 77b6ac83919ae797c9af081d13b4d6b5e2a7062e c8f8198fc102f2e5c71c28b87dfae8ae5581e3fc aef990e90ecc5fc4d5ba5792cb3105f0a028b940 9710f5036c11a97099ab5b06d9ac472d64b07963 006983dca4974fd78d8414a03a816e78914249ce 19054eb5359565a6d6390c348e9a840ca365a527 6b377f20ac31c9401cc35d4b83d2fc0807494776 0d5f2e73e28e677cd45764a2ebc4fe910400515a ac8cf98501405c3c7abfde74cced4e2d55725bba cf63c43b1622cb0f43783a95e925a2d102dff0f8 4ba0969087986e1a8ebed4dc1b2695669210c4bb 1d8af568face2e403ea3073682c303f4de92c1a5
 ---
- Makefile                            |  18 +-
+ Makefile                            |  15 +-
  ds4.c                               | 194 +++++-
  ds4.h                               |  16 +
  ds4_cli.c                           |  12 +
@@ -28,7 +28,7 @@ Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7
  tests/mellum_tool_text.h            |  95 +++
  tests/test_mellum_config.c          | 471 +++++++++++++++
  tests/test_mellum_tokenizer.c       | 137 +++++
- 15 files changed, 3043 insertions(+), 32 deletions(-)
+ 15 files changed, 3042 insertions(+), 30 deletions(-)
  create mode 100644 ds4_mellum_tokenizer.inc
  create mode 100644 ds4_mellum_unicode.inc
  create mode 100644 tests/gen_mellum_chat_ids.py
@@ -40,40 +40,30 @@ Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7
  create mode 100644 tests/test_mellum_tokenizer.c
 
 diff --git a/Makefile b/Makefile
-index 108f27e9..ffc0cb4f 100644
+index af2d5c53..23bc6828 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -746,7 +746,7 @@ test-qwen4-cuda: tests/test_qwen4_cuda
- 	./tests/test_qwen4_cuda
- endif
- 
--ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
-+ds4.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
- 	$(CC) $(CFLAGS) -c -o $@ ds4.c
- 
- ds4_image.o: ds4_image.c ds4_image.h third_party/iris/jpeg.h third_party/iris/png.h
-@@ -812,7 +812,7 @@ rax.o: rax.c rax.h rax_malloc.h
- linenoise.o: linenoise.c linenoise.h
- 	$(CC) $(CFLAGS) -c -o $@ linenoise.c
- 
--ds4_cpu.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_tp.h
-+ds4_cpu.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_tp.h
- 	$(CC) $(CFLAGS) -Wno-unused-function -DDS4_NO_GPU -c -o $@ ds4.c
- 
- ds4_cli_cpu.o: ds4_cli.c ds4.h ds4_ssd.h ds4_distributed.h ds4_help.h ds4_prompt_prefix.h linenoise.h
-@@ -1015,15 +1015,23 @@ test-qwen4-ngrams: tests/test_qwen4_ngrams
+@@ -81,6 +81,7 @@ all: ds4 ds4-server ds4-bench ds4-eval ds4-agent
+ # ds4.c or includes it from a test must list them, or an incremental build
+ # reports "up to date" after one changes (tests/ds4_series_deps_test.sh).
+ MELLUM_DS4_INCS = ds4_mellum_config.inc ds4_mellum_plan.inc
++MELLUM_DS4_INCS += ds4_mellum_tokenizer.inc ds4_mellum_unicode.inc
+ ds4.o ds4_cpu.o ds4_cpu_test_hooks.o ds4_cuda_test_hooks.o ds4_verify_test_hooks.o \
+ 	tests/test_deepseek41_dspark.o tests/test_deepseek41_gguf.o \
+ 	tests/test_deepseek41_graph.o tests/test_deepseek41_prefill.o \
+@@ -1026,15 +1027,23 @@ test-qwen4-ngrams: tests/test_qwen4_ngrams
  
  # Mellum 2.1, model-free: recognition, validation and binding on a sparse GGUF
  # (tests/mellum_fixture.h), and how the front ends treat a Mellum engine.
--tests/test_mellum_config.o: tests/test_mellum_config.c tests/mellum_fixture.h ds4.c ds4.h
+-tests/test_mellum_config.o: tests/test_mellum_config.c tests/mellum_fixture.h ds4.c ds4.h $(MELLUM_DS4_INCS)
 +tests/test_mellum_config.o: tests/test_mellum_config.c tests/mellum_fixture.h tests/mellum_chat_ids.inc \
-+	tests/mellum_tool_text.h ds4_prompt_prefix.h ds4.c ds4.h
++	tests/mellum_tool_text.h ds4_prompt_prefix.h ds4.c ds4.h $(MELLUM_DS4_INCS)
  	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -DDS4_NO_GPU -I. -c -o $@ $<
  
  tests/test_mellum_config: tests/test_mellum_config.o $(filter-out ds4_cpu.o,$(CPU_CORE_OBJS))
  	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -o $@ $^ $(LDLIBS)
  
-+tests/test_mellum_tokenizer.o: tests/test_mellum_tokenizer.c tests/mellum_tokenizer_cases.inc ds4_mellum_unicode.inc ds4.c ds4.h
++tests/test_mellum_tokenizer.o: tests/test_mellum_tokenizer.c tests/mellum_tokenizer_cases.inc ds4.c ds4.h $(MELLUM_DS4_INCS)
 +	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -DDS4_NO_GPU -I. -c -o $@ $<
 +
 +tests/test_mellum_tokenizer: tests/test_mellum_tokenizer.o $(filter-out ds4_cpu.o,$(CPU_CORE_OBJS))
@@ -87,7 +77,7 @@ index 108f27e9..ffc0cb4f 100644
  
  tests/test_qwen4_ngram_state.o: tests/test_qwen4_ngram_state.c ds4.c ds4.h
  	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -I. -c -o $@ $<
-@@ -1362,7 +1370,7 @@ tests/test_session_state_gpu.o: ds4_tool_text.h
+@@ -1373,7 +1382,7 @@ tests/test_session_state_gpu.o: ds4_tool_text.h
  clean:
  	rm -f tests/test_mmvq_cuda tests/test_mmvq_rocm
  	rm -f tests/test_qwen4_ngrams
