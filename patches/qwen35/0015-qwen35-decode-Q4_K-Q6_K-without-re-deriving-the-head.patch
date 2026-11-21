@@ -1,4 +1,4 @@
-From 6195d8eabfcac05fb41af2afca375d4fc207cf6a Mon Sep 17 00:00:00 2001
+From 4c625b932039ff3eb99ede4d688309e970623e7d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 19:01:30 +0200
 Subject: [PATCH 15/18] qwen35: decode Q4_K/Q6_K without re-deriving the header

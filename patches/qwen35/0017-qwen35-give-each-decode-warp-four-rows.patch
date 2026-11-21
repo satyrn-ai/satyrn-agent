@@ -1,4 +1,4 @@
-From c31acb66e0afbe6fffefef04581e0e88f548284e Mon Sep 17 00:00:00 2001
+From d0d5186c88376063b86abb864b7d5416549ad9df Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 20:05:21 +0200
 Subject: [PATCH 17/18] qwen35: give each decode warp four rows

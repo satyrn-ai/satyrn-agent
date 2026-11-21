@@ -1,4 +1,4 @@
-From 613afb4af112d9f3d6025404ba26117607fbd65a Mon Sep 17 00:00:00 2001
+From 69c12f365ca63055b46ab2882f6cdfbd83182972 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 12:22:58 +0200
 Subject: [PATCH 13/18] qwen35: compare the dense graph against a
@@ -59,14 +59,14 @@ index a085360f..8e042e65 100644
  /tests/test_qwen35_host
 +/tests/test_qwen35_oracle
 diff --git a/Makefile b/Makefile
-index fe688fb2..1b2e4153 100644
+index 9cf38b2a..80c22df8 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -799,6 +799,21 @@ endif
+@@ -812,6 +812,21 @@ endif
  test-qwen35-host: tests/test_qwen35_host
  	./tests/test_qwen35_host
  
-+tests/test_qwen35_oracle.o: tests/test_qwen35_oracle.c ds4.c ds4_gpu.h
++tests/test_qwen35_oracle.o: tests/test_qwen35_oracle.c ds4.c ds4_gpu.h $(MELLUM_DS4_INCS)
 +	$(CC) $(CFLAGS) -D_GNU_SOURCE -I. -c -o $@ $<
 +
 +tests/test_qwen35_oracle: tests/test_qwen35_oracle.o $(filter-out ds4.o,$(CORE_OBJS))
@@ -82,7 +82,7 @@ index fe688fb2..1b2e4153 100644
 +
 +
  
- ds4.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+ ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
  	$(CC) $(CFLAGS) -c -o $@ ds4.c
 diff --git a/tests/test_qwen35_oracle.c b/tests/test_qwen35_oracle.c
 new file mode 100644

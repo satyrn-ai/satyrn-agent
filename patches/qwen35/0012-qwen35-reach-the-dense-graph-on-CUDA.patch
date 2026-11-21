@@ -1,4 +1,4 @@
-From dceeaf2326203616e4c893e181c2632e30000911 Mon Sep 17 00:00:00 2001
+From a219a8f577e3f4a167937e523229856b626a9827 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 11:56:27 +0200
 Subject: [PATCH 12/18] qwen35: reach the dense graph on CUDA
@@ -58,14 +58,14 @@ index 620458f2..a085360f 100644
  /tests/test_qwen35_cuda_attention
 +/tests/test_qwen35_host
 diff --git a/Makefile b/Makefile
-index 32a0e5a0..fe688fb2 100644
+index 37e8829a..9cf38b2a 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -785,6 +785,21 @@ test-qwen35-cuda-attention: tests/test_qwen35_cuda_attention
+@@ -798,6 +798,21 @@ test-qwen35-cuda-attention: tests/test_qwen35_cuda_attention
  	./tests/test_qwen35_cuda_attention
  endif
  
-+tests/test_qwen35_host.o: tests/test_qwen35_host.c ds4.c ds4_gpu.h
++tests/test_qwen35_host.o: tests/test_qwen35_host.c ds4.c ds4_gpu.h $(MELLUM_DS4_INCS)
 +	$(CC) $(CFLAGS) -D_GNU_SOURCE -I. -c -o $@ $<
 +
 +tests/test_qwen35_host: tests/test_qwen35_host.o $(filter-out ds4.o,$(CORE_OBJS))
@@ -80,7 +80,7 @@ index 32a0e5a0..fe688fb2 100644
 +	./tests/test_qwen35_host
 +
 +
- ds4.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+ ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
  	$(CC) $(CFLAGS) -c -o $@ ds4.c
  
 diff --git a/ds4.c b/ds4.c
