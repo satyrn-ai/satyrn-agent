@@ -24,6 +24,10 @@ _read_lines() {
 # that does not yet exist unless a test materializes a scratch tree first.
 _check_fixture() {
     local upstream="$1" patches="$2" cache="$3" tree="$4" checkdir="$5"
+    # The README documents DS4_CHECK_BACKEND, so a caller may export it. Every
+    # test below then has to start from the genuine default; cases that want a
+    # backend pass --backend explicitly.
+    unset DS4_CHECK_BACKEND
     mkdir -p "$upstream"
     git -C "$upstream" init -q
     printf 'line1\n' > "$upstream/notes.txt"

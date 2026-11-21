@@ -1,4 +1,4 @@
-From 41f717215900eb7d020571b503d1baa53962fc7f Mon Sep 17 00:00:00 2001
+From 06bd164e5afe8ea8987c76d30278344f12422b34 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 11:56:27 +0200
 Subject: [PATCH 12/18] qwen35: reach the dense graph on CUDA
@@ -29,20 +29,6 @@ Metal-only symbol fails it.
 
 Not in this commit: the numerical oracle of Step 6, so nothing yet proves the
 graph computes the right thing, only that it is reachable and gated.
-
-Verify selection, the split-key row counts and the DFlash capture sit behind five
-helpers, so the forward calls them unconditionally and backend differences are
-not spread through the graph's control flow. Attention keeps one ordinary
-prompt/decode flow and guards only the verify override. The host gate calls the
-weight predicate directly; the stderr diversion it used to carry added failure
-paths without adding coverage.
-
-Verify selection, the split-key row counts and the DFlash capture sit behind five
-helpers, so the forward calls them unconditionally and backend differences are
-not spread through the graph's control flow. Attention keeps one ordinary
-prompt/decode flow and guards only the verify override. The host gate calls the
-weight predicate directly; the stderr diversion it used to carry added failure
-paths without adding coverage.
 
 Verify selection, the split-key row counts and the DFlash capture sit behind five
 helpers, so the forward calls them unconditionally and backend differences are

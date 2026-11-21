@@ -1,4 +1,4 @@
-From 076cd824dcb94235865f8e66e3b0cc0e24990495 Mon Sep 17 00:00:00 2001
+From 10dba23392ee54068466c86f7b176c01d3ab33aa Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Fri, 2 Oct 2026 12:46:09 +0900
 Subject: [PATCH 02/18] qwen: chat special tokens and the documented

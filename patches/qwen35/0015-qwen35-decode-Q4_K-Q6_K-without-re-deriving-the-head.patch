@@ -1,4 +1,4 @@
-From 4b6f96598f17c3ababc157259c657c2fc86195a7 Mon Sep 17 00:00:00 2001
+From 26ad6dd4f859876e7b18a0082ba7bdef817a82e2 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 19:01:30 +0200
 Subject: [PATCH 15/18] qwen35: decode Q4_K/Q6_K without re-deriving the header
@@ -21,24 +21,43 @@ Also fix the margin override: an explicit DS4_CUDA_RESERVE_GIB was being clamped
 up to the 6 GiB default floor, so the escape hatch could not lower the margin.
 The floor now applies only to the default, and the post-copy revert check uses
 the margin actually requested.
+
+Upstream: not offered, fork only
+Retire-when: dense qwen35 runs on CUDA upstream
+Carried-commits: none (authored here)
 ---
- ds4_cuda.cu        | 13 +++++---
+ ds4_cuda.cu        | 29 +++++++++++++---
  ds4_qwen4_cuda.cuh | 82 ++++++++++++++++++++++++++++++++++++++++++++++
- 2 files changed, 91 insertions(+), 4 deletions(-)
+ 2 files changed, 106 insertions(+), 5 deletions(-)
 
 diff --git a/ds4_cuda.cu b/ds4_cuda.cu
-index dc3f1136..98ee5d05 100644
+index 7da6850a..a13b0058 100644
 --- a/ds4_cuda.cu
 +++ b/ds4_cuda.cu
-@@ -4090,13 +4090,18 @@ static int cuda_model_make_resident(const void *model_map, uint64_t model_size)
+@@ -4104,13 +4104,32 @@ static int cuda_model_make_resident(const void *model_map, uint64_t model_size)
       * therefore yields rather than starve the machine it runs on. */
      const char *reserve_env = getenv("DS4_CUDA_RESERVE_GIB");
      size_t reserve = total_b / 8u;
 +    bool explicit_reserve = false;
      if (reserve_env && reserve_env[0]) {
-         const long gib = strtol(reserve_env, NULL, 10);
+-        const long gib = strtol(reserve_env, NULL, 10);
 -        if (gib > 0) reserve = (size_t)gib << 30;
-+        if (gib >= 0) { reserve = (size_t)gib << 30; explicit_reserve = true; }
++        char *end = NULL;
++        errno = 0;
++        const long gib = strtol(reserve_env, &end, 10);
++        /* An unparsable value must keep the default margin, not disable it the
++         * way an explicit 0 does: "oops" reading as "0 GiB" is how a typo
++         * becomes an Xid 62. */
++        if (end != reserve_env && end && *end == '\0' && errno != ERANGE &&
++            gib >= 0 && (uint64_t)gib <= (uint64_t)SIZE_MAX >> 30) {
++            reserve = (size_t)gib << 30;
++            explicit_reserve = true;
++        } else {
++            fprintf(stderr,
++                    "ds4: CUDA ignoring DS4_CUDA_RESERVE_GIB=%s: expected whole "
++                    "gibibytes\n",
++                    reserve_env);
++        }
      }
      /* The graph allocates its own scratch after this copy (~4.3 GiB measured on
 -     * the 27B), so the margin must cover that plus room for the display. */
@@ -52,7 +71,7 @@ index dc3f1136..98ee5d05 100644
      if ((size_t)model_size + reserve > free_b) {
          fprintf(stderr,
                  "ds4: CUDA residency skipped: %.2f GiB model + %.2f GiB reserve exceeds "
-@@ -4123,7 +4128,7 @@ static int cuda_model_make_resident(const void *model_map, uint64_t model_size)
+@@ -4137,7 +4156,7 @@ static int cuda_model_make_resident(const void *model_map, uint64_t model_size)
      /* Verify the margin the copy actually left, not the one it assumed. */
      size_t free_after = 0, total_after = 0;
      if (cudaMemGetInfo(&free_after, &total_after) == cudaSuccess &&

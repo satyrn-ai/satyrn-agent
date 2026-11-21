@@ -514,7 +514,7 @@ reproducibility.
 | Metal verify still gated | `grep -c "DS4_HAS_QWEN4_METAL" .ds4/tree/ds4.c` | unchanged from baseline |
 | Existing patches unchanged | `git diff -U0 -- 'patches/qwen35/000[1-8]-*.patch'` | only `From <sha>` and the `[PATCH n/13]` counter differ |
 | Series reconstructs | `ds4-check --model qwen35` | exit 0 |
-| Repo healthy | `uv run --frozen prek run --all-files` and `bash tests/ds4_tools_test.sh` | exit 0, 49 passed |
+| Repo healthy | `uv run --frozen prek run --all-files`, `bash tests/ds4_tools_test.sh`, `bash tests/ds4_check_test.sh` | exit 0; 50, then 9 passed |
 
 ## Review handoff
 
@@ -523,7 +523,7 @@ reproducibility.
 ```bash
 uv run --frozen prek run --all-files            # 23 hooks
 bash tests/ds4_tools_test.sh                    # 49 shell tests
-ds4-check --model qwen35                        # the thirteen patches reconstruct
+ds4-check --model qwen35                        # the eighteen patches reconstruct
 ./tools/ds4-cuda.sh make -C .ds4/tree CUDA_ARCH=sm_86 \
     test-qwen35-cuda-quant test-qwen35-cuda-recurrent \
     test-qwen35-cuda-attention test-qwen35-host test-qwen35-oracle
@@ -538,8 +538,11 @@ the Metal paths. The five patches are adopted; see Task 7 for the record.
 
 **Known limits, stated so they are not mistaken for results:**
 
-- Generation on the 3090 runs at `0.48 t/s`. Correctness is pinned by the oracle;
-  speed is not addressed anywhere in this branch.
+- Decode speed is a residency question, not an arithmetic one. `0014` moved the
+  3090 from `0.48` to `8.71 t/s`, and `0016`-`0018` continue from there. The copy
+  declines whenever the card is not free: a re-measurement during review saw
+  `7.33 GiB` free against the `15.66 + 6.00` the copy asked for and stayed at
+  `0.69 t/s`, so quote the residency conditions beside any rate.
 - Model-level batch-versus-serial agreement and the engine's terminal reason have
   no CLI path here, so Task 8 Step 6 records them as unmeasured rather than
   passing.

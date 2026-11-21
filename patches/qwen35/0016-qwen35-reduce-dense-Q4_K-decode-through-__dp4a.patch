@@ -1,4 +1,4 @@
-From 9b3b09d3eb1bf11af0bf0e38c9a01db1e12d8750 Mon Sep 17 00:00:00 2001
+From 8044aac8647ed6be8d4b73ba5d20d756ba7cdc8c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 19:44:49 +0200
 Subject: [PATCH 16/18] qwen35: reduce dense Q4_K decode through __dp4a
@@ -18,16 +18,35 @@ prefill unchanged at 132 t/s. An 8-warp block shape measured 26.76 t/s, so the
 
 Q6_K keeps the float path for now; it is a small share of this checkpoint's
 bytes.
+
+Upstream: not offered, fork only
+Retire-when: dense qwen35 runs on CUDA upstream
+Carried-commits: none (authored here)
 ---
- ds4_cuda.cu        | 72 ++++++++++++++++++++++++++++++++++++++++++++++
- ds4_qwen4_cuda.cuh |  9 ++++++
- 2 files changed, 81 insertions(+)
+ ds4_cuda.cu        | 93 ++++++++++++++++++++++++++++++++++++++++++++++
+ ds4_qwen4_cuda.cuh |  9 +++++
+ 2 files changed, 102 insertions(+)
 
 diff --git a/ds4_cuda.cu b/ds4_cuda.cu
-index 98ee5d05..eca5c298 100644
+index a13b0058..4ff4043b 100644
 --- a/ds4_cuda.cu
 +++ b/ds4_cuda.cu
-@@ -23289,6 +23289,78 @@ __global__ static void moe_down_qwarp32_kernel(
+@@ -2944,11 +2944,14 @@ extern "C" int ds4_gpu_init(void) {
+     return ds4_gpu_init_multi(&cfg);
+ }
+ 
++static void qwen_q8k_ws_release(void); /* defined with the dp4a workspace */
++
+ extern "C" void ds4_gpu_cleanup(void) {
+     ds4_gpu_stream_expert_cache_prefetch_finish(true);
+     ds4_gpu_tp_shutdown();
+     (void)cudaDeviceSynchronize();
+     ds4_gpu_decode_graphs_invalidate();
++    qwen_q8k_ws_release();
+     g_current_logical_tier = -1;
+ 
+     /* Multi-GPU teardown: events, streams, cublas handles, scratch
+@@ -23317,6 +23320,96 @@ __global__ static void moe_down_qwarp32_kernel(
      if (lane == 0) down_out[(uint64_t)pair * out_dim + row] = acc;
  }
  
@@ -37,14 +56,31 @@ index 98ee5d05..eca5c298 100644
 + * used all along, which is the arithmetic a bandwidth-bound matvec needs. */
 +static cuda_block_q8_K *g_qwen_q8k_ws = NULL;
 +static size_t g_qwen_q8k_ws_blocks = 0;
++/* -1 while no workspace exists, so a later session on another device cannot
++ * free this pointer into the wrong context. */
++static int g_qwen_q8k_ws_device = -1;
++
++static void qwen_q8k_ws_release(void) {
++    if (g_qwen_q8k_ws && g_qwen_q8k_ws_device >= 0) {
++        int previous = 0;
++        const bool switched =
++            cudaGetDevice(&previous) == cudaSuccess && previous != g_qwen_q8k_ws_device &&
++            cudaSetDevice(g_qwen_q8k_ws_device) == cudaSuccess;
++        (void)cudaFree(g_qwen_q8k_ws);
++        if (switched) (void)cudaSetDevice(previous);
++        (void)cudaGetLastError();
++    }
++    g_qwen_q8k_ws = NULL;
++    g_qwen_q8k_ws_blocks = 0;
++    g_qwen_q8k_ws_device = -1;
++}
 +
 +static int qwen_q8k_ws_ensure(size_t blocks) {
-+    if (blocks <= g_qwen_q8k_ws_blocks) return 1;
-+    if (g_qwen_q8k_ws) {
-+        (void)cudaFree(g_qwen_q8k_ws);
-+        g_qwen_q8k_ws = NULL;
-+        g_qwen_q8k_ws_blocks = 0;
-+    }
++    int current = 0;
++    const bool known =
++        cudaGetDevice(&current) == cudaSuccess && current == g_qwen_q8k_ws_device;
++    if (blocks <= g_qwen_q8k_ws_blocks && known) return 1;
++    qwen_q8k_ws_release();
 +    void *p = NULL;
 +    if (cudaMalloc(&p, blocks * sizeof(cuda_block_q8_K)) != cudaSuccess) {
 +        (void)cudaGetLastError();
@@ -52,6 +88,7 @@ index 98ee5d05..eca5c298 100644
 +    }
 +    g_qwen_q8k_ws = (cuda_block_q8_K *)p;
 +    g_qwen_q8k_ws_blocks = blocks;
++    g_qwen_q8k_ws_device = current;
 +    return 1;
 +}
 +

@@ -1,4 +1,4 @@
-From 59dba3af73962b84d458296e0e95de52a0d5a3b3 Mon Sep 17 00:00:00 2001
+From 442dbb2ccef3d9b7670245dd92a2fb6ed2f06e5c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 10:31:02 +0200
 Subject: [PATCH 10/18] qwen35: dense recurrent SiLU output on CUDA

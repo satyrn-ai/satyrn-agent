@@ -1,4 +1,4 @@
-From e05869bc2bc57ee9a406c195bdcc80970ae100c1 Mon Sep 17 00:00:00 2001
+From 04c11419bdd33faf6d67f9e88fd99f8109e20223 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 13:24:07 +0200
 Subject: [PATCH 14/18] cuda: keep the model resident on a single device
@@ -21,15 +21,19 @@ NVRM Xid 62 and tore down the desktop channels with Xid 45.
 
 The oracle still measures 1.538e-05 batch-versus-serial, and the qwen35 CUDA
 quant, recurrent, attention, host and oracle suites all pass.
+
+Upstream: not offered, fork only
+Retire-when: dense qwen35 runs on CUDA upstream
+Carried-commits: none (authored here)
 ---
- ds4_cuda.cu | 84 +++++++++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 84 insertions(+)
+ ds4_cuda.cu | 101 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 101 insertions(+)
 
 diff --git a/ds4_cuda.cu b/ds4_cuda.cu
-index 2a50737f..dc3f1136 100644
+index 2a50737f..7da6850a 100644
 --- a/ds4_cuda.cu
 +++ b/ds4_cuda.cu
-@@ -4063,9 +4063,92 @@ extern "C" int ds4_gpu_set_model_map(const void *model_map, uint64_t model_size)
+@@ -4063,9 +4063,106 @@ extern "C" int ds4_gpu_set_model_map(const void *model_map, uint64_t model_size)
      return 1;
  }
  
@@ -48,6 +52,20 @@ index 2a50737f..dc3f1136 100644
 +    }
 +    const char *opt = getenv("DS4_CUDA_COPY_MODEL");
 +    if (opt && opt[0] == '0') return 0;
++
++    /* A unified-memory device (DGX Spark and similar) reaches the host mapping
++     * at device bandwidth, so the copy would spend a second model-sized
++     * allocation to remove a PCIe path that does not exist there. */
++    int current_device = 0;
++    int integrated = 0;
++    if (cudaGetDevice(&current_device) == cudaSuccess &&
++        cudaDeviceGetAttribute(&integrated, cudaDevAttrIntegrated,
++                               current_device) == cudaSuccess &&
++        integrated) {
++        fprintf(stderr,
++                "ds4: CUDA model residency skipped: integrated device\n");
++        return 0;
++    }
 +
 +    size_t free_b = 0, total_b = 0;
 +    if (cudaMemGetInfo(&free_b, &total_b) != cudaSuccess) {
@@ -122,11 +140,14 @@ index 2a50737f..dc3f1136 100644
      if (getenv("DS4_CUDA_COPY_MODEL_CHUNKED") != NULL &&
          !cuda_model_copy_chunked(model_map, model_size, map_offset, map_size)) {
          (void)cuda_model_prefetch_range(model_map, model_size, map_offset, map_size);
-@@ -35121,6 +35204,7 @@ extern "C" int ds4_gpu_set_model_map_spans(const void *model_map, uint64_t model
+@@ -35121,6 +35218,10 @@ extern "C" int ds4_gpu_set_model_map_spans(const void *model_map, uint64_t model
          }
      }
      if (!cuda_register_model_map(model_map, model_size, false)) return 0;
-+    if (cuda_model_make_resident(model_map, model_size)) return 1;
++    /* Residency belongs to the single-tier full-map path alone. This entry point
++     * also serves --load-layer-slice and TP sharding, where copying model_size
++     * would hand every rank the whole checkpoint and defeat the point of the
++     * slice; those keep the selective span mapping below. */
      if (getenv("DS4_CUDA_COPY_MODEL_CHUNKED") != NULL) {
          for (uint32_t i = 0; i < count; i++) {
              (void)cuda_model_prefetch_range(model_map, model_size,
