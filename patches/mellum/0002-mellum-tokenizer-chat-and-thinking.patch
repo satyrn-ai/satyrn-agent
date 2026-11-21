@@ -1,0 +1,3500 @@
+From 23b5ef34127aceabc5b7408a96394d6cc4e6a7c2 Mon Sep 17 00:00:00 2001
+From: pauleveritt <pauleveritt@me.com>
+Date: Thu, 19 Nov 2026 07:29:23 -0500
+Subject: [PATCH 2/6] mellum: tokenizer, chat and thinking
+
+The mellum2 pre-tokenizer and its generated Unicode classes, the corpus
+markers classed as content, <think> and </think> as the reasoning boundary, the
+special-token and stop classes, its own system turn and assistant prefix, one
+user turn per assistant turn's tool results, the CLI's matching system prompt
+and speed line, and imported history that drops earlier reasoning.
+
+Upstream: not offered, fork only
+Retire-when: upstream renders and stops Mellum 2.1 chats
+Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7cc1be8309d630991fe b5f05300a54591f1922926286b31529228a84233 5cdf14cdf6ab26e5cd466347051bc1dcb34aab14 835c6b08c7c159784463796350809cc30bdd8539 d1a98ca532c2ee9981563719e9af474b2f778938 0df162041eab77ee0ec4a357a591f3fb1ba019db 81050b372233bf221a0b4179b2b01de6afc5e341 05cddb2bc6d96baae3b1a4da11afdab76108265c 2eda52f8d44c827314dc7e53ba88b2774f346873 88cb9ac20d32baf1252517c51631c20ea5d5009f d35666971b3471f3ab1099f273e3b2acecd2c454 77b6ac83919ae797c9af081d13b4d6b5e2a7062e c8f8198fc102f2e5c71c28b87dfae8ae5581e3fc aef990e90ecc5fc4d5ba5792cb3105f0a028b940 9710f5036c11a97099ab5b06d9ac472d64b07963 006983dca4974fd78d8414a03a816e78914249ce 19054eb5359565a6d6390c348e9a840ca365a527 6b377f20ac31c9401cc35d4b83d2fc0807494776 0d5f2e73e28e677cd45764a2ebc4fe910400515a ac8cf98501405c3c7abfde74cced4e2d55725bba cf63c43b1622cb0f43783a95e925a2d102dff0f8 4ba0969087986e1a8ebed4dc1b2695669210c4bb 1d8af568face2e403ea3073682c303f4de92c1a5
+---
+ Makefile                            |  18 +-
+ ds4.c                               | 194 +++++-
+ ds4.h                               |  16 +
+ ds4_cli.c                           |  12 +
+ ds4_mellum_tokenizer.inc            | 126 ++++
+ ds4_mellum_unicode.inc              | 903 ++++++++++++++++++++++++++++
+ ds4_prompt_prefix.h                 |  18 +-
+ tests/gen_mellum_chat_ids.py        | 257 ++++++++
+ tests/gen_mellum_tokenizer_cases.py | 138 +++++
+ tests/gen_mellum_unicode.py         | 336 +++++++++++
+ tests/mellum_chat_ids.inc           | 223 +++++++
+ tests/mellum_tokenizer_cases.inc    | 131 ++++
+ tests/mellum_tool_text.h            |  95 +++
+ tests/test_mellum_config.c          | 471 +++++++++++++++
+ tests/test_mellum_tokenizer.c       | 137 +++++
+ 15 files changed, 3043 insertions(+), 32 deletions(-)
+ create mode 100644 ds4_mellum_tokenizer.inc
+ create mode 100644 ds4_mellum_unicode.inc
+ create mode 100644 tests/gen_mellum_chat_ids.py
+ create mode 100644 tests/gen_mellum_tokenizer_cases.py
+ create mode 100644 tests/gen_mellum_unicode.py
+ create mode 100644 tests/mellum_chat_ids.inc
+ create mode 100644 tests/mellum_tokenizer_cases.inc
+ create mode 100644 tests/mellum_tool_text.h
+ create mode 100644 tests/test_mellum_tokenizer.c
+
+diff --git a/Makefile b/Makefile
+index 108f27e9..ffc0cb4f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -746,7 +746,7 @@ test-qwen4-cuda: tests/test_qwen4_cuda
+ 	./tests/test_qwen4_cuda
+ endif
+ 
+-ds4.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
++ds4.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_deepseek41_gpu.h ds4_deepseek41_dspark.h ds4_linux_memory.h ds4_engram.h
+ 	$(CC) $(CFLAGS) -c -o $@ ds4.c
+ 
+ ds4_image.o: ds4_image.c ds4_image.h third_party/iris/jpeg.h third_party/iris/png.h
+@@ -812,7 +812,7 @@ rax.o: rax.c rax.h rax_malloc.h
+ linenoise.o: linenoise.c linenoise.h
+ 	$(CC) $(CFLAGS) -c -o $@ linenoise.c
+ 
+-ds4_cpu.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_tp.h
++ds4_cpu.o: ds4.c ds4.h ds4_mellum_unicode.inc ds4_ssd.h ds4_distributed.h ds4_gpu.h ds4_gpu_tp.h
+ 	$(CC) $(CFLAGS) -Wno-unused-function -DDS4_NO_GPU -c -o $@ ds4.c
+ 
+ ds4_cli_cpu.o: ds4_cli.c ds4.h ds4_ssd.h ds4_distributed.h ds4_help.h ds4_prompt_prefix.h linenoise.h
+@@ -1015,15 +1015,23 @@ test-qwen4-ngrams: tests/test_qwen4_ngrams
+ 
+ # Mellum 2.1, model-free: recognition, validation and binding on a sparse GGUF
+ # (tests/mellum_fixture.h), and how the front ends treat a Mellum engine.
+-tests/test_mellum_config.o: tests/test_mellum_config.c tests/mellum_fixture.h ds4.c ds4.h
++tests/test_mellum_config.o: tests/test_mellum_config.c tests/mellum_fixture.h tests/mellum_chat_ids.inc \
++	tests/mellum_tool_text.h ds4_prompt_prefix.h ds4.c ds4.h
+ 	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -DDS4_NO_GPU -I. -c -o $@ $<
+ 
+ tests/test_mellum_config: tests/test_mellum_config.o $(filter-out ds4_cpu.o,$(CPU_CORE_OBJS))
+ 	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -o $@ $^ $(LDLIBS)
+ 
++tests/test_mellum_tokenizer.o: tests/test_mellum_tokenizer.c tests/mellum_tokenizer_cases.inc ds4_mellum_unicode.inc ds4.c ds4.h
++	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -DDS4_NO_GPU -I. -c -o $@ $<
++
++tests/test_mellum_tokenizer: tests/test_mellum_tokenizer.o $(filter-out ds4_cpu.o,$(CPU_CORE_OBJS))
++	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -o $@ $^ $(LDLIBS)
++
+ .PHONY: test-mellum
+-test-mellum: tests/test_mellum_config
++test-mellum: tests/test_mellum_config tests/test_mellum_tokenizer
+ 	./tests/test_mellum_config
++	./tests/test_mellum_tokenizer
+ 
+ tests/test_qwen4_ngram_state.o: tests/test_qwen4_ngram_state.c ds4.c ds4.h
+ 	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -I. -c -o $@ $<
+@@ -1362,7 +1370,7 @@ tests/test_session_state_gpu.o: ds4_tool_text.h
+ clean:
+ 	rm -f tests/test_mmvq_cuda tests/test_mmvq_rocm
+ 	rm -f tests/test_qwen4_ngrams
+-	rm -f tests/test_mellum_config
++	rm -f tests/test_mellum_config tests/test_mellum_tokenizer
+ 	rm -f tests/test_qwen4_ngram_state
+ 	rm -f tests/test_web_recovery
+ 	rm -f tests/test_metal_ssd_experts
+diff --git a/ds4.c b/ds4.c
+index 4b9ec77f..3491f440 100644
+--- a/ds4.c
++++ b/ds4.c
+@@ -1041,6 +1041,11 @@ static bool ds4_model_is_mellum(void) {
+     return DS4_MODEL_VARIANT == DS4_VARIANT_MELLUM;
+ }
+ 
++/* The QWEN4_EXP family's model, as its messages name it. */
++static const char *ds4_qwen4_family_name(void) {
++    return ds4_model_is_mellum() ? "Mellum" : "Qwen3.8";
++}
++
+ /* Mellum's attention pattern: three sliding-window layers, then one full
+  * layer, i.e. layer il slides unless il % 4 == 3.  The validator checks this
+  * rule against the GGUF's sliding_window_pattern array. */
+@@ -43285,6 +43290,10 @@ struct ds4_vocab {
+     int im_start_id;
+     int im_end_id;
+     int endoftext_id;
++    /* One ds4_stop_class byte per id, filled at vocab_load.  Every stop
++     * decision (vocab_token_is_generation_stop, ds4_token_stop_class) reads
++     * it: EOS, EOS-alt and protocol end a generation, a marker is content. */
++    uint8_t *stop_class;
+     str_i32_table token_to_id;
+     str_i32_table merge_rank;
+ };
+@@ -44303,11 +44312,16 @@ static void bpe_tokenize_text_qwen35(const ds4_vocab *vocab, const char *text, t
+  * word (for example ">;\n").  Splitting those newlines separately changes the
+  * token stream for code prompts and produces wrong long-context logits.
+  */
++#include "ds4_mellum_tokenizer.inc"
+ static void bpe_tokenize_text(const ds4_vocab *vocab, const char *text, token_vec *out) {
+     if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
+         bpe_tokenize_text_glm4(vocab, text, out);
+         return;
+     }
++    if (ds4_model_is_mellum()) {
++        bpe_tokenize_text_mellum(vocab, text, out);
++        return;
++    }
+     if (ds4_model_is_qwen4()) {
+         bpe_tokenize_text_qwen35(vocab, text, out);
+         return;
+@@ -44399,7 +44413,7 @@ static int vocab_lookup_optional(const ds4_vocab *vocab, const char *text) {
+ 
+ /* Load token strings, special token ids, and merge ranks from GGUF metadata. */
+ 
+-static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
++static void vocab_load_ids(ds4_vocab *vocab, const ds4_model *model) {
+     memset(vocab, 0, sizeof(*vocab));
+ 
+     ds4_array_ref tokens;
+@@ -44509,7 +44523,63 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
+     vocab->dsml_id = vocab_lookup(vocab, "｜DSML｜");
+ }
+ 
++/* Mellum's ids 3-20 are the corpus markers (<filename>, <fim_*>, ...): in the
++ * file they are CONTROL, in a reply they are content.  A CONTROL token not named
++ * here is protocol (fail-closed): a host refuses it as an unexpected stop. */
++static const char *const MELLUM_MARKER_SPELLINGS[] = {
++    "<commit_before>", "<commit_after>", "<commit_msg>", "<empty_output>", "<filename>",
++    "<fim_prefix>", "<fim_middle>", "<fim_suffix>", "<fim_pad>", "<gh_stars>",
++    "<issue_start>", "<issue_comment>", "<issue_closed>",
++    "<jupyter_text>", "<jupyter_code>", "<jupyter_start>", "<jupyter_output>", "<reponame>",
++};
++
++static bool vocab_spelling_in(const ds4_str *s, const char *const *list, size_t n) {
++    for (size_t i = 0; i < n; i++) {
++        const size_t len = strlen(list[i]);
++        if (s->len == len && memcmp(s->ptr, list[i], len) == 0) return true;
++    }
++    return false;
++}
++
++/* Fill vocab->stop_class.  Other models keep their stops exactly: eos is EOS,
++ * <|endoftext|> (Qwen) is EOS-alt, GLM's role ids are protocol. */
++static void vocab_classify_stops(ds4_vocab *vocab, const ds4_model *model) {
++    vocab->stop_class = xcalloc((size_t)vocab->n_vocab, 1);
++    uint8_t *cls = vocab->stop_class;
++    if (ds4_model_is_mellum()) {
++        /* 2.1 classes by token_type: CONTROL (3) tokens are markers or protocol
++         * by spelling; 23, 24 and 29-32 are USER_DEFINED (4) and are none. */
++        ds4_array_ref types;
++        if (!model_get_array(model, "tokenizer.ggml.token_type", &types) ||
++            types.type != GGUF_VALUE_INT32 || types.len != (uint64_t)vocab->n_vocab) {
++            ds4_die("tokenizer.ggml.token_type must be an int32 array with one entry per token (Mellum stops)");
++        }
++        ds4_cursor tc = cursor_at(model, types.data_pos);
++        for (int i = 0; i < vocab->n_vocab; i++) {
++            int32_t type = 0;
++            if (!cursor_read(&tc, &type, sizeof(type))) ds4_die(tc.error);
++            if (type != 3) continue;
++            cls[i] = vocab_spelling_in(&vocab->token[i], MELLUM_MARKER_SPELLINGS,
++                                       sizeof(MELLUM_MARKER_SPELLINGS) / sizeof(MELLUM_MARKER_SPELLINGS[0]))
++                         ? DS4_STOP_MARKER : DS4_STOP_PROTOCOL;
++        }
++    } else if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
++        const int roles[4] = { vocab->system_id, vocab->user_id, vocab->assistant_id, vocab->observation_id };
++        for (int r = 0; r < 4; r++) {
++            if (roles[r] >= 0 && roles[r] < vocab->n_vocab) cls[roles[r]] = DS4_STOP_PROTOCOL;
++        }
++    }
++    if (vocab->endoftext_id >= 0 && vocab->endoftext_id < vocab->n_vocab) cls[vocab->endoftext_id] = DS4_STOP_EOS_ALT;
++    if (vocab->eos_id >= 0 && vocab->eos_id < vocab->n_vocab) cls[vocab->eos_id] = DS4_STOP_EOS;
++}
++
++static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
++    vocab_load_ids(vocab, model);
++    vocab_classify_stops(vocab, model);
++}
++
+ static void vocab_free(ds4_vocab *vocab) {
++    free(vocab->stop_class);
+     free(vocab->token);
+     table_free(&vocab->token_to_id);
+     table_free(&vocab->merge_rank);
+@@ -44562,7 +44632,8 @@ static void chat_push_think_prefix(const ds4_vocab *vocab,
+             token_vec_push(out, vocab->system_id);
+             bpe_tokenize_text(vocab, effort, out);
+         }
+-    } else if (think_mode == DS4_THINK_MAX) {
++    } else if (think_mode == DS4_THINK_MAX && !ds4_model_is_mellum()) {
++        /* DeepSeek's preamble; Mellum 2.1's template has no effort text */
+         bpe_tokenize_text(vocab, DS4_REASONING_EFFORT_MAX_PREFIX, out);
+     }
+ }
+@@ -44615,12 +44686,48 @@ static void qwen4_chat_system(const ds4_vocab *vocab, const char *system, ds4_th
+     qwen4_chat_close(vocab, out);
+ }
+ 
++/* Mellum 2.1's generation prompt: its template adds nothing after the
++ * assistant tag when thinking is on (the model writes <think> itself) and an
++ * empty think block when off.  Qwen's prefix opens <think> itself. */
++static void mellum_chat_assistant_prefix(const ds4_vocab *vocab, ds4_think_mode think_mode, token_vec *out) {
++    qwen4_chat_open(vocab, "assistant", out);
++    if (!ds4_think_mode_enabled(think_mode)) {
++        token_vec_push(out, vocab->think_start_id);
++        bpe_tokenize_text(vocab, "\n\n", out);
++        token_vec_push(out, vocab->think_end_id);
++        bpe_tokenize_text(vocab, "\n\n", out);
++    }
++}
++
++/* Mellum 2.1's system turn: the caller's text, or none.  Its template has no
++ * reasoning-effort instruction, which Qwen's system turn prepends. */
++static void tokenize_rendered_chat_vocab(const ds4_vocab *vocab, const char *text, token_vec *out);
++
++static void mellum_chat_system(const ds4_vocab *vocab, const char *system, token_vec *out) {
++    if (!system || !system[0]) return;
++    qwen4_chat_open(vocab, "system", out);
++    tokenize_rendered_chat_vocab(vocab, system, out);   /* as ds4_chat_append_message's system turn */
++    qwen4_chat_close(vocab, out);
++}
++
+ static void encode_chat_prompt(
+         const ds4_vocab *vocab,
+         const char      *system,
+         const char      *prompt,
+         ds4_think_mode   think_mode,
+         token_vec       *out) {
++    if (ds4_model_is_mellum()) {
++        if (vocab->im_start_id < 0 || vocab->im_end_id < 0 ||
++            vocab->think_start_id < 0 || vocab->think_end_id < 0) {
++            ds4_die("this tokenizer does not provide Mellum's chat markers");
++        }
++        mellum_chat_system(vocab, system, out);
++        qwen4_chat_open(vocab, "user", out);
++        bpe_tokenize_text(vocab, prompt, out);
++        qwen4_chat_close(vocab, out);
++        mellum_chat_assistant_prefix(vocab, think_mode, out);
++        return;
++    }
+     if (ds4_model_is_qwen4()) {
+         if (vocab->im_start_id < 0 || vocab->im_end_id < 0 ||
+             vocab->think_start_id < 0 || vocab->think_end_id < 0) {
+@@ -44813,6 +44920,14 @@ static void bpe_tokenize_tool_response_text(ds4_vocab *vocab, const char *conten
+     bpe_tokenize_wrapped_payload_text(vocab, content, "</tool_response>", out);
+ }
+ 
++/* A qwen4 tool message's <tool_response> wrapper.  Mellum's template text encodes it as the
++ * vocabulary's added tokens 31 and 32, which plain BPE text would not give; Flash Next keeps
++ * the text form it always had. */
++static void qwen4_tool_response_tag(ds4_vocab *vocab, const char *tag, token_vec *out) {
++    if (ds4_model_is_mellum()) tokenize_rendered_chat_vocab(vocab, tag, out);
++    else bpe_tokenize_text(vocab, tag, out);
++}
++
+ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role, const char *content) {
+     ds4_vocab *vocab = &e->vocab;
+     if (!role) role = "user";
+@@ -44821,14 +44936,17 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
+     if (ds4_model_is_qwen4()) {
+         if (!strcmp(role, "tool") || !strcmp(role, "function")) {
+             qwen4_chat_open(vocab, "user", tokens);
+-            bpe_tokenize_text(vocab, "<tool_response>\n", tokens);
++            qwen4_tool_response_tag(vocab, "<tool_response>\n", tokens);
+             bpe_tokenize_tool_response_text(vocab, content, tokens);
+-            bpe_tokenize_text(vocab, "\n</tool_response>", tokens);
++            qwen4_tool_response_tag(vocab, "\n</tool_response>", tokens);
+         } else {
+             const char *name = (!strcmp(role, "system") || !strcmp(role, "developer")) ? "system" :
+                                !strcmp(role, "assistant") ? "assistant" : "user";
+             qwen4_chat_open(vocab, name, tokens);
+-            if (!strcmp(name, "assistant")) {
++            /* Mellum's system turn carries the host's tools block, whose <tool_call> and
++             * </tool_call> the template's text encodes as tokens 29 and 30.  User text stays
++             * plain BPE, as for every model. */
++            if (!strcmp(name, "assistant") || (ds4_model_is_mellum() && !strcmp(name, "system"))) {
+                 tokenize_rendered_chat_vocab(vocab, content, tokens);
+             } else {
+                 bpe_tokenize_text(vocab, content, tokens);
+@@ -44883,7 +45001,32 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
+     }
+ }
+ 
++int ds4_chat_append_tool_results(ds4_engine *e, ds4_tokens *tokens,
++                                 const char *const *parts, size_t n) {
++    if (!e || !tokens || !parts || n == 0) return 0;
++    for (size_t i = 0; i < n; i++) if (!parts[i]) return 0;
++    if (ds4_model_is_mellum()) {
++        /* 2.1's template merges consecutive tool messages into one user turn, a
++         * <tool_response> block per result. */
++        ds4_vocab *vocab = &e->vocab;
++        qwen4_chat_open(vocab, "user", tokens);
++        for (size_t i = 0; i < n; i++) {
++            qwen4_tool_response_tag(vocab, i ? "\n<tool_response>\n" : "<tool_response>\n", tokens);
++            bpe_tokenize_tool_response_text(vocab, parts[i], tokens);
++            qwen4_tool_response_tag(vocab, "\n</tool_response>", tokens);
++        }
++        qwen4_chat_close(vocab, tokens);
++        return 1;
++    }
++    for (size_t i = 0; i < n; i++) ds4_chat_append_message(e, tokens, "tool", parts[i]);
++    return 1;
++}
++
+ void ds4_chat_append_assistant_prefix(ds4_engine *e, ds4_tokens *tokens, ds4_think_mode think_mode) {
++    if (ds4_model_is_mellum()) {
++        mellum_chat_assistant_prefix(&e->vocab, think_mode, tokens);
++        return;
++    }
+     if (ds4_model_is_qwen4()) {
+         qwen4_chat_assistant_prefix(&e->vocab, think_mode, tokens);
+         return;
+@@ -45004,23 +45147,24 @@ char *ds4_token_text(ds4_engine *e, int token, size_t *len) {
+     return out;
+ }
+ 
++static int vocab_token_stop_class(const ds4_vocab *vocab, int token) {
++    if (!vocab || !vocab->stop_class || token < 0 || token >= vocab->n_vocab) return DS4_STOP_NONE;
++    return vocab->stop_class[token];
++}
++
+ static bool vocab_token_is_generation_stop(const ds4_vocab *vocab, int token) {
+-    if (!vocab || token < 0) return false;
+-    if (token == vocab->eos_id) return true;
+-    if (vocab->endoftext_id >= 0 && token == vocab->endoftext_id) return true;
+-    if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
+-        return (vocab->system_id >= 0 && token == vocab->system_id) ||
+-               (vocab->user_id >= 0 && token == vocab->user_id) ||
+-               (vocab->assistant_id >= 0 && token == vocab->assistant_id) ||
+-               (vocab->observation_id >= 0 && token == vocab->observation_id);
+-    }
+-    return false;
++    const int cls = vocab_token_stop_class(vocab, token);
++    return cls == DS4_STOP_EOS || cls == DS4_STOP_EOS_ALT || cls == DS4_STOP_PROTOCOL;
+ }
+ 
+ int ds4_token_eos(ds4_engine *e) {
+     return e->vocab.eos_id;
+ }
+ 
++int ds4_token_stop_class(ds4_engine *e, int token) {
++    return e ? vocab_token_stop_class(&e->vocab, token) : DS4_STOP_NONE;
++}
++
+ bool ds4_token_is_stop(ds4_engine *e, int token) {
+     return e ? vocab_token_is_generation_stop(&e->vocab, token) : false;
+ }
+@@ -59940,7 +60084,7 @@ static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *
+     if (all_rows && T > g->n_logit_rows) return false;
+     for (uint32_t t = 0; t < T; t++) {
+         if (tokens[t] < 0 || tokens[t] >= (int)DS4_N_VOCAB) {
+-            fprintf(stderr, "ds4: Qwen3.8 token id %d is outside the vocabulary\n", tokens[t]);
++            fprintf(stderr, "ds4: %s token id %d is outside the vocabulary\n", ds4_qwen4_family_name(), tokens[t]);
+             return false;
+         }
+     }
+@@ -60473,7 +60617,7 @@ static int generate_qwen4_metal_argmax(
+     }
+     const double t_prefill1 = now_sec();
+     if (!ok) {
+-        fprintf(stderr, "ds4: Qwen3.8 prefill failed\n");
++        fprintf(stderr, "ds4: %s prefill failed\n", ds4_qwen4_family_name());
+         free(logits);
+         qwen4_graph_free(g);
+         free(g);
+@@ -60488,7 +60632,7 @@ static int generate_qwen4_metal_argmax(
+         n_generated++;
+         if (i == n_predict - 1 || g->pos + 1u >= g->ctx_cap) break;
+         if (!qwen4_graph_forward_token(g, model, weights, token, logits)) {
+-            fprintf(stderr, "ds4: Qwen3.8 decode failed at position %u\n", g->pos);
++            fprintf(stderr, "ds4: %s decode failed at position %u\n", ds4_qwen4_family_name(), g->pos);
+             free(logits);
+             qwen4_graph_free(g);
+             free(g);
+@@ -60499,7 +60643,7 @@ static int generate_qwen4_metal_argmax(
+     if (done) done(emit_ud);
+     const double prefill_s = t_prefill1 - t_prefill0;
+     const double decode_s = t_decode1 - t_decode0;
+-    ds4_log(stderr, DS4_LOG_TIMING, "ds4: Qwen3.8 prefill: %.2f t/s, generation: %.2f t/s\n",
++    ds4_log(stderr, DS4_LOG_TIMING, "ds4: %s prefill: %.2f t/s, generation: %.2f t/s\n", ds4_qwen4_family_name(),
+             prefill_s > 0.0 ? (double)prompt->len / prefill_s : 0.0,
+             decode_s > 0.0 ? (double)n_generated / decode_s : 0.0);
+     free(logits);
+@@ -73872,7 +74016,7 @@ int ds4_chat_append_multimodal_message(
+         const int old_len = tokens->len;
+         ds4_vocab *vocab = &e->vocab;
+         qwen4_chat_open(vocab, "user", tokens);
+-        if (tool) bpe_tokenize_text(vocab, "<tool_response>\n", tokens);
++        if (tool) qwen4_tool_response_tag(vocab, "<tool_response>\n", tokens);
+         size_t moved = 0;
+         for (size_t i = 0; i <= image_count; i++) {
+             const char *text = text_parts[i] ? text_parts[i] : "";
+@@ -73889,7 +74033,7 @@ int ds4_chat_append_multimodal_message(
+             }
+             moved++;
+         }
+-        if (tool) bpe_tokenize_text(vocab, "\n</tool_response>", tokens);
++        if (tool) qwen4_tool_response_tag(vocab, "\n</tool_response>", tokens);
+         qwen4_chat_close(vocab, tokens);
+         return 1;
+     }
+@@ -74688,7 +74832,7 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
+     if (ds4_model_is_qwen4()) {
+         if ((e->backend != DS4_BACKEND_METAL && e->backend != DS4_BACKEND_CUDA) ||
+             e->distributed.role != DS4_DISTRIBUTED_NONE) {
+-            fprintf(stderr, "ds4: Qwen3.8 sessions require single-host Metal or CUDA\n");
++            fprintf(stderr, "ds4: %s sessions require single-host Metal or CUDA\n", ds4_qwen4_family_name());
+             free(s);
+             return 1;
+         }
+@@ -77148,7 +77292,7 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
+             s->checkpoint_valid = false;
+             if (!qwen4_graph_forward_tokens(&s->qwen4_graph, &e->model, &e->weights,
+                                             prompt->v + i, chunk, s->logits, false)) {
+-                snprintf(err, errlen, "Qwen3.8 prefill failed at token %d", i);
++                snprintf(err, errlen, "%s prefill failed at token %d", ds4_qwen4_family_name(), i);
+                 s->checkpoint_valid = false;
+                 prefill_rc = 1;
+                 break;
+@@ -79338,7 +79482,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
+ #ifdef DS4_HAS_QWEN4_GPU
+     if (ds4_session_is_qwen4(s)) {
+         if (!s->qwen4_graph_ready) {
+-            if (errlen) snprintf(err, errlen, "Qwen3.8 graph is not initialized");
++            if (errlen) snprintf(err, errlen, "%s graph is not initialized", ds4_qwen4_family_name());
+             return 1;
+         }
+         if (qwen4_session_replay_if_stale(s, err, errlen) != 0) return 1;
+@@ -79348,7 +79492,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
+         }
+         if (!s->glm_spec_inside) { s->glm_mtp_have = 0; s->glm_mtp_have2 = false; }
+         if (!qwen4_graph_forward_token(&s->qwen4_graph, &e->model, &e->weights, token, s->logits)) {
+-            if (errlen) snprintf(err, errlen, "Qwen3.8 decode failed");
++            if (errlen) snprintf(err, errlen, "%s decode failed", ds4_qwen4_family_name());
+             s->checkpoint_valid = false;
+             return 1;
+         }
+diff --git a/ds4.h b/ds4.h
+index 0dd82239..e8c1e7fc 100644
+--- a/ds4.h
++++ b/ds4.h
+@@ -388,10 +388,26 @@ void ds4_encode_chat_prompt(
+ void ds4_chat_append_max_effort_prefix(ds4_engine *e, ds4_tokens *tokens);
+ void ds4_chat_append_think_prefix(ds4_engine *e, ds4_tokens *tokens, ds4_think_mode mode);
+ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role, const char *content);
++/* Append the results of one assistant turn's tool calls, n of them, as the loaded model's
++ * template renders consecutive tool messages.  Mellum: one user turn with a <tool_response>
++ * block per result.  Other models: one tool message per result, as ds4_chat_append_message.
++ * Returns 0 and appends nothing when n is 0 or a part is NULL. */
++int ds4_chat_append_tool_results(ds4_engine *e, ds4_tokens *tokens,
++                                 const char *const *parts, size_t n);
+ void ds4_chat_append_assistant_prefix(ds4_engine *e, ds4_tokens *tokens, ds4_think_mode think_mode);
+ 
+ char *ds4_token_text(ds4_engine *e, int token, size_t *len);
+ int ds4_token_eos(ds4_engine *e);
++/* What a token does when generated.  EOS, EOS-alt and protocol end a generation
++ * (ds4_token_is_stop); a marker is ordinary content, rendered as its text. */
++enum ds4_stop_class {
++    DS4_STOP_NONE = 0,
++    DS4_STOP_EOS = 1,
++    DS4_STOP_EOS_ALT = 2,
++    DS4_STOP_PROTOCOL = 3,
++    DS4_STOP_MARKER = 4,
++};
++int ds4_token_stop_class(ds4_engine *e, int token);
+ bool ds4_token_is_stop(ds4_engine *e, int token);
+ bool ds4_token_is_thinking_control(ds4_engine *e, int token);
+ bool ds4_token_is_stop_for_think_mode(ds4_engine *e,
+diff --git a/ds4_cli.c b/ds4_cli.c
+index c4529743..c28401b6 100644
+--- a/ds4_cli.c
++++ b/ds4_cli.c
+@@ -386,6 +386,7 @@ typedef struct {
+     bool last_output_newline;
+     char pending[16];
+     size_t pending_len;
++    int n_emitted;          /* tokens printed this turn (the greedy path counts them here) */
+ } token_printer;
+ 
+ static bool bytes_has_prefix(const char *p, size_t n, const char *prefix) {
+@@ -491,8 +492,16 @@ static void token_printer_write_text(token_printer *p, const char *text, size_t
+     }
+ }
+ 
++/* A turn that ran into -n says so: the text simply stops there, and a long
++ * reasoning block can use the whole budget before the answer starts. */
++static void cli_report_token_cap(int generated, int n_predict) {
++    if (n_predict > 0 && generated >= n_predict)
++        fprintf(stderr, "ds4: stopped at the -n cap of %d tokens\n", n_predict);
++}
++
+ static void print_generated_token(void *ud, int token) {
+     token_printer *p = ud;
++    p->n_emitted++;
+     size_t len = 0;
+     char *text = ds4_token_text(p->engine, token, &len);
+     token_printer_write_text(p, text, len);
+@@ -683,6 +692,7 @@ static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, con
+     generation_done(&printer);
+     if (cli_interrupt_requested()) cli_interrupt_clear();
+ 
++    cli_report_token_cap(generated, cfg->gen.n_predict);
+     const double prefill_s = t_prefill1 - t_prefill0;
+     const double decode_s = t_decode1 - t_decode0;
+     ds4_log(stderr,
+@@ -1279,6 +1289,7 @@ static int run_generation(ds4_engine *engine, const cli_config *cfg) {
+                                             &printer,
+                                             cli_prefill_progress_cb,
+                                             &progress);
++            if (rc == 0) cli_report_token_cap(printer.n_emitted, cfg->gen.n_predict);
+         }
+     }
+ 
+@@ -1696,6 +1707,7 @@ static int run_chat_turn(ds4_engine *engine, cli_config *cfg, repl_chat *chat,
+         ds4_tokens_push(&chat->transcript, ds4_token_eos(engine));
+     }
+ 
++    cli_report_token_cap(generated, cfg->gen.n_predict);
+     const double prefill_s = t_prefill1 - t_prefill0;
+     const double decode_s = t_decode1 - t_decode0;
+     if (interrupted) cli_interrupt_clear();
+diff --git a/ds4_mellum_tokenizer.inc b/ds4_mellum_tokenizer.inc
+new file mode 100644
+index 00000000..70b51730
+--- /dev/null
++++ b/ds4_mellum_tokenizer.inc
+@@ -0,0 +1,126 @@
++/* Mellum 2.1, included by ds4.c where this code sits: not a separate translation unit. */
++
++/* Mellum 2.1 pre-tokenization (tokenizer.ggml.pre = "mellum2"), as the
++ * snapshot's tokenizer.json `pre_tokenizer` has it: Digits(individual_digits)
++ * then ByteLevel(use_regex) with GPT-2's expression
++ *   's|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+
++ * (contractions are case sensitive; a combining mark is neither \p{L} nor
++ * \s, so it falls under [^\s\p{L}\p{N}]).  Digits cuts every \p{N} character
++ * out as its own piece first, so the expression only ever sees the stretches
++ * between them, and `(?!\S)` at a stretch's end holds even when a digit
++ * follows.  The classes are the generated ds4_mellum_unicode.inc, derived from
++ * the snapshot's own tokenizer: the Qwen tables (the Python `regex` module's
++ * Unicode) class 4,644 codepoints as letters that tokenizers 0.23.3 does not. */
++#include "ds4_mellum_unicode.inc"
++
++typedef void (*mellum_piece_fn)(void *ud, uint64_t start, uint64_t end);
++
++/* qwen4_char_info with the Mellum classes; `mark` stays false, because a
++ * combining mark is only [^\s\p{L}\p{N}] to this expression. */
++static qwen4_char_info mellum_char_at(const char *s, uint64_t len, uint64_t pos) {
++    qwen4_char_info c;
++    memset(&c, 0, sizeof(c));
++    if (pos >= len) return c;
++    c.valid = true;
++    c.cp = utf8_peek_one(s, len, pos, &c.next);
++    c.letter = mellum_unicode_letter(c.cp);
++    c.number = mellum_unicode_number(c.cp);
++    c.space = mellum_unicode_space(c.cp);
++    return c;
++}
++
++/* The piece at `pos` within the stretch ending at `end` (no \p{N} inside). */
++static uint64_t mellum_piece_end(const char *t, uint64_t end, uint64_t pos) {
++    const qwen4_char_info cur = mellum_char_at(t, end, pos);
++    if (cur.cp == '\'') {
++        const uint64_t room = end - pos;
++        if (room >= 2) {
++            const char c1 = t[pos + 1];
++            if (c1 == 's' || c1 == 't' || c1 == 'm' || c1 == 'd') return pos + 2;
++        }
++        if (room >= 3) {
++            const char c1 = t[pos + 1], c2 = t[pos + 2];
++            if ((c1 == 'r' && c2 == 'e') || (c1 == 'v' && c2 == 'e') || (c1 == 'l' && c2 == 'l')) return pos + 3;
++        }
++    }
++
++    /* ` ?` takes only a literal space; then a run of one class */
++    qwen4_char_info lead = cur;
++    if (cur.cp == ' ') lead = mellum_char_at(t, end, cur.next);
++    if (lead.valid && lead.letter) {
++        uint64_t p = lead.next;
++        while (p < end) {
++            const qwen4_char_info c = mellum_char_at(t, end, p);
++            if (!c.letter) break;
++            p = c.next;
++        }
++        return p;
++    }
++    if (lead.valid && !lead.space && !lead.letter && !lead.number) {
++        uint64_t p = lead.next;
++        while (p < end) {
++            const qwen4_char_info c = mellum_char_at(t, end, p);
++            if (c.space || c.letter || c.number) break;
++            p = c.next;
++        }
++        return p;
++    }
++
++    if (cur.space) {
++        uint64_t p = pos, last = pos;
++        int n = 0;
++        while (p < end) {
++            const qwen4_char_info c = mellum_char_at(t, end, p);
++            if (!c.space) break;
++            last = p;
++            p = c.next;
++            n++;
++        }
++        /* \s+(?!\S) gives back the last space when a non-space follows */
++        return (p < end && n > 1) ? last : p;
++    }
++
++    return cur.next > pos ? cur.next : pos + 1;
++}
++
++/* Calls fn for each piece, in order; the pieces tile text[0, len). */
++static void mellum_segment_pieces(const char *text, uint64_t len, mellum_piece_fn fn, void *ud) {
++    uint64_t pos = 0, stretch_end = 0;
++    while (pos < len) {
++        const qwen4_char_info c = mellum_char_at(text, len, pos);
++        if (c.number) {
++            fn(ud, pos, c.next);
++            pos = c.next;
++            continue;
++        }
++        if (stretch_end <= pos) {
++            uint64_t p = pos;
++            while (p < len) {
++                const qwen4_char_info s = mellum_char_at(text, len, p);
++                if (s.number) break;
++                p = s.next;
++            }
++            stretch_end = p;
++        }
++        const uint64_t e = mellum_piece_end(text, stretch_end, pos);
++        fn(ud, pos, e);
++        pos = e;
++    }
++}
++
++typedef struct {
++    const ds4_vocab *vocab;
++    const char *text;
++    token_vec *out;
++} mellum_emit;
++
++static void mellum_emit_piece(void *ud, uint64_t start, uint64_t end) {
++    mellum_emit *m = ud;
++    bpe_emit_piece(m->vocab, (ds4_str){ m->text + start, end - start }, m->out);
++}
++
++static void bpe_tokenize_text_mellum(const ds4_vocab *vocab, const char *text, token_vec *out) {
++    mellum_emit m = { vocab, text, out };
++    mellum_segment_pieces(text, strlen(text), mellum_emit_piece, &m);
++}
++
+diff --git a/ds4_mellum_unicode.inc b/ds4_mellum_unicode.inc
+new file mode 100644
+index 00000000..d79b7377
+--- /dev/null
++++ b/ds4_mellum_unicode.inc
+@@ -0,0 +1,903 @@
++/* ds4_mellum_unicode.inc -- GENERATED FILE, NEVER EDITED BY HAND.
++ *
++ * The Mellum *content* segmenter's letter / number / whitespace
++ * classification, derived from the reference tokenizer's own behaviour by
++ * tests/gen_mellum_unicode.py.  Regenerate it; do not patch it.
++ *
++ * The three predicates, each a probe of the snapshot's own pre-tokenizer
++ * stages -- never unicodedata, never a Unicode data file:
++ *   number  a Digits(individual_digits=true) stage alone cuts "<cp><cp>" in two
++ *   letter  a ByteLevel-only pre-tokenizer keeps "a<cp>" as one piece
++ *   space   neither of those, and "."<cp> splits in two
++ *
++ * These tables are used ONLY by the Mellum pre-tokenizer
++ * (mellum_char_at in ds4.c).  Every other family keeps its own classifiers
++ * byte for byte.
++ *
++ * tokenizers: 0.23.3
++ * unicode-version: unknown (tokenizers 0.23.3 exposes no Unicode version; the tables ARE this build's behaviour and their row counts and this file's sha256 are the fingerprint)
++ * snapshot: Mellum2.1-12B-A2.5B-Thinking-6bit
++ * codepoints: 0x0000-0x10FFFF
++ * generator-sha256: d3f65d5118cec1e4a5566abaf65f7e82dc57233b84f03208011010d25e08e823
++ * generated: 2026-10-26
++ * letter-ranges: 677
++ * number-ranges: 146
++ * space-ranges: 10
++ */
++
++typedef struct {
++    uint32_t lo, hi;
++} mellum_unicode_range;
++
++static bool mellum_unicode_in(const mellum_unicode_range *ranges, size_t n,
++                              uint32_t cp) {
++    size_t lo = 0, hi = n;
++    while (lo < hi) {
++        const size_t mid = lo + (hi - lo) / 2;
++        if (cp < ranges[mid].lo)      hi = mid;
++        else if (cp > ranges[mid].hi) lo = mid + 1;
++        else                          return true;
++    }
++    return false;
++}
++
++static const mellum_unicode_range mellum_letter_ranges[] = {
++    {0x0041, 0x005A},
++    {0x0061, 0x007A},
++    {0x00AA, 0x00AA},
++    {0x00B5, 0x00B5},
++    {0x00BA, 0x00BA},
++    {0x00C0, 0x00D6},
++    {0x00D8, 0x00F6},
++    {0x00F8, 0x02C1},
++    {0x02C6, 0x02D1},
++    {0x02E0, 0x02E4},
++    {0x02EC, 0x02EC},
++    {0x02EE, 0x02EE},
++    {0x0370, 0x0374},
++    {0x0376, 0x0377},
++    {0x037A, 0x037D},
++    {0x037F, 0x037F},
++    {0x0386, 0x0386},
++    {0x0388, 0x038A},
++    {0x038C, 0x038C},
++    {0x038E, 0x03A1},
++    {0x03A3, 0x03F5},
++    {0x03F7, 0x0481},
++    {0x048A, 0x052F},
++    {0x0531, 0x0556},
++    {0x0559, 0x0559},
++    {0x0560, 0x0588},
++    {0x05D0, 0x05EA},
++    {0x05EF, 0x05F2},
++    {0x0620, 0x064A},
++    {0x066E, 0x066F},
++    {0x0671, 0x06D3},
++    {0x06D5, 0x06D5},
++    {0x06E5, 0x06E6},
++    {0x06EE, 0x06EF},
++    {0x06FA, 0x06FC},
++    {0x06FF, 0x06FF},
++    {0x0710, 0x0710},
++    {0x0712, 0x072F},
++    {0x074D, 0x07A5},
++    {0x07B1, 0x07B1},
++    {0x07CA, 0x07EA},
++    {0x07F4, 0x07F5},
++    {0x07FA, 0x07FA},
++    {0x0800, 0x0815},
++    {0x081A, 0x081A},
++    {0x0824, 0x0824},
++    {0x0828, 0x0828},
++    {0x0840, 0x0858},
++    {0x0860, 0x086A},
++    {0x0870, 0x0887},
++    {0x0889, 0x088E},
++    {0x08A0, 0x08C9},
++    {0x0904, 0x0939},
++    {0x093D, 0x093D},
++    {0x0950, 0x0950},
++    {0x0958, 0x0961},
++    {0x0971, 0x0980},
++    {0x0985, 0x098C},
++    {0x098F, 0x0990},
++    {0x0993, 0x09A8},
++    {0x09AA, 0x09B0},
++    {0x09B2, 0x09B2},
++    {0x09B6, 0x09B9},
++    {0x09BD, 0x09BD},
++    {0x09CE, 0x09CE},
++    {0x09DC, 0x09DD},
++    {0x09DF, 0x09E1},
++    {0x09F0, 0x09F1},
++    {0x09FC, 0x09FC},
++    {0x0A05, 0x0A0A},
++    {0x0A0F, 0x0A10},
++    {0x0A13, 0x0A28},
++    {0x0A2A, 0x0A30},
++    {0x0A32, 0x0A33},
++    {0x0A35, 0x0A36},
++    {0x0A38, 0x0A39},
++    {0x0A59, 0x0A5C},
++    {0x0A5E, 0x0A5E},
++    {0x0A72, 0x0A74},
++    {0x0A85, 0x0A8D},
++    {0x0A8F, 0x0A91},
++    {0x0A93, 0x0AA8},
++    {0x0AAA, 0x0AB0},
++    {0x0AB2, 0x0AB3},
++    {0x0AB5, 0x0AB9},
++    {0x0ABD, 0x0ABD},
++    {0x0AD0, 0x0AD0},
++    {0x0AE0, 0x0AE1},
++    {0x0AF9, 0x0AF9},
++    {0x0B05, 0x0B0C},
++    {0x0B0F, 0x0B10},
++    {0x0B13, 0x0B28},
++    {0x0B2A, 0x0B30},
++    {0x0B32, 0x0B33},
++    {0x0B35, 0x0B39},
++    {0x0B3D, 0x0B3D},
++    {0x0B5C, 0x0B5D},
++    {0x0B5F, 0x0B61},
++    {0x0B71, 0x0B71},
++    {0x0B83, 0x0B83},
++    {0x0B85, 0x0B8A},
++    {0x0B8E, 0x0B90},
++    {0x0B92, 0x0B95},
++    {0x0B99, 0x0B9A},
++    {0x0B9C, 0x0B9C},
++    {0x0B9E, 0x0B9F},
++    {0x0BA3, 0x0BA4},
++    {0x0BA8, 0x0BAA},
++    {0x0BAE, 0x0BB9},
++    {0x0BD0, 0x0BD0},
++    {0x0C05, 0x0C0C},
++    {0x0C0E, 0x0C10},
++    {0x0C12, 0x0C28},
++    {0x0C2A, 0x0C39},
++    {0x0C3D, 0x0C3D},
++    {0x0C58, 0x0C5A},
++    {0x0C5D, 0x0C5D},
++    {0x0C60, 0x0C61},
++    {0x0C80, 0x0C80},
++    {0x0C85, 0x0C8C},
++    {0x0C8E, 0x0C90},
++    {0x0C92, 0x0CA8},
++    {0x0CAA, 0x0CB3},
++    {0x0CB5, 0x0CB9},
++    {0x0CBD, 0x0CBD},
++    {0x0CDD, 0x0CDE},
++    {0x0CE0, 0x0CE1},
++    {0x0CF1, 0x0CF2},
++    {0x0D04, 0x0D0C},
++    {0x0D0E, 0x0D10},
++    {0x0D12, 0x0D3A},
++    {0x0D3D, 0x0D3D},
++    {0x0D4E, 0x0D4E},
++    {0x0D54, 0x0D56},
++    {0x0D5F, 0x0D61},
++    {0x0D7A, 0x0D7F},
++    {0x0D85, 0x0D96},
++    {0x0D9A, 0x0DB1},
++    {0x0DB3, 0x0DBB},
++    {0x0DBD, 0x0DBD},
++    {0x0DC0, 0x0DC6},
++    {0x0E01, 0x0E30},
++    {0x0E32, 0x0E33},
++    {0x0E40, 0x0E46},
++    {0x0E81, 0x0E82},
++    {0x0E84, 0x0E84},
++    {0x0E86, 0x0E8A},
++    {0x0E8C, 0x0EA3},
++    {0x0EA5, 0x0EA5},
++    {0x0EA7, 0x0EB0},
++    {0x0EB2, 0x0EB3},
++    {0x0EBD, 0x0EBD},
++    {0x0EC0, 0x0EC4},
++    {0x0EC6, 0x0EC6},
++    {0x0EDC, 0x0EDF},
++    {0x0F00, 0x0F00},
++    {0x0F40, 0x0F47},
++    {0x0F49, 0x0F6C},
++    {0x0F88, 0x0F8C},
++    {0x1000, 0x102A},
++    {0x103F, 0x103F},
++    {0x1050, 0x1055},
++    {0x105A, 0x105D},
++    {0x1061, 0x1061},
++    {0x1065, 0x1066},
++    {0x106E, 0x1070},
++    {0x1075, 0x1081},
++    {0x108E, 0x108E},
++    {0x10A0, 0x10C5},
++    {0x10C7, 0x10C7},
++    {0x10CD, 0x10CD},
++    {0x10D0, 0x10FA},
++    {0x10FC, 0x1248},
++    {0x124A, 0x124D},
++    {0x1250, 0x1256},
++    {0x1258, 0x1258},
++    {0x125A, 0x125D},
++    {0x1260, 0x1288},
++    {0x128A, 0x128D},
++    {0x1290, 0x12B0},
++    {0x12B2, 0x12B5},
++    {0x12B8, 0x12BE},
++    {0x12C0, 0x12C0},
++    {0x12C2, 0x12C5},
++    {0x12C8, 0x12D6},
++    {0x12D8, 0x1310},
++    {0x1312, 0x1315},
++    {0x1318, 0x135A},
++    {0x1380, 0x138F},
++    {0x13A0, 0x13F5},
++    {0x13F8, 0x13FD},
++    {0x1401, 0x166C},
++    {0x166F, 0x167F},
++    {0x1681, 0x169A},
++    {0x16A0, 0x16EA},
++    {0x16F1, 0x16F8},
++    {0x1700, 0x1711},
++    {0x171F, 0x1731},
++    {0x1740, 0x1751},
++    {0x1760, 0x176C},
++    {0x176E, 0x1770},
++    {0x1780, 0x17B3},
++    {0x17D7, 0x17D7},
++    {0x17DC, 0x17DC},
++    {0x1820, 0x1878},
++    {0x1880, 0x1884},
++    {0x1887, 0x18A8},
++    {0x18AA, 0x18AA},
++    {0x18B0, 0x18F5},
++    {0x1900, 0x191E},
++    {0x1950, 0x196D},
++    {0x1970, 0x1974},
++    {0x1980, 0x19AB},
++    {0x19B0, 0x19C9},
++    {0x1A00, 0x1A16},
++    {0x1A20, 0x1A54},
++    {0x1AA7, 0x1AA7},
++    {0x1B05, 0x1B33},
++    {0x1B45, 0x1B4C},
++    {0x1B83, 0x1BA0},
++    {0x1BAE, 0x1BAF},
++    {0x1BBA, 0x1BE5},
++    {0x1C00, 0x1C23},
++    {0x1C4D, 0x1C4F},
++    {0x1C5A, 0x1C7D},
++    {0x1C80, 0x1C8A},
++    {0x1C90, 0x1CBA},
++    {0x1CBD, 0x1CBF},
++    {0x1CE9, 0x1CEC},
++    {0x1CEE, 0x1CF3},
++    {0x1CF5, 0x1CF6},
++    {0x1CFA, 0x1CFA},
++    {0x1D00, 0x1DBF},
++    {0x1E00, 0x1F15},
++    {0x1F18, 0x1F1D},
++    {0x1F20, 0x1F45},
++    {0x1F48, 0x1F4D},
++    {0x1F50, 0x1F57},
++    {0x1F59, 0x1F59},
++    {0x1F5B, 0x1F5B},
++    {0x1F5D, 0x1F5D},
++    {0x1F5F, 0x1F7D},
++    {0x1F80, 0x1FB4},
++    {0x1FB6, 0x1FBC},
++    {0x1FBE, 0x1FBE},
++    {0x1FC2, 0x1FC4},
++    {0x1FC6, 0x1FCC},
++    {0x1FD0, 0x1FD3},
++    {0x1FD6, 0x1FDB},
++    {0x1FE0, 0x1FEC},
++    {0x1FF2, 0x1FF4},
++    {0x1FF6, 0x1FFC},
++    {0x2071, 0x2071},
++    {0x207F, 0x207F},
++    {0x2090, 0x209C},
++    {0x2102, 0x2102},
++    {0x2107, 0x2107},
++    {0x210A, 0x2113},
++    {0x2115, 0x2115},
++    {0x2119, 0x211D},
++    {0x2124, 0x2124},
++    {0x2126, 0x2126},
++    {0x2128, 0x2128},
++    {0x212A, 0x212D},
++    {0x212F, 0x2139},
++    {0x213C, 0x213F},
++    {0x2145, 0x2149},
++    {0x214E, 0x214E},
++    {0x2183, 0x2184},
++    {0x2C00, 0x2CE4},
++    {0x2CEB, 0x2CEE},
++    {0x2CF2, 0x2CF3},
++    {0x2D00, 0x2D25},
++    {0x2D27, 0x2D27},
++    {0x2D2D, 0x2D2D},
++    {0x2D30, 0x2D67},
++    {0x2D6F, 0x2D6F},
++    {0x2D80, 0x2D96},
++    {0x2DA0, 0x2DA6},
++    {0x2DA8, 0x2DAE},
++    {0x2DB0, 0x2DB6},
++    {0x2DB8, 0x2DBE},
++    {0x2DC0, 0x2DC6},
++    {0x2DC8, 0x2DCE},
++    {0x2DD0, 0x2DD6},
++    {0x2DD8, 0x2DDE},
++    {0x2E2F, 0x2E2F},
++    {0x3005, 0x3006},
++    {0x3031, 0x3035},
++    {0x303B, 0x303C},
++    {0x3041, 0x3096},
++    {0x309D, 0x309F},
++    {0x30A1, 0x30FA},
++    {0x30FC, 0x30FF},
++    {0x3105, 0x312F},
++    {0x3131, 0x318E},
++    {0x31A0, 0x31BF},
++    {0x31F0, 0x31FF},
++    {0x3400, 0x4DBF},
++    {0x4E00, 0xA48C},
++    {0xA4D0, 0xA4FD},
++    {0xA500, 0xA60C},
++    {0xA610, 0xA61F},
++    {0xA62A, 0xA62B},
++    {0xA640, 0xA66E},
++    {0xA67F, 0xA69D},
++    {0xA6A0, 0xA6E5},
++    {0xA717, 0xA71F},
++    {0xA722, 0xA788},
++    {0xA78B, 0xA7CD},
++    {0xA7D0, 0xA7D1},
++    {0xA7D3, 0xA7D3},
++    {0xA7D5, 0xA7DC},
++    {0xA7F2, 0xA801},
++    {0xA803, 0xA805},
++    {0xA807, 0xA80A},
++    {0xA80C, 0xA822},
++    {0xA840, 0xA873},
++    {0xA882, 0xA8B3},
++    {0xA8F2, 0xA8F7},
++    {0xA8FB, 0xA8FB},
++    {0xA8FD, 0xA8FE},
++    {0xA90A, 0xA925},
++    {0xA930, 0xA946},
++    {0xA960, 0xA97C},
++    {0xA984, 0xA9B2},
++    {0xA9CF, 0xA9CF},
++    {0xA9E0, 0xA9E4},
++    {0xA9E6, 0xA9EF},
++    {0xA9FA, 0xA9FE},
++    {0xAA00, 0xAA28},
++    {0xAA40, 0xAA42},
++    {0xAA44, 0xAA4B},
++    {0xAA60, 0xAA76},
++    {0xAA7A, 0xAA7A},
++    {0xAA7E, 0xAAAF},
++    {0xAAB1, 0xAAB1},
++    {0xAAB5, 0xAAB6},
++    {0xAAB9, 0xAABD},
++    {0xAAC0, 0xAAC0},
++    {0xAAC2, 0xAAC2},
++    {0xAADB, 0xAADD},
++    {0xAAE0, 0xAAEA},
++    {0xAAF2, 0xAAF4},
++    {0xAB01, 0xAB06},
++    {0xAB09, 0xAB0E},
++    {0xAB11, 0xAB16},
++    {0xAB20, 0xAB26},
++    {0xAB28, 0xAB2E},
++    {0xAB30, 0xAB5A},
++    {0xAB5C, 0xAB69},
++    {0xAB70, 0xABE2},
++    {0xAC00, 0xD7A3},
++    {0xD7B0, 0xD7C6},
++    {0xD7CB, 0xD7FB},
++    {0xF900, 0xFA6D},
++    {0xFA70, 0xFAD9},
++    {0xFB00, 0xFB06},
++    {0xFB13, 0xFB17},
++    {0xFB1D, 0xFB1D},
++    {0xFB1F, 0xFB28},
++    {0xFB2A, 0xFB36},
++    {0xFB38, 0xFB3C},
++    {0xFB3E, 0xFB3E},
++    {0xFB40, 0xFB41},
++    {0xFB43, 0xFB44},
++    {0xFB46, 0xFBB1},
++    {0xFBD3, 0xFD3D},
++    {0xFD50, 0xFD8F},
++    {0xFD92, 0xFDC7},
++    {0xFDF0, 0xFDFB},
++    {0xFE70, 0xFE74},
++    {0xFE76, 0xFEFC},
++    {0xFF21, 0xFF3A},
++    {0xFF41, 0xFF5A},
++    {0xFF66, 0xFFBE},
++    {0xFFC2, 0xFFC7},
++    {0xFFCA, 0xFFCF},
++    {0xFFD2, 0xFFD7},
++    {0xFFDA, 0xFFDC},
++    {0x10000, 0x1000B},
++    {0x1000D, 0x10026},
++    {0x10028, 0x1003A},
++    {0x1003C, 0x1003D},
++    {0x1003F, 0x1004D},
++    {0x10050, 0x1005D},
++    {0x10080, 0x100FA},
++    {0x10280, 0x1029C},
++    {0x102A0, 0x102D0},
++    {0x10300, 0x1031F},
++    {0x1032D, 0x10340},
++    {0x10342, 0x10349},
++    {0x10350, 0x10375},
++    {0x10380, 0x1039D},
++    {0x103A0, 0x103C3},
++    {0x103C8, 0x103CF},
++    {0x10400, 0x1049D},
++    {0x104B0, 0x104D3},
++    {0x104D8, 0x104FB},
++    {0x10500, 0x10527},
++    {0x10530, 0x10563},
++    {0x10570, 0x1057A},
++    {0x1057C, 0x1058A},
++    {0x1058C, 0x10592},
++    {0x10594, 0x10595},
++    {0x10597, 0x105A1},
++    {0x105A3, 0x105B1},
++    {0x105B3, 0x105B9},
++    {0x105BB, 0x105BC},
++    {0x105C0, 0x105F3},
++    {0x10600, 0x10736},
++    {0x10740, 0x10755},
++    {0x10760, 0x10767},
++    {0x10780, 0x10785},
++    {0x10787, 0x107B0},
++    {0x107B2, 0x107BA},
++    {0x10800, 0x10805},
++    {0x10808, 0x10808},
++    {0x1080A, 0x10835},
++    {0x10837, 0x10838},
++    {0x1083C, 0x1083C},
++    {0x1083F, 0x10855},
++    {0x10860, 0x10876},
++    {0x10880, 0x1089E},
++    {0x108E0, 0x108F2},
++    {0x108F4, 0x108F5},
++    {0x10900, 0x10915},
++    {0x10920, 0x10939},
++    {0x10980, 0x109B7},
++    {0x109BE, 0x109BF},
++    {0x10A00, 0x10A00},
++    {0x10A10, 0x10A13},
++    {0x10A15, 0x10A17},
++    {0x10A19, 0x10A35},
++    {0x10A60, 0x10A7C},
++    {0x10A80, 0x10A9C},
++    {0x10AC0, 0x10AC7},
++    {0x10AC9, 0x10AE4},
++    {0x10B00, 0x10B35},
++    {0x10B40, 0x10B55},
++    {0x10B60, 0x10B72},
++    {0x10B80, 0x10B91},
++    {0x10C00, 0x10C48},
++    {0x10C80, 0x10CB2},
++    {0x10CC0, 0x10CF2},
++    {0x10D00, 0x10D23},
++    {0x10D4A, 0x10D65},
++    {0x10D6F, 0x10D85},
++    {0x10E80, 0x10EA9},
++    {0x10EB0, 0x10EB1},
++    {0x10EC2, 0x10EC4},
++    {0x10F00, 0x10F1C},
++    {0x10F27, 0x10F27},
++    {0x10F30, 0x10F45},
++    {0x10F70, 0x10F81},
++    {0x10FB0, 0x10FC4},
++    {0x10FE0, 0x10FF6},
++    {0x11003, 0x11037},
++    {0x11071, 0x11072},
++    {0x11075, 0x11075},
++    {0x11083, 0x110AF},
++    {0x110D0, 0x110E8},
++    {0x11103, 0x11126},
++    {0x11144, 0x11144},
++    {0x11147, 0x11147},
++    {0x11150, 0x11172},
++    {0x11176, 0x11176},
++    {0x11183, 0x111B2},
++    {0x111C1, 0x111C4},
++    {0x111DA, 0x111DA},
++    {0x111DC, 0x111DC},
++    {0x11200, 0x11211},
++    {0x11213, 0x1122B},
++    {0x1123F, 0x11240},
++    {0x11280, 0x11286},
++    {0x11288, 0x11288},
++    {0x1128A, 0x1128D},
++    {0x1128F, 0x1129D},
++    {0x1129F, 0x112A8},
++    {0x112B0, 0x112DE},
++    {0x11305, 0x1130C},
++    {0x1130F, 0x11310},
++    {0x11313, 0x11328},
++    {0x1132A, 0x11330},
++    {0x11332, 0x11333},
++    {0x11335, 0x11339},
++    {0x1133D, 0x1133D},
++    {0x11350, 0x11350},
++    {0x1135D, 0x11361},
++    {0x11380, 0x11389},
++    {0x1138B, 0x1138B},
++    {0x1138E, 0x1138E},
++    {0x11390, 0x113B5},
++    {0x113B7, 0x113B7},
++    {0x113D1, 0x113D1},
++    {0x113D3, 0x113D3},
++    {0x11400, 0x11434},
++    {0x11447, 0x1144A},
++    {0x1145F, 0x11461},
++    {0x11480, 0x114AF},
++    {0x114C4, 0x114C5},
++    {0x114C7, 0x114C7},
++    {0x11580, 0x115AE},
++    {0x115D8, 0x115DB},
++    {0x11600, 0x1162F},
++    {0x11644, 0x11644},
++    {0x11680, 0x116AA},
++    {0x116B8, 0x116B8},
++    {0x11700, 0x1171A},
++    {0x11740, 0x11746},
++    {0x11800, 0x1182B},
++    {0x118A0, 0x118DF},
++    {0x118FF, 0x11906},
++    {0x11909, 0x11909},
++    {0x1190C, 0x11913},
++    {0x11915, 0x11916},
++    {0x11918, 0x1192F},
++    {0x1193F, 0x1193F},
++    {0x11941, 0x11941},
++    {0x119A0, 0x119A7},
++    {0x119AA, 0x119D0},
++    {0x119E1, 0x119E1},
++    {0x119E3, 0x119E3},
++    {0x11A00, 0x11A00},
++    {0x11A0B, 0x11A32},
++    {0x11A3A, 0x11A3A},
++    {0x11A50, 0x11A50},
++    {0x11A5C, 0x11A89},
++    {0x11A9D, 0x11A9D},
++    {0x11AB0, 0x11AF8},
++    {0x11BC0, 0x11BE0},
++    {0x11C00, 0x11C08},
++    {0x11C0A, 0x11C2E},
++    {0x11C40, 0x11C40},
++    {0x11C72, 0x11C8F},
++    {0x11D00, 0x11D06},
++    {0x11D08, 0x11D09},
++    {0x11D0B, 0x11D30},
++    {0x11D46, 0x11D46},
++    {0x11D60, 0x11D65},
++    {0x11D67, 0x11D68},
++    {0x11D6A, 0x11D89},
++    {0x11D98, 0x11D98},
++    {0x11EE0, 0x11EF2},
++    {0x11F02, 0x11F02},
++    {0x11F04, 0x11F10},
++    {0x11F12, 0x11F33},
++    {0x11FB0, 0x11FB0},
++    {0x12000, 0x12399},
++    {0x12480, 0x12543},
++    {0x12F90, 0x12FF0},
++    {0x13000, 0x1342F},
++    {0x13441, 0x13446},
++    {0x13460, 0x143FA},
++    {0x14400, 0x14646},
++    {0x16100, 0x1611D},
++    {0x16800, 0x16A38},
++    {0x16A40, 0x16A5E},
++    {0x16A70, 0x16ABE},
++    {0x16AD0, 0x16AED},
++    {0x16B00, 0x16B2F},
++    {0x16B40, 0x16B43},
++    {0x16B63, 0x16B77},
++    {0x16B7D, 0x16B8F},
++    {0x16D40, 0x16D6C},
++    {0x16E40, 0x16E7F},
++    {0x16F00, 0x16F4A},
++    {0x16F50, 0x16F50},
++    {0x16F93, 0x16F9F},
++    {0x16FE0, 0x16FE1},
++    {0x16FE3, 0x16FE3},
++    {0x17000, 0x187F7},
++    {0x18800, 0x18CD5},
++    {0x18CFF, 0x18D08},
++    {0x1AFF0, 0x1AFF3},
++    {0x1AFF5, 0x1AFFB},
++    {0x1AFFD, 0x1AFFE},
++    {0x1B000, 0x1B122},
++    {0x1B132, 0x1B132},
++    {0x1B150, 0x1B152},
++    {0x1B155, 0x1B155},
++    {0x1B164, 0x1B167},
++    {0x1B170, 0x1B2FB},
++    {0x1BC00, 0x1BC6A},
++    {0x1BC70, 0x1BC7C},
++    {0x1BC80, 0x1BC88},
++    {0x1BC90, 0x1BC99},
++    {0x1D400, 0x1D454},
++    {0x1D456, 0x1D49C},
++    {0x1D49E, 0x1D49F},
++    {0x1D4A2, 0x1D4A2},
++    {0x1D4A5, 0x1D4A6},
++    {0x1D4A9, 0x1D4AC},
++    {0x1D4AE, 0x1D4B9},
++    {0x1D4BB, 0x1D4BB},
++    {0x1D4BD, 0x1D4C3},
++    {0x1D4C5, 0x1D505},
++    {0x1D507, 0x1D50A},
++    {0x1D50D, 0x1D514},
++    {0x1D516, 0x1D51C},
++    {0x1D51E, 0x1D539},
++    {0x1D53B, 0x1D53E},
++    {0x1D540, 0x1D544},
++    {0x1D546, 0x1D546},
++    {0x1D54A, 0x1D550},
++    {0x1D552, 0x1D6A5},
++    {0x1D6A8, 0x1D6C0},
++    {0x1D6C2, 0x1D6DA},
++    {0x1D6DC, 0x1D6FA},
++    {0x1D6FC, 0x1D714},
++    {0x1D716, 0x1D734},
++    {0x1D736, 0x1D74E},
++    {0x1D750, 0x1D76E},
++    {0x1D770, 0x1D788},
++    {0x1D78A, 0x1D7A8},
++    {0x1D7AA, 0x1D7C2},
++    {0x1D7C4, 0x1D7CB},
++    {0x1DF00, 0x1DF1E},
++    {0x1DF25, 0x1DF2A},
++    {0x1E030, 0x1E06D},
++    {0x1E100, 0x1E12C},
++    {0x1E137, 0x1E13D},
++    {0x1E14E, 0x1E14E},
++    {0x1E290, 0x1E2AD},
++    {0x1E2C0, 0x1E2EB},
++    {0x1E4D0, 0x1E4EB},
++    {0x1E5D0, 0x1E5ED},
++    {0x1E5F0, 0x1E5F0},
++    {0x1E7E0, 0x1E7E6},
++    {0x1E7E8, 0x1E7EB},
++    {0x1E7ED, 0x1E7EE},
++    {0x1E7F0, 0x1E7FE},
++    {0x1E800, 0x1E8C4},
++    {0x1E900, 0x1E943},
++    {0x1E94B, 0x1E94B},
++    {0x1EE00, 0x1EE03},
++    {0x1EE05, 0x1EE1F},
++    {0x1EE21, 0x1EE22},
++    {0x1EE24, 0x1EE24},
++    {0x1EE27, 0x1EE27},
++    {0x1EE29, 0x1EE32},
++    {0x1EE34, 0x1EE37},
++    {0x1EE39, 0x1EE39},
++    {0x1EE3B, 0x1EE3B},
++    {0x1EE42, 0x1EE42},
++    {0x1EE47, 0x1EE47},
++    {0x1EE49, 0x1EE49},
++    {0x1EE4B, 0x1EE4B},
++    {0x1EE4D, 0x1EE4F},
++    {0x1EE51, 0x1EE52},
++    {0x1EE54, 0x1EE54},
++    {0x1EE57, 0x1EE57},
++    {0x1EE59, 0x1EE59},
++    {0x1EE5B, 0x1EE5B},
++    {0x1EE5D, 0x1EE5D},
++    {0x1EE5F, 0x1EE5F},
++    {0x1EE61, 0x1EE62},
++    {0x1EE64, 0x1EE64},
++    {0x1EE67, 0x1EE6A},
++    {0x1EE6C, 0x1EE72},
++    {0x1EE74, 0x1EE77},
++    {0x1EE79, 0x1EE7C},
++    {0x1EE7E, 0x1EE7E},
++    {0x1EE80, 0x1EE89},
++    {0x1EE8B, 0x1EE9B},
++    {0x1EEA1, 0x1EEA3},
++    {0x1EEA5, 0x1EEA9},
++    {0x1EEAB, 0x1EEBB},
++    {0x20000, 0x2A6DF},
++    {0x2A700, 0x2B739},
++    {0x2B740, 0x2B81D},
++    {0x2B820, 0x2CEA1},
++    {0x2CEB0, 0x2EBE0},
++    {0x2EBF0, 0x2EE5D},
++    {0x2F800, 0x2FA1D},
++    {0x30000, 0x3134A},
++    {0x31350, 0x323AF},
++};
++
++static const mellum_unicode_range mellum_number_ranges[] = {
++    {0x0030, 0x0039},
++    {0x00B2, 0x00B3},
++    {0x00B9, 0x00B9},
++    {0x00BC, 0x00BE},
++    {0x0660, 0x0669},
++    {0x06F0, 0x06F9},
++    {0x07C0, 0x07C9},
++    {0x0966, 0x096F},
++    {0x09E6, 0x09EF},
++    {0x09F4, 0x09F9},
++    {0x0A66, 0x0A6F},
++    {0x0AE6, 0x0AEF},
++    {0x0B66, 0x0B6F},
++    {0x0B72, 0x0B77},
++    {0x0BE6, 0x0BF2},
++    {0x0C66, 0x0C6F},
++    {0x0C78, 0x0C7E},
++    {0x0CE6, 0x0CEF},
++    {0x0D58, 0x0D5E},
++    {0x0D66, 0x0D78},
++    {0x0DE6, 0x0DEF},
++    {0x0E50, 0x0E59},
++    {0x0ED0, 0x0ED9},
++    {0x0F20, 0x0F33},
++    {0x1040, 0x1049},
++    {0x1090, 0x1099},
++    {0x1369, 0x137C},
++    {0x16EE, 0x16F0},
++    {0x17E0, 0x17E9},
++    {0x17F0, 0x17F9},
++    {0x1810, 0x1819},
++    {0x1946, 0x194F},
++    {0x19D0, 0x19DA},
++    {0x1A80, 0x1A89},
++    {0x1A90, 0x1A99},
++    {0x1B50, 0x1B59},
++    {0x1BB0, 0x1BB9},
++    {0x1C40, 0x1C49},
++    {0x1C50, 0x1C59},
++    {0x2070, 0x2070},
++    {0x2074, 0x2079},
++    {0x2080, 0x2089},
++    {0x2150, 0x2182},
++    {0x2185, 0x2189},
++    {0x2460, 0x249B},
++    {0x24EA, 0x24FF},
++    {0x2776, 0x2793},
++    {0x2CFD, 0x2CFD},
++    {0x3007, 0x3007},
++    {0x3021, 0x3029},
++    {0x3038, 0x303A},
++    {0x3192, 0x3195},
++    {0x3220, 0x3229},
++    {0x3248, 0x324F},
++    {0x3251, 0x325F},
++    {0x3280, 0x3289},
++    {0x32B1, 0x32BF},
++    {0xA620, 0xA629},
++    {0xA6E6, 0xA6EF},
++    {0xA830, 0xA835},
++    {0xA8D0, 0xA8D9},
++    {0xA900, 0xA909},
++    {0xA9D0, 0xA9D9},
++    {0xA9F0, 0xA9F9},
++    {0xAA50, 0xAA59},
++    {0xABF0, 0xABF9},
++    {0xFF10, 0xFF19},
++    {0x10107, 0x10133},
++    {0x10140, 0x10178},
++    {0x1018A, 0x1018B},
++    {0x102E1, 0x102FB},
++    {0x10320, 0x10323},
++    {0x10341, 0x10341},
++    {0x1034A, 0x1034A},
++    {0x103D1, 0x103D5},
++    {0x104A0, 0x104A9},
++    {0x10858, 0x1085F},
++    {0x10879, 0x1087F},
++    {0x108A7, 0x108AF},
++    {0x108FB, 0x108FF},
++    {0x10916, 0x1091B},
++    {0x109BC, 0x109BD},
++    {0x109C0, 0x109CF},
++    {0x109D2, 0x109FF},
++    {0x10A40, 0x10A48},
++    {0x10A7D, 0x10A7E},
++    {0x10A9D, 0x10A9F},
++    {0x10AEB, 0x10AEF},
++    {0x10B58, 0x10B5F},
++    {0x10B78, 0x10B7F},
++    {0x10BA9, 0x10BAF},
++    {0x10CFA, 0x10CFF},
++    {0x10D30, 0x10D39},
++    {0x10D40, 0x10D49},
++    {0x10E60, 0x10E7E},
++    {0x10F1D, 0x10F26},
++    {0x10F51, 0x10F54},
++    {0x10FC5, 0x10FCB},
++    {0x11052, 0x1106F},
++    {0x110F0, 0x110F9},
++    {0x11136, 0x1113F},
++    {0x111D0, 0x111D9},
++    {0x111E1, 0x111F4},
++    {0x112F0, 0x112F9},
++    {0x11450, 0x11459},
++    {0x114D0, 0x114D9},
++    {0x11650, 0x11659},
++    {0x116C0, 0x116C9},
++    {0x116D0, 0x116E3},
++    {0x11730, 0x1173B},
++    {0x118E0, 0x118F2},
++    {0x11950, 0x11959},
++    {0x11BF0, 0x11BF9},
++    {0x11C50, 0x11C6C},
++    {0x11D50, 0x11D59},
++    {0x11DA0, 0x11DA9},
++    {0x11DE0, 0x11DE9},
++    {0x11F50, 0x11F59},
++    {0x11FC0, 0x11FD4},
++    {0x12400, 0x1246E},
++    {0x16130, 0x16139},
++    {0x16A60, 0x16A69},
++    {0x16AC0, 0x16AC9},
++    {0x16B50, 0x16B59},
++    {0x16B5B, 0x16B61},
++    {0x16D70, 0x16D79},
++    {0x16E80, 0x16E96},
++    {0x16FF4, 0x16FF6},
++    {0x1CCF0, 0x1CCF9},
++    {0x1D2C0, 0x1D2D3},
++    {0x1D2E0, 0x1D2F3},
++    {0x1D360, 0x1D378},
++    {0x1D7CE, 0x1D7FF},
++    {0x1E140, 0x1E149},
++    {0x1E2F0, 0x1E2F9},
++    {0x1E4F0, 0x1E4F9},
++    {0x1E5F1, 0x1E5FA},
++    {0x1E8C7, 0x1E8CF},
++    {0x1E950, 0x1E959},
++    {0x1EC71, 0x1ECAB},
++    {0x1ECAD, 0x1ECAF},
++    {0x1ECB1, 0x1ECB4},
++    {0x1ED01, 0x1ED2D},
++    {0x1ED2F, 0x1ED3D},
++    {0x1F100, 0x1F10C},
++    {0x1FBF0, 0x1FBF9},
++};
++
++static const mellum_unicode_range mellum_space_ranges[] = {
++    {0x0009, 0x000D},
++    {0x0020, 0x0020},
++    {0x0085, 0x0085},
++    {0x00A0, 0x00A0},
++    {0x1680, 0x1680},
++    {0x2000, 0x200A},
++    {0x2028, 0x2029},
++    {0x202F, 0x202F},
++    {0x205F, 0x205F},
++    {0x3000, 0x3000},
++};
++
++static bool mellum_unicode_letter(uint32_t cp) {
++    return mellum_unicode_in(mellum_letter_ranges,
++                             sizeof(mellum_letter_ranges) /
++                                 sizeof(mellum_letter_ranges[0]), cp);
++}
++
++static bool mellum_unicode_number(uint32_t cp) {
++    return mellum_unicode_in(mellum_number_ranges,
++                             sizeof(mellum_number_ranges) /
++                                 sizeof(mellum_number_ranges[0]), cp);
++}
++
++static bool mellum_unicode_space(uint32_t cp) {
++    return mellum_unicode_in(mellum_space_ranges,
++                             sizeof(mellum_space_ranges) /
++                                 sizeof(mellum_space_ranges[0]), cp);
++}
++
+diff --git a/ds4_prompt_prefix.h b/ds4_prompt_prefix.h
+index ad439d44..1bd5932c 100644
+--- a/ds4_prompt_prefix.h
++++ b/ds4_prompt_prefix.h
+@@ -4,6 +4,7 @@
+ #include "ds4.h"
+ 
+ #include <stddef.h>
++#include <string.h>
+ 
+ typedef enum {
+     DS4_PROMPT_PREFIX_USER,
+@@ -38,10 +39,23 @@ static inline void ds4_prompt_prefix_append(ds4_engine *engine,
+     for (size_t i = 0; i < prefix->count; i++) {
+         const ds4_prompt_prefix_turn *turn = &prefix->turns[i];
+         const bool assistant = turn->role == DS4_PROMPT_PREFIX_ASSISTANT;
++        const char *content = turn->content;
++        if (assistant && ds4_engine_is_mellum(engine)) {
++            /* 2.1's template drops the reasoning of assistant turns before the latest user message,
++             * which every turn here is: it keeps what follows the last </think>, leading newlines
++             * dropped */
++            const char *end = NULL;
++            for (const char *p = content; (p = strstr(p, "</think>")) != NULL; p += 8) end = p + 8;
++            if (end) {
++                while (*end == '\n') end++;
++                content = end;
++            }
++        }
+         ds4_chat_append_message(engine, tokens,
+                                 assistant ? "assistant" : "user",
+-                                turn->content);
+-        if (assistant && !ds4_engine_is_glm_dsa(engine))
++                                content);
++        /* Mellum's ds4_chat_append_message already closed the turn with <|im_end|>\n */
++        if (assistant && !ds4_engine_is_glm_dsa(engine) && !ds4_engine_is_mellum(engine))
+             ds4_tokens_push(tokens, ds4_token_eos(engine));
+     }
+ }
+diff --git a/tests/gen_mellum_chat_ids.py b/tests/gen_mellum_chat_ids.py
+new file mode 100644
+index 00000000..65446068
+--- /dev/null
++++ b/tests/gen_mellum_chat_ids.py
+@@ -0,0 +1,257 @@
++# /// script
++# requires-python = ">=3.10"
++# dependencies = ["jinja2", "tokenizers"]
++# ///
++"""Write tests/mellum_chat_ids.inc: the token ids Mellum 2.1's own chat template
++and tokenizer give for the conversations the engine's chat renderer is tested
++with.  The template and tokenizer.json are the model's; the template is rendered
++as transformers renders it (an ImmutableSandboxedEnvironment with trim_blocks
++and lstrip_blocks, the loopcontrols extension, tojson without ASCII escaping);
++the encoder is `tokenizers` with the file's own added tokens, so <|im_start|>,
++<think> and the rest encode as their ids.
++
++Usage (from the repository root; SNAP holds the model's chat_template.jinja and
++tokenizer.json, JetBrains/Mellum2.1-12B-A2.5B-Thinking)::
++
++    uv run --no-project --with jinja2==3.1.6 --with tokenizers==0.23.3 python -I \\
++        tests/gen_mellum_chat_ids.py $SNAP > tests/mellum_chat_ids.inc
++
++The tool-bearing shapes give the template Pi's four tools, read, bash, edit and
++write (descriptions and parameter schemas from Pi's MIT source,
++@earendil-works/pi-coding-agent, dist/core/tools/{read,bash,edit,write}.js),
++as {"type", "function": {"name", "description", "parameters": {"type",
++"required", "properties"}, "strict": false}} in that key order.  `tojson` is
++transformers' (default separators, insertion order, no key sorting, no HTML
++escaping), so the key order inside a property ("type" before "description")
++is this file's choice and shows in the text.
++"""
++
++import hashlib
++import json
++import sys
++from importlib.metadata import version
++
++from jinja2.ext import loopcontrols
++from jinja2.sandbox import ImmutableSandboxedEnvironment
++from tokenizers import Tokenizer
++
++CASES = [
++    # (name, think, messages); think False renders with enable_thinking false
++    ("system+user, think on", True,
++     [("system", "You are a helpful assistant."), ("user", "Hello, world!")]),
++    ("system+user, think off", False,
++     [("system", "You are a helpful assistant."), ("user", "Hello, world!")]),
++    ("user only, think on", True, [("user", "Write a haiku about autumn.")]),
++    # a tool message is a user turn holding one <tool_response> block
++    ("system, user, assistant, tool, think on", True,
++     [("system", "You are a coding agent."), ("user", "How many files are here?"),
++      ("assistant", "Let me check."), ("tool", "42 files\nin 3 directories")]),
++    ("tool only, think on", True, [("tool", "42 files")]),
++    # consecutive tool messages share one user turn, a <tool_response> block each
++    ("user, assistant, two tool messages, think on", True,
++     [("user", "Count files and directories."), ("assistant", "Let me check."),
++      ("tool", "42 files"), ("tool", "7 directories")]),
++]
++
++
++def _tool(name, description, required, properties):
++    return {"type": "function",
++            "function": {"name": name, "description": description,
++                         "parameters": {"type": "object", "required": required,
++                                        "properties": properties},
++                         "strict": False}}
++
++
++def _str(description):
++    return {"type": "string", "description": description}
++
++
++def _num(description):
++    return {"type": "number", "description": description}
++
++
++# Pi's four default tools, in Pi's order
++TOOLS = [
++    _tool("read",
++          "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp)."
++          " Images are sent as attachments. For text files, output is truncated to 2000 lines or"
++          " 50KB (whichever is hit first). Use offset/limit for large files. When you need the full"
++          " file, continue with offset until complete.",
++          ["path"],
++          {"path": _str("Path to the file to read (relative or absolute)"),
++           "offset": _num("Line number to start reading from (1-indexed)"),
++           "limit": _num("Maximum number of lines to read")}),
++    _tool("bash",
++          "Execute a bash command in the current working directory. Returns stdout and stderr."
++          " Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated,"
++          " full output is saved to a temp file. Optionally provide a timeout in seconds.",
++          ["command"],
++          {"command": _str("Shell command to execute"),
++           "timeout": _num("Timeout in seconds (optional, no default timeout)")}),
++    _tool("edit",
++          "Edit a single file using exact text replacement. Every edits[].oldText must match a"
++          " unique, non-overlapping region of the original file. If two changes affect the same"
++          " block or nearby lines, merge them into one edit instead of emitting overlapping edits."
++          " Do not include large unchanged regions just to connect distant changes.",
++          ["path", "edits"],
++          {"path": _str("Path to the file to edit (relative or absolute)"),
++           "edits": {"type": "array",
++                     "items": {"type": "object", "required": ["oldText", "newText"],
++                               "properties": {
++                                   "oldText": _str(
++                                       "Exact text for one targeted replacement. It must be unique"
++                                       " in the original file and must not overlap with any other"
++                                       " edits[].oldText in the same call."),
++                                   "newText": _str("Replacement text for this targeted edit.")}},
++                     "description":
++                         "One or more targeted replacements. Each edit is matched against the"
++                         " original file, not incrementally. Do not include overlapping or nested"
++                         " edits. If two changes touch the same block or nearby lines, merge them"
++                         " into one edit instead."}}),
++    _tool("write",
++          "Write content to a file. Creates the file if it doesn't exist, overwrites if it does."
++          " Automatically creates parent directories.",
++          ["path", "content"],
++          {"path": _str("Path to the file to write (relative or absolute)"),
++           "content": _str("Content to write to the file")}),
++]
++
++# The tool-bearing shapes, thinking on: (2) a system turn with the tools and a user turn; (3) and
++# an assistant turn with reasoning and one tool call; (4) and a tool message; (5) and a second
++# tool message, which shares the first one's user turn.
++TOOL_SYSTEM = "You are a coding agent. Current working directory: /testbed"
++TOOL_USER = "Read hello.py and tell me what it prints."
++TOOL_REASONING = "The user wants to know what hello.py prints. I should read the file first."
++TOOL_CALL_NAME = "read"
++TOOL_CALL_ARGS = {"path": "hello.py"}
++TOOL_RESULT = 'print("hello, world")\n'
++TOOL_RESULT_2 = "second result: 7 files\n"
++TOOL_CASES = [
++    ("tools: system+user, think on", 2),
++    ("tools: +assistant reasoning and one tool call, think on", 3),
++    ("tools: +tool message, think on", 4),
++    ("tools: +two tool messages, one user turn, think on", 5),
++]
++
++# Imported histories: the turns before the last come from a prompt-prefix file (USER: and
++# ASSISTANT: turns, ds4_prompt_prefix_append), the last user turn is the live prompt.
++HISTORIES = [
++    ("history: user, assistant, user, think on", True,
++     [("user", "What is 2 + 2?"), ("assistant", "4"), ("user", "And times 3?")]),
++    ("history: system, two exchanges, user, think on", True,
++     [("system", "You are terse."), ("user", "Name a prime."), ("assistant", "7"),
++      ("user", "Another?"), ("assistant", "11"), ("user", "Their sum?")]),
++    # reasoning written into an earlier assistant turn: the template drops it (every prefix turn comes
++    # before the live prompt, the latest user message)
++    ("history: assistant with reasoning, think on", True,
++     [("user", "What is 2 + 2?"), ("assistant", "<think>\nA simple sum.\n</think>\n\n4"),
++      ("user", "And times 3?")]),
++]
++
++# the generation prompt alone, as the template's last block writes it
++PREFIXES = [
++    ("assistant prefix, think on", True, "<|im_start|>assistant\n"),
++    ("assistant prefix, think off", False, "<|im_start|>assistant\n<think>\n\n</think>\n\n"),
++]
++
++
++def cstr(s):
++    return json.dumps(s, ensure_ascii=True)
++
++
++def main(snap):
++    tpl_path = snap + "/chat_template.jinja"
++    tok_path = snap + "/tokenizer.json"
++    tpl_text = open(tpl_path, encoding="utf-8").read()
++    env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True,
++                                        extensions=[loopcontrols])
++    env.filters["tojson"] = lambda x, **kw: json.dumps(x, ensure_ascii=False)
++    tpl = env.from_string(tpl_text)
++    tok = Tokenizer.from_file(tok_path)
++
++    def ids(text):
++        return tok.encode(text, add_special_tokens=False).ids
++
++    out = []
++    p = out.append
++    p("/* Generated by tests/gen_mellum_chat_ids.py; do not edit.")
++    p(" * chat_template.jinja sha256 %s" % hashlib.sha256(tpl_text.encode()).hexdigest())
++    p(" * tokenizer.json sha256 %s" % hashlib.sha256(open(tok_path, "rb").read()).hexdigest())
++    p(" * jinja2 %s, tokenizers %s */" % (version("jinja2"), version("tokenizers")))
++    for i, (name, think, msgs) in enumerate(CASES):
++        messages = [{"role": r, "content": c} for r, c in msgs]
++        kw = {} if think else {"enable_thinking": False}
++        text = tpl.render(messages=messages, add_generation_prompt=True, **kw)
++        p("static const fx_msg fx_msgs_%d[] = {" % i)
++        for r, c in msgs:
++            p("    {%s, %s}," % (cstr(r), cstr(c)))
++        p("};")
++        p("static const int fx_ids_%d[] = {%s};" % (i, ", ".join(map(str, ids(text)))))
++    for j, (name, think, text) in enumerate(PREFIXES):
++        # the prefix must be what the template itself appends for the generation prompt
++        kw = {} if think else {"enable_thinking": False}
++        tail = tpl.render(messages=[{"role": "user", "content": "x"}], add_generation_prompt=True, **kw)
++        assert tail.endswith(text), name
++        p("static const int fx_prefix_ids_%d[] = {%s};" % (j, ", ".join(map(str, ids(text)))))
++    p("static const fx_case fx_cases[] = {")
++    for i, (name, think, msgs) in enumerate(CASES):
++        p("    {%s, %s, %d, fx_msgs_%d, (int)(sizeof(fx_ids_%d) / sizeof(int)), fx_ids_%d},"
++          % (cstr(name), "true" if think else "false", len(msgs), i, i, i))
++    p("};")
++    for k, (name, think, msgs) in enumerate(HISTORIES):
++        messages = [{"role": r, "content": c} for r, c in msgs]
++        kw = {} if think else {"enable_thinking": False}
++        text = tpl.render(messages=messages, add_generation_prompt=True, **kw)
++        p("static const fx_msg fx_history_msgs_%d[] = {" % k)
++        for r, c in msgs:
++            p("    {%s, %s}," % (cstr(r), cstr(c)))
++        p("};")
++        p("static const int fx_history_ids_%d[] = {%s};" % (k, ", ".join(map(str, ids(text)))))
++    p("static const fx_case fx_histories[] = {")
++    for k, (name, think, msgs) in enumerate(HISTORIES):
++        p("    {%s, %s, %d, fx_history_msgs_%d, (int)(sizeof(fx_history_ids_%d) / sizeof(int)), fx_history_ids_%d},"
++          % (cstr(name), "true" if think else "false", len(msgs), k, k, k))
++    p("};")
++    p("static const fx_prefix fx_prefixes[] = {")
++    for j, (name, think, text) in enumerate(PREFIXES):
++        p("    {%s, %s, (int)(sizeof(fx_prefix_ids_%d) / sizeof(int)), fx_prefix_ids_%d},"
++          % (cstr(name), "true" if think else "false", j, j))
++    p("};")
++
++    # the tool-bearing shapes: inputs, the template's exact text, and the tokenizer's ids for it
++    def lines(text):
++        parts = text.split("\n")
++        pieces = [x + "\n" for x in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
++        return "\n".join("    " + cstr(x) for x in pieces) or '    ""'
++
++    p("static const char fx_tool_system[] = %s;" % cstr(TOOL_SYSTEM))
++    p("static const char fx_tool_user[] = %s;" % cstr(TOOL_USER))
++    p("static const char fx_tool_reasoning[] = %s;" % cstr(TOOL_REASONING))
++    p("static const char fx_tool_call_name[] = %s;" % cstr(TOOL_CALL_NAME))
++    p("static const char fx_tool_call_args[] = %s;" % cstr(json.dumps(TOOL_CALL_ARGS, ensure_ascii=False)))
++    p("static const char fx_tool_result[] = %s;" % cstr(TOOL_RESULT))
++    p("static const char fx_tool_result_2[] = %s;" % cstr(TOOL_RESULT_2))
++    for i, (name, nmsg) in enumerate(TOOL_CASES):
++        messages = [{"role": "system", "content": TOOL_SYSTEM},
++                    {"role": "user", "content": TOOL_USER}]
++        if nmsg >= 3:
++            messages.append({"role": "assistant", "content": "", "reasoning_content": TOOL_REASONING,
++                             "tool_calls": [{"type": "function", "function": {
++                                 "name": TOOL_CALL_NAME, "arguments": TOOL_CALL_ARGS}}]})
++        if nmsg >= 4:
++            messages.append({"role": "tool", "content": TOOL_RESULT})
++        if nmsg >= 5:
++            messages.append({"role": "tool", "content": TOOL_RESULT_2})
++        text = tpl.render(messages=messages, tools=TOOLS, add_generation_prompt=True)
++        p("static const char fx_tool_text_%d[] =\n%s;" % (i, lines(text)))
++        p("static const int fx_tool_ids_%d[] = {%s};" % (i, ", ".join(map(str, ids(text)))))
++    p("static const fx_tool_case fx_tool_cases[] = {")
++    for i, (name, nmsg) in enumerate(TOOL_CASES):
++        p("    {%s, %d, fx_tool_text_%d, (int)(sizeof(fx_tool_ids_%d) / sizeof(int)), fx_tool_ids_%d},"
++          % (cstr(name), nmsg, i, i, i))
++    p("};")
++    print("\n".join(out))
++
++
++if __name__ == "__main__":
++    main(sys.argv[1])
+diff --git a/tests/gen_mellum_tokenizer_cases.py b/tests/gen_mellum_tokenizer_cases.py
+new file mode 100644
+index 00000000..943d6add
+--- /dev/null
++++ b/tests/gen_mellum_tokenizer_cases.py
+@@ -0,0 +1,138 @@
++# /// script
++# requires-python = ">=3.10"
++# dependencies = ["tokenizers"]
++# ///
++"""Write tests/mellum_tokenizer_cases.inc: what Mellum 2.1's own tokenizer does
++with a fixed list of strings, for the engine's tokenizer tests to match.
++
++For each string it records the pieces of the snapshot's pre-tokenizer
++(Digits(individual_digits) then ByteLevel's GPT-2 expression) and the token
++ids of a full encode.  Both are taken in content mode: the added tokens
++(<think>, <|im_start|>, ...) are emptied from the spec first, because the
++engine's content tokenizer never matches special-token spellings (the chat
++renderer pushes those ids itself), and no special tokens are added.
++
++The pieces need no model (tests/test_mellum_tokenizer checks them always);
++the ids need the GGUF's vocabulary and merges (checked when
++DS4_TEST_MELLUM_MODEL is set).
++
++Usage (from the repository root)::
++
++    uv run --no-project --with tokenizers==0.23.3 python -I \\
++        tests/gen_mellum_tokenizer_cases.py --tokenizer $SNAP/tokenizer.json \\
++        --out tests/mellum_tokenizer_cases.inc
++
++where $SNAP holds JetBrains/Mellum2.1-12B-A2.5B-Thinking's tokenizer.json.
++"""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import sys
++from pathlib import Path
++
++# Each string pins a rule of Digits-then-GPT-2, or is ordinary text a host sends.
++CASES = [
++    ("letter, space, two digits", "a 12"),
++    ("call", "foo.bar()"),
++    ("two spaces then a letter", "  x"),
++    ("contraction", "don't"),
++    ("newlines then indent", "\n\n  def"),
++    ("combining mark after a letter", "cafe\u0301s"),
++    ("superscript two", "\u00b2"),
++    ("circled one", "\u2460"),
++    ("digits end a stretch: the lookahead sees its end", "  1"),
++    ("a whitespace run inside a stretch", "a  \n b"),
++    ("contractions are case sensitive", "x'S 're 'RE I've we'll she'd I'm"),
++    ("a lone quote", "'"),
++    ("tab, newline, space run", " \t\n"),
++    ("a digit run is split", "1.5e-30"),
++    ("no-break space is whitespace", "\u00a0x"),
++    ("em space between letters", "a\u2003b"),
++    ("a mark after a space is not a letter", " \u0301a"),
++    ("CJK", "\u65e5\u672c\u8a9e text"),
++    ("CRLF", "a\r\nb"),
++    ("punctuation run takes one leading space", "x ... y"),
++    ("a space before a digit stands alone", "x 7"),
++    ("emoji and ZWJ", "ok \U0001f469\u200d\U0001f4bb done"),
++    ("Python", "def add(a, b):\n    return a + b  # 2024\n"),
++    ("JSON tool call", '{"name": "read", "arguments": {"path": "hello.py", "offset": 10}}'),
++    ("prose", "The quick brown fox jumps over the lazy dog; it's 3:45pm."),
++    ("Cyrillic and Greek", "\u041f\u0440\u0438\u0432\u0435\u0442 \u03ba\u03cc\u03c3\u03bc\u03b5"),
++    ("Arabic digits", "\u0661\u0662\u0663 and 456"),
++    ("a long space run before code", "x =        1\n\t\tif y:\n"),
++    ("shell", "ls -la /tmp && echo \"$HOME\" | wc -c"),
++    ("marker spellings are text here", "<filename>main.c<fim_prefix>"),
++]
++
++
++def load_spec(path: Path) -> dict:
++    spec = json.loads(Path(path).read_text(encoding="utf-8"))
++    spec["added_tokens"] = []
++    return spec
++
++
++def c_string(s: str) -> str:
++    out = []
++    for b in s.encode("utf-8"):
++        if b in (0x22, 0x5C):
++            out.append("\\" + chr(b))
++        elif 0x20 <= b < 0x7F and chr(b) != "?":
++            out.append(chr(b))
++        else:
++            out.append(f"\\{b:03o}")
++    return '"' + "".join(out) + '"'
++
++
++def render(rows: list[tuple[str, str, list[str], list[int]]], source: str, digest: str) -> str:
++    import tokenizers
++
++    out = [
++        "/* tests/mellum_tokenizer_cases.inc -- GENERATED by tests/gen_mellum_tokenizer_cases.py;",
++        " * never edited by hand.  Mellum 2.1's own tokenizer on each string, in content mode",
++        " * (no added tokens, none added): the pre-tokenizer's pieces and the encoded ids.",
++        " *",
++        f" * tokenizers: {tokenizers.__version__}",
++        f" * tokenizer.json: {source} (sha256 {digest})",
++        " */",
++        "",
++    ]
++    for i, (_, _, _, ids) in enumerate(rows):
++        out.append(f"static const int MELLUM_CASE_IDS_{i}[] = {{{', '.join(map(str, ids))}}};")
++    out.append("")
++    out.append("static const mellum_tokenizer_case MELLUM_TOKENIZER_CASES[] = {")
++    for i, (label, text, pieces, ids) in enumerate(rows):
++        plist = ", ".join(c_string(p) for p in pieces)
++        out.append(f"    /* {label} */")
++        out.append(f"    {{ {c_string(text)}, {len(pieces)}, {{ {plist} }},")
++        out.append(f"      MELLUM_CASE_IDS_{i}, {len(ids)} }},")
++    out.append("};")
++    return "\n".join(out) + "\n"
++
++
++def main(argv: list[str] | None = None) -> int:
++    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
++    ap.add_argument("--tokenizer", required=True, type=Path, help="Mellum 2.1's tokenizer.json")
++    ap.add_argument("--out", required=True, type=Path)
++    args = ap.parse_args(argv)
++
++    from tokenizers import Tokenizer
++
++    tok = Tokenizer.from_str(json.dumps(load_spec(args.tokenizer)))
++    rows = []
++    for label, text in CASES:
++        pieces = [text[a:b] for _, (a, b) in tok.pre_tokenizer.pre_tokenize_str(text)]
++        ids = tok.encode(text, add_special_tokens=False).ids
++        assert "".join(pieces) == text, label
++        rows.append((label, text, pieces, ids))
++    digest = hashlib.sha256(args.tokenizer.read_bytes()).hexdigest()
++    source = args.tokenizer.resolve().parent.name
++    args.out.write_text(render(rows, source, digest), encoding="utf-8")
++    print(f"wrote {args.out}: {len(rows)} cases")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/tests/gen_mellum_unicode.py b/tests/gen_mellum_unicode.py
+new file mode 100644
+index 00000000..3f0e3577
+--- /dev/null
++++ b/tests/gen_mellum_unicode.py
+@@ -0,0 +1,336 @@
++# /// script
++# requires-python = ">=3.10"
++# dependencies = ["tokenizers"]
++# ///
++"""Derive the Mellum content segmenter's Unicode classification from the
++reference tokenizer itself, and emit `ds4_mellum_unicode.inc`.
++
++The three predicates below are *probes*, run against pre-tokenizer stages
++deserialized out of the snapshot's own `tokenizer.json`, not re-implemented,
++not read from `unicodedata`, not read from a Unicode data file:
++
++  number(cp)  a Digits(individual_digits=true) stage **alone** cuts `{cp}{cp}`
++              into two pieces. Digits splits every numeric character into its
++              own piece and leaves a non-numeric run whole, so the doubled
++              string is the discriminating probe (`1{cp}1` is not: a
++              non-digit `{cp}` also lands between the two `1`s).
++  letter(cp)  a ByteLevel-only pre-tokenizer keeps `a{cp}` as **one** piece,
++              i.e. `{cp}` continues ` ?\\p{L}+`.
++  space(cp)   `{cp}` is neither of the above and `.{cp}` splits in **two**,
++              i.e. `{cp}` is outside `[^\\s\\p{L}\\p{N}]` -- the regex's own
++              `\\s`, whatever that build's Unicode tables say it is.
++
++Python's own Unicode tables would not do: the `regex` module's classes (which
++the Qwen pre-tokenizer tables follow) call 4,644 codepoints letters that
++tokenizers 0.23.3 does not.
++
++The tables are derived from the reference by construction, so the evidence
++that they are right is the engine's pieces matching the reference's
++(tests/test_mellum_tokenizer), not this generator agreeing with itself.
++
++The emitted file records the `tokenizers` version, the Unicode version that
++build reports, the snapshot directory it was derived from, this generator's
++`sha256`, the date and each table's row count. **It is never edited by hand.**
++
++Usage (from the repository root; tokenizers 0.23.3, the version the table
++was made with)::
++
++    uv run --no-project --with tokenizers==0.23.3 python -I tests/gen_mellum_unicode.py \\
++        --snapshot $SNAP --out ds4_mellum_unicode.inc
++
++where $SNAP is a directory holding Mellum 2.1's `tokenizer.json`
++(JetBrains/Mellum2.1-12B-A2.5B-Thinking).
++"""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import sys
++from datetime import date as date_type
++from pathlib import Path
++
++MAX_CODEPOINT = 0x10FFFF
++SURROGATES = range(0xD800, 0xE000)
++
++TABLES = ("letter", "number", "space")
++
++
++def is_swept(cp: int) -> bool:
++    """U+0000 cannot cross a C string interface; surrogates are not UTF-8."""
++    return cp != 0 and cp not in SURROGATES
++
++
++# --------------------------------------------------------------------------
++# The reference's own stages
++
++
++def load_spec(path: Path) -> dict:
++    spec = json.loads(Path(path).read_text(encoding="utf-8"))
++    spec["added_tokens"] = []
++    return spec
++
++
++def _stage_only(spec: dict, stage: dict):
++    """A pre-tokenizer built from one stage of the reference's own sequence.
++
++    The stage is handed back to `tokenizers` as JSON exactly as the snapshot
++    serialized it, so its parameters are the reference's, not this file's.
++    """
++    from tokenizers import Tokenizer
++
++    one = dict(spec)
++    one["pre_tokenizer"] = stage
++    return Tokenizer.from_str(json.dumps(one)).pre_tokenizer
++
++
++def stage_pre_tokenizers(spec: dict):
++    """(Digits-only, ByteLevel-only), from the reference's own sequence."""
++    pre = spec.get("pre_tokenizer") or {}
++    if pre.get("type") != "Sequence":
++        raise ValueError(f"pre_tokenizer is {pre.get('type')!r}, expected a Sequence")
++    stages = {stage.get("type"): stage for stage in pre.get("pretokenizers", [])}
++    missing = [name for name in ("Digits", "ByteLevel") if name not in stages]
++    if missing:
++        raise ValueError(
++            f"pre_tokenizer sequence has no {' and no '.join(missing)} stage"
++        )
++    return _stage_only(spec, stages["Digits"]), _stage_only(spec, stages["ByteLevel"])
++
++
++def pieces(pre, text: str) -> list[str]:
++    return [text[a:b] for _, (a, b) in pre.pre_tokenize_str(text)]
++
++
++# --------------------------------------------------------------------------
++# The three predicates
++
++
++def is_number(digits_pre, cp: int) -> bool:
++    c = chr(cp)
++    return len(pieces(digits_pre, c + c)) > 1
++
++
++def is_letter(bytelevel_pre, cp: int) -> bool:
++    return len(pieces(bytelevel_pre, "a" + chr(cp))) == 1
++
++
++def is_space(bytelevel_pre, cp: int) -> bool:
++    """Outside `[^\\s\\p{L}\\p{N}]`, and not a letter or a number.
++
++    `.{cp}` staying whole means `{cp}` joined the punctuation run; splitting
++    means it did not, and for a codepoint that is neither a letter nor a
++    number the only remaining alternative is `\\s`.
++    """
++    c = chr(cp)
++    if is_letter(bytelevel_pre, cp):
++        return False
++    if len(pieces(bytelevel_pre, "1" + c)) == 1:
++        # A numeric continuation of ` ?\p{N}+`; not whitespace.
++        return False
++    return len(pieces(bytelevel_pre, "." + c)) > 1
++
++
++def classify(digits_pre, bytelevel_pre, cp: int) -> str | None:
++    if is_number(digits_pre, cp):
++        return "number"
++    if is_letter(bytelevel_pre, cp):
++        return "letter"
++    if is_space(bytelevel_pre, cp):
++        return "space"
++    return None
++
++
++# --------------------------------------------------------------------------
++# Ranges
++
++
++def coalesce(codepoints: list[int]) -> list[tuple[int, int]]:
++    """Minimal sorted ranges: adjacent codepoints merge, never neighbour."""
++    ranges: list[tuple[int, int]] = []
++    for cp in sorted(codepoints):
++        if ranges and cp == ranges[-1][1] + 1:
++            ranges[-1] = (ranges[-1][0], cp)
++        elif not ranges or cp > ranges[-1][1]:
++            ranges.append((cp, cp))
++    return ranges
++
++
++def derive(
++    digits_pre, bytelevel_pre, lo: int, hi: int
++) -> dict[str, list[tuple[int, int]]]:
++    found: dict[str, list[int]] = {name: [] for name in TABLES}
++    for cp in range(lo, hi + 1):
++        if not is_swept(cp):
++            continue
++        name = classify(digits_pre, bytelevel_pre, cp)
++        if name is not None:
++            found[name].append(cp)
++    return {name: coalesce(found[name]) for name in TABLES}
++
++
++# --------------------------------------------------------------------------
++# Emission
++
++
++def generator_sha256() -> str:
++    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
++
++
++def tokenizers_version() -> str:
++    import tokenizers
++
++    return tokenizers.__version__
++
++
++def unicode_version() -> str:
++    """What the `tokenizers` build reports, or `unknown` with the reason."""
++    import tokenizers
++
++    for attr in ("__unicode_version__", "unicode_version"):
++        value = getattr(tokenizers, attr, None)
++        if value:
++            return str(value)
++    return (
++        f"unknown (tokenizers {tokenizers_version()} exposes no Unicode version; "
++        "the tables ARE this build's behaviour and their row counts and this "
++        "file's sha256 are the fingerprint)"
++    )
++
++
++def render_table(name: str, ranges: list[tuple[int, int]]) -> str:
++    rows = [f"    {{0x{lo:04X}, 0x{hi:04X}}}," for lo, hi in ranges]
++    if not rows:
++        rows = ["    {0x0001, 0x0000}, /* empty: lo > hi never matches */"]
++    body = "\n".join(rows)
++    return (
++        f"static const mellum_unicode_range mellum_{name}_ranges[] = {{\n{body}\n}};\n"
++    )
++
++
++def render(
++    tables: dict[str, list[tuple[int, int]]],
++    *,
++    snapshot: str,
++    generated: str,
++    codepoints: str,
++) -> str:
++    counts = "\n".join(f" * {name}-ranges: {len(tables[name])}" for name in TABLES)
++    out = f"""/* ds4_mellum_unicode.inc -- GENERATED FILE, NEVER EDITED BY HAND.
++ *
++ * The Mellum *content* segmenter's letter / number / whitespace
++ * classification, derived from the reference tokenizer's own behaviour by
++ * tests/gen_mellum_unicode.py.  Regenerate it; do not patch it.
++ *
++ * The three predicates, each a probe of the snapshot's own pre-tokenizer
++ * stages -- never unicodedata, never a Unicode data file:
++ *   number  a Digits(individual_digits=true) stage alone cuts "<cp><cp>" in two
++ *   letter  a ByteLevel-only pre-tokenizer keeps "a<cp>" as one piece
++ *   space   neither of those, and "."<cp> splits in two
++ *
++ * These tables are used ONLY by the Mellum pre-tokenizer
++ * (mellum_char_at in ds4.c).  Every other family keeps its own classifiers
++ * byte for byte.
++ *
++ * tokenizers: {tokenizers_version()}
++ * unicode-version: {unicode_version()}
++ * snapshot: {snapshot}
++ * codepoints: {codepoints}
++ * generator-sha256: {generator_sha256()}
++ * generated: {generated}
++{counts}
++ */
++
++typedef struct {{
++    uint32_t lo, hi;
++}} mellum_unicode_range;
++
++static bool mellum_unicode_in(const mellum_unicode_range *ranges, size_t n,
++                              uint32_t cp) {{
++    size_t lo = 0, hi = n;
++    while (lo < hi) {{
++        const size_t mid = lo + (hi - lo) / 2;
++        if (cp < ranges[mid].lo)      hi = mid;
++        else if (cp > ranges[mid].hi) lo = mid + 1;
++        else                          return true;
++    }}
++    return false;
++}}
++
++"""
++    for name in TABLES:
++        out += render_table(name, tables[name])
++        out += "\n"
++    for name in TABLES:
++        out += (
++            f"static bool mellum_unicode_{name}(uint32_t cp) {{\n"
++            f"    return mellum_unicode_in(mellum_{name}_ranges,\n"
++            f"                             sizeof(mellum_{name}_ranges) /\n"
++            f"                                 sizeof(mellum_{name}_ranges[0]), cp);\n"
++            f"}}\n\n"
++        )
++    return out
++
++
++# --------------------------------------------------------------------------
++
++
++def parse_codepoint_range(text: str) -> tuple[int, int]:
++    lo_s, _, hi_s = text.partition("-")
++    if not hi_s:
++        raise ValueError(f"--codepoints wants FROM-TO, got {text!r}")
++    lo, hi = int(lo_s, 0), int(hi_s, 0)
++    if lo < 0 or hi > MAX_CODEPOINT or lo > hi:
++        raise ValueError(f"--codepoints {text!r} is not inside 0x0-0x10FFFF")
++    return lo, hi
++
++
++def main(argv: list[str] | None = None) -> int:
++    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
++    ap.add_argument("--snapshot", type=Path, help="the model snapshot directory")
++    ap.add_argument(
++        "--tokenizer", type=Path, help="a tokenizer.json (overrides --snapshot)"
++    )
++    ap.add_argument("--out", required=True, type=Path, help="the .inc to write")
++    ap.add_argument(
++        "--codepoints",
++        default="0x0000-0x10FFFF",
++        help="FROM-TO, default the whole space",
++    )
++    ap.add_argument("--date", help="the header's date (default: today)")
++    ap.add_argument("--quiet", action="store_true")
++    args = ap.parse_args(argv)
++
++    if not args.snapshot and not args.tokenizer:
++        print("gen_mellum_unicode: need --snapshot or --tokenizer", file=sys.stderr)
++        return 2
++    tokenizer_path = args.tokenizer or (args.snapshot / "tokenizer.json")
++    try:
++        lo, hi = parse_codepoint_range(args.codepoints)
++        spec = load_spec(tokenizer_path)
++        digits_pre, bytelevel_pre = stage_pre_tokenizers(spec)
++        tables = derive(digits_pre, bytelevel_pre, lo, hi)
++        text = render(
++            tables,
++            # The directory's name, not the file's target: tokenizer.json is a
++            # symlink into the hub's blob store, and resolving it would record
++            # "blobs" instead of the snapshot.
++            snapshot=Path(tokenizer_path).parent.resolve().name,
++            generated=args.date or date_type.today().isoformat(),
++            codepoints=args.codepoints,
++        )
++        args.out.write_text(text, encoding="utf-8")
++    except (OSError, ValueError, KeyError) as exc:
++        print(f"gen_mellum_unicode: {exc}", file=sys.stderr)
++        return 2
++
++    if not args.quiet:
++        for name in TABLES:
++            print(f"{name}-ranges: {len(tables[name])}")
++        print(f"wrote {args.out}")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/tests/mellum_chat_ids.inc b/tests/mellum_chat_ids.inc
+new file mode 100644
+index 00000000..52dec4a6
+--- /dev/null
++++ b/tests/mellum_chat_ids.inc
+@@ -0,0 +1,223 @@
++/* Generated by tests/gen_mellum_chat_ids.py; do not edit.
++ * chat_template.jinja sha256 4593a34d52f3364ac13ce57f4bea5688924e8942da6df8201e411db17e729f48
++ * tokenizer.json sha256 58548a346eb073e5132bf7d8ad17dc6971bca36ade378ca4d2bfbc49bf60da2a
++ * jinja2 3.1.6, tokenizers 0.23.3 */
++static const fx_msg fx_msgs_0[] = {
++    {"system", "You are a helpful assistant."},
++    {"user", "Hello, world!"},
++};
++static const int fx_ids_0[] = {27, 5217, 233, 2591, 445, 255, 99, 8478, 16833, 48, 28, 233, 27, 1397, 233, 7995, 46, 1685, 35, 28, 233, 27, 8091, 233};
++static const fx_msg fx_msgs_1[] = {
++    {"system", "You are a helpful assistant."},
++    {"user", "Hello, world!"},
++};
++static const int fx_ids_1[] = {27, 5217, 233, 2591, 445, 255, 99, 8478, 16833, 48, 28, 233, 27, 1397, 233, 7995, 46, 1685, 35, 28, 233, 27, 8091, 233, 23, 233, 233, 24, 233, 233};
++static const fx_msg fx_msgs_2[] = {
++    {"user", "Write a haiku about autumn."},
++};
++static const int fx_ids_2[] = {27, 1397, 233, 3969, 255, 99, 66776, 12619, 901, 27764, 48, 28, 233, 27, 8091, 233};
++static const fx_msg fx_msgs_3[] = {
++    {"system", "You are a coding agent."},
++    {"user", "How many files are here?"},
++    {"assistant", "Let me check."},
++    {"tool", "42 files\nin 3 directories"},
++};
++static const int fx_ids_3[] = {27, 5217, 233, 2591, 445, 255, 99, 9680, 8755, 48, 28, 233, 27, 1397, 233, 2869, 1248, 2617, 445, 2075, 65, 28, 233, 27, 8091, 233, 3616, 776, 1483, 48, 28, 233, 27, 1397, 233, 31, 233, 54, 52, 2617, 233, 107, 112, 255, 53, 15701, 233, 32, 28, 233, 27, 8091, 233};
++static const fx_msg fx_msgs_4[] = {
++    {"tool", "42 files"},
++};
++static const int fx_ids_4[] = {27, 1397, 233, 31, 233, 54, 52, 2617, 233, 32, 28, 233, 27, 8091, 233};
++static const fx_msg fx_msgs_5[] = {
++    {"user", "Count files and directories."},
++    {"assistant", "Let me check."},
++    {"tool", "42 files"},
++    {"tool", "7 directories"},
++};
++static const int fx_ids_5[] = {27, 1397, 233, 2798, 2617, 335, 15701, 48, 28, 233, 27, 8091, 233, 3616, 776, 1483, 48, 28, 233, 27, 1397, 233, 31, 233, 54, 52, 2617, 233, 32, 233, 31, 233, 57, 15701, 233, 32, 28, 233, 27, 8091, 233};
++static const int fx_prefix_ids_0[] = {27, 8091, 233};
++static const int fx_prefix_ids_1[] = {27, 8091, 233, 23, 233, 233, 24, 233, 233};
++static const fx_case fx_cases[] = {
++    {"system+user, think on", true, 2, fx_msgs_0, (int)(sizeof(fx_ids_0) / sizeof(int)), fx_ids_0},
++    {"system+user, think off", false, 2, fx_msgs_1, (int)(sizeof(fx_ids_1) / sizeof(int)), fx_ids_1},
++    {"user only, think on", true, 1, fx_msgs_2, (int)(sizeof(fx_ids_2) / sizeof(int)), fx_ids_2},
++    {"system, user, assistant, tool, think on", true, 4, fx_msgs_3, (int)(sizeof(fx_ids_3) / sizeof(int)), fx_ids_3},
++    {"tool only, think on", true, 1, fx_msgs_4, (int)(sizeof(fx_ids_4) / sizeof(int)), fx_ids_4},
++    {"user, assistant, two tool messages, think on", true, 4, fx_msgs_5, (int)(sizeof(fx_ids_5) / sizeof(int)), fx_ids_5},
++};
++static const fx_msg fx_history_msgs_0[] = {
++    {"user", "What is 2 + 2?"},
++    {"assistant", "4"},
++    {"user", "And times 3?"},
++};
++static const int fx_history_ids_0[] = {27, 1397, 233, 2821, 359, 255, 52, 523, 255, 52, 65, 28, 233, 27, 8091, 233, 54, 28, 233, 27, 1397, 233, 2967, 2497, 255, 53, 65, 28, 233, 27, 8091, 233};
++static const fx_msg fx_history_msgs_1[] = {
++    {"system", "You are terse."},
++    {"user", "Name a prime."},
++    {"assistant", "7"},
++    {"user", "Another?"},
++    {"assistant", "11"},
++    {"user", "Their sum?"},
++};
++static const int fx_history_ids_1[] = {27, 5217, 233, 2591, 445, 96600, 48, 28, 233, 27, 1397, 233, 827, 255, 99, 4599, 48, 28, 233, 27, 8091, 233, 57, 28, 233, 27, 1397, 233, 5993, 65, 28, 233, 27, 8091, 233, 51, 51, 28, 233, 27, 1397, 233, 28109, 1572, 65, 28, 233, 27, 8091, 233};
++static const fx_msg fx_history_msgs_2[] = {
++    {"user", "What is 2 + 2?"},
++    {"assistant", "<think>\nA simple sum.\n</think>\n\n4"},
++    {"user", "And times 3?"},
++};
++static const int fx_history_ids_2[] = {27, 1397, 233, 2821, 359, 255, 52, 523, 255, 52, 65, 28, 233, 27, 8091, 233, 54, 28, 233, 27, 1397, 233, 2967, 2497, 255, 53, 65, 28, 233, 27, 8091, 233};
++static const fx_case fx_histories[] = {
++    {"history: user, assistant, user, think on", true, 3, fx_history_msgs_0, (int)(sizeof(fx_history_ids_0) / sizeof(int)), fx_history_ids_0},
++    {"history: system, two exchanges, user, think on", true, 6, fx_history_msgs_1, (int)(sizeof(fx_history_ids_1) / sizeof(int)), fx_history_ids_1},
++    {"history: assistant with reasoning, think on", true, 3, fx_history_msgs_2, (int)(sizeof(fx_history_ids_2) / sizeof(int)), fx_history_ids_2},
++};
++static const fx_prefix fx_prefixes[] = {
++    {"assistant prefix, think on", true, (int)(sizeof(fx_prefix_ids_0) / sizeof(int)), fx_prefix_ids_0},
++    {"assistant prefix, think off", false, (int)(sizeof(fx_prefix_ids_1) / sizeof(int)), fx_prefix_ids_1},
++};
++static const char fx_tool_system[] = "You are a coding agent. Current working directory: /testbed";
++static const char fx_tool_user[] = "Read hello.py and tell me what it prints.";
++static const char fx_tool_reasoning[] = "The user wants to know what hello.py prints. I should read the file first.";
++static const char fx_tool_call_name[] = "read";
++static const char fx_tool_call_args[] = "{\"path\": \"hello.py\"}";
++static const char fx_tool_result[] = "print(\"hello, world\")\n";
++static const char fx_tool_result_2[] = "second result: 7 files\n";
++static const char fx_tool_text_0[] =
++    "<|im_start|>system\n"
++    "You are a coding agent. Current working directory: /testbed\n"
++    "\n"
++    "# Tools\n"
++    "\n"
++    "You may call one or more functions to assist with the user query.\n"
++    "\n"
++    "You are provided with function signatures within <tools></tools> XML tags:\n"
++    "<tools>\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"read\", \"description\": \"Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to read (relative or absolute)\"}, \"offset\": {\"type\": \"number\", \"description\": \"Line number to start reading from (1-indexed)\"}, \"limit\": {\"type\": \"number\", \"description\": \"Maximum number of lines to read\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"bash\", \"description\": \"Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.\", \"parameters\": {\"type\": \"object\", \"required\": [\"command\"], \"properties\": {\"command\": {\"type\": \"string\", \"description\": \"Shell command to execute\"}, \"timeout\": {\"type\": \"number\", \"description\": \"Timeout in seconds (optional, no default timeout)\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"edit\", \"description\": \"Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"edits\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to edit (relative or absolute)\"}, \"edits\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"required\": [\"oldText\", \"newText\"], \"properties\": {\"oldText\": {\"type\": \"string\", \"description\": \"Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.\"}, \"newText\": {\"type\": \"string\", \"description\": \"Replacement text for this targeted edit.\"}}}, \"description\": \"One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"write\", \"description\": \"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"content\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to write (relative or absolute)\"}, \"content\": {\"type\": \"string\", \"description\": \"Content to write to the file\"}}}, \"strict\": false}}\n"
++    "</tools>\n"
++    "\n"
++    "For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n"
++    "<tool_call>\n"
++    "{\"name\": <function-name>, \"arguments\": <args-json-object>}\n"
++    "</tool_call><|im_end|>\n"
++    "<|im_start|>user\n"
++    "Read hello.py and tell me what it prints.<|im_end|>\n"
++    "<|im_start|>assistant\n";
++static const int fx_tool_ids_0[] = {27, 5217, 233, 2591, 445, 255, 99, 9680, 8755, 48, 9230, 3007, 4021, 60, 686, 888, 2257, 233, 233, 37, 13938, 233, 233, 2591, 865, 1729, 768, 439, 744, 3018, 333, 9480, 434, 302, 1297, 2969, 48, 233, 233, 2591, 445, 2419, 434, 669, 23427, 1858, 389, 6859, 966, 6859, 64, 9145, 7696, 60, 233, 62, 6859, 64, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 1028, 482, 392, 3217, 621, 392, 3964, 302, 8206, 332, 255, 99, 1163, 48, 34410, 1419, 2617, 335, 4295, 367, 6364, 46, 40935, 46, 17738, 46, 3014, 114, 46, 80771, 556, 22491, 445, 3342, 449, 34138, 48, 1215, 1419, 2617, 46, 1493, 359, 37298, 333, 255, 52, 50, 50, 50, 3771, 439, 255, 55, 50, 16598, 367, 2275, 42851, 359, 7764, 979, 556, 3477, 5073, 49, 6205, 382, 2173, 2617, 48, 2496, 554, 895, 302, 2884, 1163, 46, 3874, 434, 5073, 3027, 3559, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 1378, 367, 11265, 439, 6111, 94733, 392, 4772, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 3276, 914, 333, 1524, 4414, 516, 367, 51, 47, 22987, 94733, 392, 6205, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 22738, 914, 332, 3771, 333, 1378, 63180, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 5412, 482, 392, 3217, 621, 392, 16007, 255, 99, 22516, 2307, 325, 302, 1361, 3007, 4021, 48, 6327, 25273, 335, 32575, 48, 6227, 359, 37298, 333, 2042, 255, 52, 50, 50, 50, 3771, 439, 255, 55, 50, 16598, 367, 2275, 42851, 359, 7764, 979, 556, 1087, 37298, 46, 2884, 1493, 359, 8741, 333, 255, 99, 7228, 1163, 48, 56823, 2177, 255, 99, 10172, 325, 6450, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 6022, 4517, 392, 6817, 621, 5341, 6022, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 15488, 2307, 333, 7927, 3358, 392, 9900, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 6949, 325, 6450, 367, 8934, 46, 882, 1940, 10172, 4412, 25858, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 5705, 482, 392, 3217, 621, 392, 7330, 255, 99, 2370, 1163, 1018, 3645, 1419, 12026, 48, 9887, 42294, 55191, 1162, 1849, 1326, 3275, 255, 99, 3039, 46, 1752, 47, 45763, 3351, 332, 302, 2482, 1163, 48, 1087, 1011, 2573, 5237, 302, 1328, 2250, 439, 13216, 3771, 46, 8896, 988, 913, 768, 7831, 3786, 332, 44064, 21477, 42294, 48, 3980, 529, 1890, 2173, 20838, 6235, 1641, 333, 6629, 18879, 2573, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 482, 392, 67275, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 7831, 367, 11265, 439, 6111, 94733, 392, 67275, 621, 5341, 632, 621, 392, 2679, 482, 392, 4339, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1162, 1849, 482, 392, 1353, 1849, 4517, 392, 6817, 621, 5341, 1162, 1849, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 25533, 1419, 382, 768, 13700, 12026, 48, 939, 1326, 409, 3039, 325, 302, 2482, 1163, 335, 1326, 529, 15876, 434, 917, 769, 42294, 55191, 1162, 1849, 325, 302, 1328, 1729, 76411, 392, 1353, 1849, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 48317, 1419, 382, 497, 13700, 7831, 1748, 25858, 392, 3217, 621, 392, 3929, 439, 744, 13700, 38698, 48, 4268, 7831, 359, 16456, 2794, 302, 2482, 1163, 46, 529, 56657, 48, 3980, 529, 1890, 21477, 439, 9934, 42294, 48, 1087, 1011, 2573, 7869, 302, 1328, 2250, 439, 13216, 3771, 46, 8896, 988, 913, 768, 7831, 3786, 1748, 25858, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 3577, 482, 392, 3217, 621, 392, 3969, 1920, 333, 255, 99, 1163, 48, 17120, 302, 1163, 521, 496, 3264, 1445, 3304, 46, 91504, 521, 496, 1285, 48, 50589, 6523, 2640, 15701, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 482, 392, 2067, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 2468, 367, 11265, 439, 6111, 94733, 392, 2067, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 3208, 333, 2468, 333, 302, 1163, 63180, 392, 13656, 621, 1449, 1552, 233, 436, 6859, 64, 233, 233, 1602, 959, 669, 1729, 46, 587, 255, 99, 4653, 1786, 434, 669, 795, 335, 4962, 1858, 255, 29, 30, 9145, 7696, 60, 233, 29, 233, 2507, 728, 621, 389, 1035, 47, 728, 4037, 392, 7571, 621, 389, 2624, 47, 2184, 47, 2709, 25060, 233, 30, 28, 233, 27, 1397, 233, 3964, 26299, 48, 2065, 335, 4372, 776, 1186, 496, 10970, 48, 28, 233, 27, 8091, 233};
++static const char fx_tool_text_1[] =
++    "<|im_start|>system\n"
++    "You are a coding agent. Current working directory: /testbed\n"
++    "\n"
++    "# Tools\n"
++    "\n"
++    "You may call one or more functions to assist with the user query.\n"
++    "\n"
++    "You are provided with function signatures within <tools></tools> XML tags:\n"
++    "<tools>\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"read\", \"description\": \"Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to read (relative or absolute)\"}, \"offset\": {\"type\": \"number\", \"description\": \"Line number to start reading from (1-indexed)\"}, \"limit\": {\"type\": \"number\", \"description\": \"Maximum number of lines to read\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"bash\", \"description\": \"Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.\", \"parameters\": {\"type\": \"object\", \"required\": [\"command\"], \"properties\": {\"command\": {\"type\": \"string\", \"description\": \"Shell command to execute\"}, \"timeout\": {\"type\": \"number\", \"description\": \"Timeout in seconds (optional, no default timeout)\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"edit\", \"description\": \"Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"edits\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to edit (relative or absolute)\"}, \"edits\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"required\": [\"oldText\", \"newText\"], \"properties\": {\"oldText\": {\"type\": \"string\", \"description\": \"Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.\"}, \"newText\": {\"type\": \"string\", \"description\": \"Replacement text for this targeted edit.\"}}}, \"description\": \"One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"write\", \"description\": \"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"content\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to write (relative or absolute)\"}, \"content\": {\"type\": \"string\", \"description\": \"Content to write to the file\"}}}, \"strict\": false}}\n"
++    "</tools>\n"
++    "\n"
++    "For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n"
++    "<tool_call>\n"
++    "{\"name\": <function-name>, \"arguments\": <args-json-object>}\n"
++    "</tool_call><|im_end|>\n"
++    "<|im_start|>user\n"
++    "Read hello.py and tell me what it prints.<|im_end|>\n"
++    "<|im_start|>assistant\n"
++    "<think>\n"
++    "The user wants to know what hello.py prints. I should read the file first.\n"
++    "</think>\n"
++    "\n"
++    "<tool_call>\n"
++    "{\"name\": \"read\", \"arguments\": {\"path\": \"hello.py\"}}\n"
++    "</tool_call><|im_end|>\n"
++    "<|im_start|>assistant\n";
++static const int fx_tool_ids_1[] = {27, 5217, 233, 2591, 445, 255, 99, 9680, 8755, 48, 9230, 3007, 4021, 60, 686, 888, 2257, 233, 233, 37, 13938, 233, 233, 2591, 865, 1729, 768, 439, 744, 3018, 333, 9480, 434, 302, 1297, 2969, 48, 233, 233, 2591, 445, 2419, 434, 669, 23427, 1858, 389, 6859, 966, 6859, 64, 9145, 7696, 60, 233, 62, 6859, 64, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 1028, 482, 392, 3217, 621, 392, 3964, 302, 8206, 332, 255, 99, 1163, 48, 34410, 1419, 2617, 335, 4295, 367, 6364, 46, 40935, 46, 17738, 46, 3014, 114, 46, 80771, 556, 22491, 445, 3342, 449, 34138, 48, 1215, 1419, 2617, 46, 1493, 359, 37298, 333, 255, 52, 50, 50, 50, 3771, 439, 255, 55, 50, 16598, 367, 2275, 42851, 359, 7764, 979, 556, 3477, 5073, 49, 6205, 382, 2173, 2617, 48, 2496, 554, 895, 302, 2884, 1163, 46, 3874, 434, 5073, 3027, 3559, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 1378, 367, 11265, 439, 6111, 94733, 392, 4772, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 3276, 914, 333, 1524, 4414, 516, 367, 51, 47, 22987, 94733, 392, 6205, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 22738, 914, 332, 3771, 333, 1378, 63180, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 5412, 482, 392, 3217, 621, 392, 16007, 255, 99, 22516, 2307, 325, 302, 1361, 3007, 4021, 48, 6327, 25273, 335, 32575, 48, 6227, 359, 37298, 333, 2042, 255, 52, 50, 50, 50, 3771, 439, 255, 55, 50, 16598, 367, 2275, 42851, 359, 7764, 979, 556, 1087, 37298, 46, 2884, 1493, 359, 8741, 333, 255, 99, 7228, 1163, 48, 56823, 2177, 255, 99, 10172, 325, 6450, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 6022, 4517, 392, 6817, 621, 5341, 6022, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 15488, 2307, 333, 7927, 3358, 392, 9900, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 6949, 325, 6450, 367, 8934, 46, 882, 1940, 10172, 4412, 25858, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 5705, 482, 392, 3217, 621, 392, 7330, 255, 99, 2370, 1163, 1018, 3645, 1419, 12026, 48, 9887, 42294, 55191, 1162, 1849, 1326, 3275, 255, 99, 3039, 46, 1752, 47, 45763, 3351, 332, 302, 2482, 1163, 48, 1087, 1011, 2573, 5237, 302, 1328, 2250, 439, 13216, 3771, 46, 8896, 988, 913, 768, 7831, 3786, 332, 44064, 21477, 42294, 48, 3980, 529, 1890, 2173, 20838, 6235, 1641, 333, 6629, 18879, 2573, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 482, 392, 67275, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 7831, 367, 11265, 439, 6111, 94733, 392, 67275, 621, 5341, 632, 621, 392, 2679, 482, 392, 4339, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1162, 1849, 482, 392, 1353, 1849, 4517, 392, 6817, 621, 5341, 1162, 1849, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 25533, 1419, 382, 768, 13700, 12026, 48, 939, 1326, 409, 3039, 325, 302, 2482, 1163, 335, 1326, 529, 15876, 434, 917, 769, 42294, 55191, 1162, 1849, 325, 302, 1328, 1729, 76411, 392, 1353, 1849, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 48317, 1419, 382, 497, 13700, 7831, 1748, 25858, 392, 3217, 621, 392, 3929, 439, 744, 13700, 38698, 48, 4268, 7831, 359, 16456, 2794, 302, 2482, 1163, 46, 529, 56657, 48, 3980, 529, 1890, 21477, 439, 9934, 42294, 48, 1087, 1011, 2573, 7869, 302, 1328, 2250, 439, 13216, 3771, 46, 8896, 988, 913, 768, 7831, 3786, 1748, 25858, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 3577, 482, 392, 3217, 621, 392, 3969, 1920, 333, 255, 99, 1163, 48, 17120, 302, 1163, 521, 496, 3264, 1445, 3304, 46, 91504, 521, 496, 1285, 48, 50589, 6523, 2640, 15701, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 482, 392, 2067, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 2468, 367, 11265, 439, 6111, 94733, 392, 2067, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 3208, 333, 2468, 333, 302, 1163, 63180, 392, 13656, 621, 1449, 1552, 233, 436, 6859, 64, 233, 233, 1602, 959, 669, 1729, 46, 587, 255, 99, 4653, 1786, 434, 669, 795, 335, 4962, 1858, 255, 29, 30, 9145, 7696, 60, 233, 29, 233, 2507, 728, 621, 389, 1035, 47, 728, 4037, 392, 7571, 621, 389, 2624, 47, 2184, 47, 2709, 25060, 233, 30, 28, 233, 27, 1397, 233, 3964, 26299, 48, 2065, 335, 4372, 776, 1186, 496, 10970, 48, 28, 233, 27, 8091, 233, 23, 233, 629, 1297, 9066, 333, 1513, 1186, 26299, 48, 2065, 10970, 48, 397, 856, 1378, 302, 1163, 979, 48, 233, 24, 233, 233, 29, 233, 2507, 728, 621, 392, 1028, 482, 392, 7571, 621, 5341, 1264, 621, 392, 10471, 48, 2065, 19280, 233, 30, 28, 233, 27, 8091, 233};
++static const char fx_tool_text_2[] =
++    "<|im_start|>system\n"
++    "You are a coding agent. Current working directory: /testbed\n"
++    "\n"
++    "# Tools\n"
++    "\n"
++    "You may call one or more functions to assist with the user query.\n"
++    "\n"
++    "You are provided with function signatures within <tools></tools> XML tags:\n"
++    "<tools>\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"read\", \"description\": \"Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to read (relative or absolute)\"}, \"offset\": {\"type\": \"number\", \"description\": \"Line number to start reading from (1-indexed)\"}, \"limit\": {\"type\": \"number\", \"description\": \"Maximum number of lines to read\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"bash\", \"description\": \"Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.\", \"parameters\": {\"type\": \"object\", \"required\": [\"command\"], \"properties\": {\"command\": {\"type\": \"string\", \"description\": \"Shell command to execute\"}, \"timeout\": {\"type\": \"number\", \"description\": \"Timeout in seconds (optional, no default timeout)\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"edit\", \"description\": \"Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"edits\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to edit (relative or absolute)\"}, \"edits\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"required\": [\"oldText\", \"newText\"], \"properties\": {\"oldText\": {\"type\": \"string\", \"description\": \"Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.\"}, \"newText\": {\"type\": \"string\", \"description\": \"Replacement text for this targeted edit.\"}}}, \"description\": \"One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"write\", \"description\": \"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"content\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to write (relative or absolute)\"}, \"content\": {\"type\": \"string\", \"description\": \"Content to write to the file\"}}}, \"strict\": false}}\n"
++    "</tools>\n"
++    "\n"
++    "For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n"
++    "<tool_call>\n"
++    "{\"name\": <function-name>, \"arguments\": <args-json-object>}\n"
++    "</tool_call><|im_end|>\n"
++    "<|im_start|>user\n"
++    "Read hello.py and tell me what it prints.<|im_end|>\n"
++    "<|im_start|>assistant\n"
++    "<think>\n"
++    "The user wants to know what hello.py prints. I should read the file first.\n"
++    "</think>\n"
++    "\n"
++    "<tool_call>\n"
++    "{\"name\": \"read\", \"arguments\": {\"path\": \"hello.py\"}}\n"
++    "</tool_call><|im_end|>\n"
++    "<|im_start|>user\n"
++    "<tool_response>\n"
++    "print(\"hello, world\")\n"
++    "\n"
++    "</tool_response><|im_end|>\n"
++    "<|im_start|>assistant\n";
++static const int fx_tool_ids_2[] = {27, 5217, 233, 2591, 445, 255, 99, 9680, 8755, 48, 9230, 3007, 4021, 60, 686, 888, 2257, 233, 233, 37, 13938, 233, 233, 2591, 865, 1729, 768, 439, 744, 3018, 333, 9480, 434, 302, 1297, 2969, 48, 233, 233, 2591, 445, 2419, 434, 669, 23427, 1858, 389, 6859, 966, 6859, 64, 9145, 7696, 60, 233, 62, 6859, 64, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 1028, 482, 392, 3217, 621, 392, 3964, 302, 8206, 332, 255, 99, 1163, 48, 34410, 1419, 2617, 335, 4295, 367, 6364, 46, 40935, 46, 17738, 46, 3014, 114, 46, 80771, 556, 22491, 445, 3342, 449, 34138, 48, 1215, 1419, 2617, 46, 1493, 359, 37298, 333, 255, 52, 50, 50, 50, 3771, 439, 255, 55, 50, 16598, 367, 2275, 42851, 359, 7764, 979, 556, 3477, 5073, 49, 6205, 382, 2173, 2617, 48, 2496, 554, 895, 302, 2884, 1163, 46, 3874, 434, 5073, 3027, 3559, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 1378, 367, 11265, 439, 6111, 94733, 392, 4772, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 3276, 914, 333, 1524, 4414, 516, 367, 51, 47, 22987, 94733, 392, 6205, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 22738, 914, 332, 3771, 333, 1378, 63180, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 5412, 482, 392, 3217, 621, 392, 16007, 255, 99, 22516, 2307, 325, 302, 1361, 3007, 4021, 48, 6327, 25273, 335, 32575, 48, 6227, 359, 37298, 333, 2042, 255, 52, 50, 50, 50, 3771, 439, 255, 55, 50, 16598, 367, 2275, 42851, 359, 7764, 979, 556, 1087, 37298, 46, 2884, 1493, 359, 8741, 333, 255, 99, 7228, 1163, 48, 56823, 2177, 255, 99, 10172, 325, 6450, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 6022, 4517, 392, 6817, 621, 5341, 6022, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 15488, 2307, 333, 7927, 3358, 392, 9900, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 6949, 325, 6450, 367, 8934, 46, 882, 1940, 10172, 4412, 25858, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 5705, 482, 392, 3217, 621, 392, 7330, 255, 99, 2370, 1163, 1018, 3645, 1419, 12026, 48, 9887, 42294, 55191, 1162, 1849, 1326, 3275, 255, 99, 3039, 46, 1752, 47, 45763, 3351, 332, 302, 2482, 1163, 48, 1087, 1011, 2573, 5237, 302, 1328, 2250, 439, 13216, 3771, 46, 8896, 988, 913, 768, 7831, 3786, 332, 44064, 21477, 42294, 48, 3980, 529, 1890, 2173, 20838, 6235, 1641, 333, 6629, 18879, 2573, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 482, 392, 67275, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 7831, 367, 11265, 439, 6111, 94733, 392, 67275, 621, 5341, 632, 621, 392, 2679, 482, 392, 4339, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1162, 1849, 482, 392, 1353, 1849, 4517, 392, 6817, 621, 5341, 1162, 1849, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 25533, 1419, 382, 768, 13700, 12026, 48, 939, 1326, 409, 3039, 325, 302, 2482, 1163, 335, 1326, 529, 15876, 434, 917, 769, 42294, 55191, 1162, 1849, 325, 302, 1328, 1729, 76411, 392, 1353, 1849, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 48317, 1419, 382, 497, 13700, 7831, 1748, 25858, 392, 3217, 621, 392, 3929, 439, 744, 13700, 38698, 48, 4268, 7831, 359, 16456, 2794, 302, 2482, 1163, 46, 529, 56657, 48, 3980, 529, 1890, 21477, 439, 9934, 42294, 48, 1087, 1011, 2573, 7869, 302, 1328, 2250, 439, 13216, 3771, 46, 8896, 988, 913, 768, 7831, 3786, 1748, 25858, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 3577, 482, 392, 3217, 621, 392, 3969, 1920, 333, 255, 99, 1163, 48, 17120, 302, 1163, 521, 496, 3264, 1445, 3304, 46, 91504, 521, 496, 1285, 48, 50589, 6523, 2640, 15701, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 482, 392, 2067, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 2468, 367, 11265, 439, 6111, 94733, 392, 2067, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 3208, 333, 2468, 333, 302, 1163, 63180, 392, 13656, 621, 1449, 1552, 233, 436, 6859, 64, 233, 233, 1602, 959, 669, 1729, 46, 587, 255, 99, 4653, 1786, 434, 669, 795, 335, 4962, 1858, 255, 29, 30, 9145, 7696, 60, 233, 29, 233, 2507, 728, 621, 389, 1035, 47, 728, 4037, 392, 7571, 621, 389, 2624, 47, 2184, 47, 2709, 25060, 233, 30, 28, 233, 27, 1397, 233, 3964, 26299, 48, 2065, 335, 4372, 776, 1186, 496, 10970, 48, 28, 233, 27, 8091, 233, 23, 233, 629, 1297, 9066, 333, 1513, 1186, 26299, 48, 2065, 10970, 48, 397, 856, 1378, 302, 1163, 979, 48, 233, 24, 233, 233, 29, 233, 2507, 728, 621, 392, 1028, 482, 392, 7571, 621, 5341, 1264, 621, 392, 10471, 48, 2065, 19280, 233, 30, 28, 233, 27, 1397, 233, 31, 233, 1804, 634, 10471, 46, 1685, 968, 233, 233, 32, 28, 233, 27, 8091, 233};
++static const char fx_tool_text_3[] =
++    "<|im_start|>system\n"
++    "You are a coding agent. Current working directory: /testbed\n"
++    "\n"
++    "# Tools\n"
++    "\n"
++    "You may call one or more functions to assist with the user query.\n"
++    "\n"
++    "You are provided with function signatures within <tools></tools> XML tags:\n"
++    "<tools>\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"read\", \"description\": \"Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to read (relative or absolute)\"}, \"offset\": {\"type\": \"number\", \"description\": \"Line number to start reading from (1-indexed)\"}, \"limit\": {\"type\": \"number\", \"description\": \"Maximum number of lines to read\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"bash\", \"description\": \"Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.\", \"parameters\": {\"type\": \"object\", \"required\": [\"command\"], \"properties\": {\"command\": {\"type\": \"string\", \"description\": \"Shell command to execute\"}, \"timeout\": {\"type\": \"number\", \"description\": \"Timeout in seconds (optional, no default timeout)\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"edit\", \"description\": \"Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"edits\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to edit (relative or absolute)\"}, \"edits\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"required\": [\"oldText\", \"newText\"], \"properties\": {\"oldText\": {\"type\": \"string\", \"description\": \"Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.\"}, \"newText\": {\"type\": \"string\", \"description\": \"Replacement text for this targeted edit.\"}}}, \"description\": \"One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.\"}}}, \"strict\": false}}\n"
++    "{\"type\": \"function\", \"function\": {\"name\": \"write\", \"description\": \"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"content\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to write (relative or absolute)\"}, \"content\": {\"type\": \"string\", \"description\": \"Content to write to the file\"}}}, \"strict\": false}}\n"
++    "</tools>\n"
++    "\n"
++    "For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n"
++    "<tool_call>\n"
++    "{\"name\": <function-name>, \"arguments\": <args-json-object>}\n"
++    "</tool_call><|im_end|>\n"
++    "<|im_start|>user\n"
++    "Read hello.py and tell me what it prints.<|im_end|>\n"
++    "<|im_start|>assistant\n"
++    "<think>\n"
++    "The user wants to know what hello.py prints. I should read the file first.\n"
++    "</think>\n"
++    "\n"
++    "<tool_call>\n"
++    "{\"name\": \"read\", \"arguments\": {\"path\": \"hello.py\"}}\n"
++    "</tool_call><|im_end|>\n"
++    "<|im_start|>user\n"
++    "<tool_response>\n"
++    "print(\"hello, world\")\n"
++    "\n"
++    "</tool_response>\n"
++    "<tool_response>\n"
++    "second result: 7 files\n"
++    "\n"
++    "</tool_response><|im_end|>\n"
++    "<|im_start|>assistant\n";
++static const int fx_tool_ids_3[] = {27, 5217, 233, 2591, 445, 255, 99, 9680, 8755, 48, 9230, 3007, 4021, 60, 686, 888, 2257, 233, 233, 37, 13938, 233, 233, 2591, 865, 1729, 768, 439, 744, 3018, 333, 9480, 434, 302, 1297, 2969, 48, 233, 233, 2591, 445, 2419, 434, 669, 23427, 1858, 389, 6859, 966, 6859, 64, 9145, 7696, 60, 233, 62, 6859, 64, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 1028, 482, 392, 3217, 621, 392, 3964, 302, 8206, 332, 255, 99, 1163, 48, 34410, 1419, 2617, 335, 4295, 367, 6364, 46, 40935, 46, 17738, 46, 3014, 114, 46, 80771, 556, 22491, 445, 3342, 449, 34138, 48, 1215, 1419, 2617, 46, 1493, 359, 37298, 333, 255, 52, 50, 50, 50, 3771, 439, 255, 55, 50, 16598, 367, 2275, 42851, 359, 7764, 979, 556, 3477, 5073, 49, 6205, 382, 2173, 2617, 48, 2496, 554, 895, 302, 2884, 1163, 46, 3874, 434, 5073, 3027, 3559, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 1378, 367, 11265, 439, 6111, 94733, 392, 4772, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 3276, 914, 333, 1524, 4414, 516, 367, 51, 47, 22987, 94733, 392, 6205, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 22738, 914, 332, 3771, 333, 1378, 63180, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 5412, 482, 392, 3217, 621, 392, 16007, 255, 99, 22516, 2307, 325, 302, 1361, 3007, 4021, 48, 6327, 25273, 335, 32575, 48, 6227, 359, 37298, 333, 2042, 255, 52, 50, 50, 50, 3771, 439, 255, 55, 50, 16598, 367, 2275, 42851, 359, 7764, 979, 556, 1087, 37298, 46, 2884, 1493, 359, 8741, 333, 255, 99, 7228, 1163, 48, 56823, 2177, 255, 99, 10172, 325, 6450, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 6022, 4517, 392, 6817, 621, 5341, 6022, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 15488, 2307, 333, 7927, 3358, 392, 9900, 621, 5341, 632, 621, 392, 3112, 482, 392, 3217, 621, 392, 6949, 325, 6450, 367, 8934, 46, 882, 1940, 10172, 4412, 25858, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 5705, 482, 392, 3217, 621, 392, 7330, 255, 99, 2370, 1163, 1018, 3645, 1419, 12026, 48, 9887, 42294, 55191, 1162, 1849, 1326, 3275, 255, 99, 3039, 46, 1752, 47, 45763, 3351, 332, 302, 2482, 1163, 48, 1087, 1011, 2573, 5237, 302, 1328, 2250, 439, 13216, 3771, 46, 8896, 988, 913, 768, 7831, 3786, 332, 44064, 21477, 42294, 48, 3980, 529, 1890, 2173, 20838, 6235, 1641, 333, 6629, 18879, 2573, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 482, 392, 67275, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 7831, 367, 11265, 439, 6111, 94733, 392, 67275, 621, 5341, 632, 621, 392, 2679, 482, 392, 4339, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1162, 1849, 482, 392, 1353, 1849, 4517, 392, 6817, 621, 5341, 1162, 1849, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 25533, 1419, 382, 768, 13700, 12026, 48, 939, 1326, 409, 3039, 325, 302, 2482, 1163, 335, 1326, 529, 15876, 434, 917, 769, 42294, 55191, 1162, 1849, 325, 302, 1328, 1729, 76411, 392, 1353, 1849, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 48317, 1419, 382, 497, 13700, 7831, 1748, 25858, 392, 3217, 621, 392, 3929, 439, 744, 13700, 38698, 48, 4268, 7831, 359, 16456, 2794, 302, 2482, 1163, 46, 529, 56657, 48, 3980, 529, 1890, 21477, 439, 9934, 42294, 48, 1087, 1011, 2573, 7869, 302, 1328, 2250, 439, 13216, 3771, 46, 8896, 988, 913, 768, 7831, 3786, 1748, 25858, 392, 13656, 621, 1449, 1552, 233, 2507, 632, 621, 392, 1035, 482, 392, 1035, 621, 5341, 728, 621, 392, 3577, 482, 392, 3217, 621, 392, 3969, 1920, 333, 255, 99, 1163, 48, 17120, 302, 1163, 521, 496, 3264, 1445, 3304, 46, 91504, 521, 496, 1285, 48, 50589, 6523, 2640, 15701, 7008, 392, 7853, 621, 5341, 632, 621, 392, 2709, 482, 392, 6046, 621, 4711, 1264, 482, 392, 2067, 4517, 392, 6817, 621, 5341, 1264, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 1993, 333, 302, 1163, 333, 2468, 367, 11265, 439, 6111, 94733, 392, 2067, 621, 5341, 632, 621, 392, 962, 482, 392, 3217, 621, 392, 3208, 333, 2468, 333, 302, 1163, 63180, 392, 13656, 621, 1449, 1552, 233, 436, 6859, 64, 233, 233, 1602, 959, 669, 1729, 46, 587, 255, 99, 4653, 1786, 434, 669, 795, 335, 4962, 1858, 255, 29, 30, 9145, 7696, 60, 233, 29, 233, 2507, 728, 621, 389, 1035, 47, 728, 4037, 392, 7571, 621, 389, 2624, 47, 2184, 47, 2709, 25060, 233, 30, 28, 233, 27, 1397, 233, 3964, 26299, 48, 2065, 335, 4372, 776, 1186, 496, 10970, 48, 28, 233, 27, 8091, 233, 23, 233, 629, 1297, 9066, 333, 1513, 1186, 26299, 48, 2065, 10970, 48, 397, 856, 1378, 302, 1163, 979, 48, 233, 24, 233, 233, 29, 233, 2507, 728, 621, 392, 1028, 482, 392, 7571, 621, 5341, 1264, 621, 392, 10471, 48, 2065, 19280, 233, 30, 28, 233, 27, 1397, 233, 31, 233, 1804, 634, 10471, 46, 1685, 968, 233, 233, 32, 233, 31, 233, 6189, 1337, 60, 255, 57, 2617, 233, 233, 32, 28, 233, 27, 8091, 233};
++static const fx_tool_case fx_tool_cases[] = {
++    {"tools: system+user, think on", 2, fx_tool_text_0, (int)(sizeof(fx_tool_ids_0) / sizeof(int)), fx_tool_ids_0},
++    {"tools: +assistant reasoning and one tool call, think on", 3, fx_tool_text_1, (int)(sizeof(fx_tool_ids_1) / sizeof(int)), fx_tool_ids_1},
++    {"tools: +tool message, think on", 4, fx_tool_text_2, (int)(sizeof(fx_tool_ids_2) / sizeof(int)), fx_tool_ids_2},
++    {"tools: +two tool messages, one user turn, think on", 5, fx_tool_text_3, (int)(sizeof(fx_tool_ids_3) / sizeof(int)), fx_tool_ids_3},
++};
+diff --git a/tests/mellum_tokenizer_cases.inc b/tests/mellum_tokenizer_cases.inc
+new file mode 100644
+index 00000000..fb85675f
+--- /dev/null
++++ b/tests/mellum_tokenizer_cases.inc
+@@ -0,0 +1,131 @@
++/* tests/mellum_tokenizer_cases.inc -- GENERATED by tests/gen_mellum_tokenizer_cases.py;
++ * never edited by hand.  Mellum 2.1's own tokenizer on each string, in content mode
++ * (no added tokens, none added): the pre-tokenizer's pieces and the encoded ids.
++ *
++ * tokenizers: 0.23.3
++ * tokenizer.json: Mellum2.1-12B-A2.5B-Thinking-6bit (sha256 58548a346eb073e5132bf7d8ad17dc6971bca36ade378ca4d2bfbc49bf60da2a)
++ */
++
++static const int MELLUM_CASE_IDS_0[] = {99, 255, 51, 52};
++static const int MELLUM_CASE_IDS_1[] = {6997, 48, 2087, 484};
++static const int MELLUM_CASE_IDS_2[] = {255, 759};
++static const int MELLUM_CASE_IDS_3[] = {14734, 1445};
++static const int MELLUM_CASE_IDS_4[] = {233, 233, 255, 783};
++static const int MELLUM_CASE_IDS_5[] = {85293, 15985, 117};
++static const int MELLUM_CASE_IDS_6[] = {3808};
++static const int MELLUM_CASE_IDS_7[] = {76216};
++static const int MELLUM_CASE_IDS_8[] = {307, 51};
++static const int MELLUM_CASE_IDS_9[] = {99, 784, 321};
++static const int MELLUM_CASE_IDS_10[] = {122, 41, 85, 469, 294, 469, 1094, 397, 6070, 545, 4724, 1837, 10168, 397, 5792};
++static const int MELLUM_CASE_IDS_11[] = {41};
++static const int MELLUM_CASE_IDS_12[] = {85736};
++static const int MELLUM_CASE_IDS_13[] = {51, 48, 55, 103, 47, 53, 50};
++static const int MELLUM_CASE_IDS_14[] = {2392, 122};
++static const int MELLUM_CASE_IDS_15[] = {99, 71538, 100};
++static const int MELLUM_CASE_IDS_16[] = {255, 15985, 99};
++static const int MELLUM_CASE_IDS_17[] = {75761, 45017, 1419};
++static const int MELLUM_CASE_IDS_18[] = {99, 236, 233, 100};
++static const int MELLUM_CASE_IDS_19[] = {122, 3080, 420};
++static const int MELLUM_CASE_IDS_20[] = {122, 255, 57};
++static const int MELLUM_CASE_IDS_21[] = {1635, 65087, 137, 34518, 40271, 154, 3073};
++static const int MELLUM_CASE_IDS_22[] = {910, 846, 42, 99, 46, 321, 800, 233, 308, 587, 255, 99, 523, 321, 255, 789, 255, 52, 50, 52, 54, 233};
++static const int MELLUM_CASE_IDS_23[] = {2507, 728, 621, 392, 1028, 482, 392, 7571, 621, 5341, 1264, 621, 392, 10471, 48, 2065, 482, 392, 4772, 621, 255, 51, 50, 1552};
++static const int MELLUM_CASE_IDS_24[] = {629, 3770, 11245, 23222, 26148, 905, 302, 16946, 4581, 61, 496, 637, 255, 53, 60, 54, 55, 3203, 48};
++static const int MELLUM_CASE_IDS_25[] = {96923, 43585, 24286, 26752, 12707, 95834};
++static const int MELLUM_CASE_IDS_26[] = {184, 129, 184, 130, 184, 131, 335, 255, 54, 55, 56};
++static const int MELLUM_CASE_IDS_27[] = {122, 346, 307, 307, 307, 307, 51, 233, 232, 232, 428, 420, 60, 233};
++static const int MELLUM_CASE_IDS_28[] = {3302, 453, 4860, 686, 4960, 1713, 3800, 6570, 14727, 36, 565, 42760, 453, 101};
++static const int MELLUM_CASE_IDS_29[] = {62, 7227, 64, 3212, 48, 101, 62, 104, 396, 97, 6626, 64};
++
++static const mellum_tokenizer_case MELLUM_TOKENIZER_CASES[] = {
++    /* letter, space, two digits */
++    { "a 12", 4, { "a", " ", "1", "2" },
++      MELLUM_CASE_IDS_0, 4 },
++    /* call */
++    { "foo.bar()", 4, { "foo", ".", "bar", "()" },
++      MELLUM_CASE_IDS_1, 4 },
++    /* two spaces then a letter */
++    { "  x", 2, { " ", " x" },
++      MELLUM_CASE_IDS_2, 2 },
++    /* contraction */
++    { "don't", 2, { "don", "'t" },
++      MELLUM_CASE_IDS_3, 2 },
++    /* newlines then indent */
++    { "\012\012  def", 2, { "\012\012 ", " def" },
++      MELLUM_CASE_IDS_4, 4 },
++    /* combining mark after a letter */
++    { "cafe\314\201s", 3, { "cafe", "\314\201", "s" },
++      MELLUM_CASE_IDS_5, 3 },
++    /* superscript two */
++    { "\302\262", 1, { "\302\262" },
++      MELLUM_CASE_IDS_6, 1 },
++    /* circled one */
++    { "\342\221\240", 1, { "\342\221\240" },
++      MELLUM_CASE_IDS_7, 1 },
++    /* digits end a stretch: the lookahead sees its end */
++    { "  1", 2, { "  ", "1" },
++      MELLUM_CASE_IDS_8, 2 },
++    /* a whitespace run inside a stretch */
++    { "a  \012 b", 3, { "a", "  \012", " b" },
++      MELLUM_CASE_IDS_9, 3 },
++    /* contractions are case sensitive */
++    { "x'S 're 'RE I've we'll she'd I'm", 15, { "x", "'", "S", " '", "re", " '", "RE", " I", "'ve", " we", "'ll", " she", "'d", " I", "'m" },
++      MELLUM_CASE_IDS_10, 15 },
++    /* a lone quote */
++    { "'", 1, { "'" },
++      MELLUM_CASE_IDS_11, 1 },
++    /* tab, newline, space run */
++    { " \011\012", 1, { " \011\012" },
++      MELLUM_CASE_IDS_12, 1 },
++    /* a digit run is split */
++    { "1.5e-30", 7, { "1", ".", "5", "e", "-", "3", "0" },
++      MELLUM_CASE_IDS_13, 7 },
++    /* no-break space is whitespace */
++    { "\302\240x", 2, { "\302\240", "x" },
++      MELLUM_CASE_IDS_14, 2 },
++    /* em space between letters */
++    { "a\342\200\203b", 3, { "a", "\342\200\203", "b" },
++      MELLUM_CASE_IDS_15, 3 },
++    /* a mark after a space is not a letter */
++    { " \314\201a", 2, { " \314\201", "a" },
++      MELLUM_CASE_IDS_16, 3 },
++    /* CJK */
++    { "\346\227\245\346\234\254\350\252\236 text", 2, { "\346\227\245\346\234\254\350\252\236", " text" },
++      MELLUM_CASE_IDS_17, 3 },
++    /* CRLF */
++    { "a\015\012b", 4, { "a", "\015", "\012", "b" },
++      MELLUM_CASE_IDS_18, 4 },
++    /* punctuation run takes one leading space */
++    { "x ... y", 3, { "x", " ...", " y" },
++      MELLUM_CASE_IDS_19, 3 },
++    /* a space before a digit stands alone */
++    { "x 7", 3, { "x", " ", "7" },
++      MELLUM_CASE_IDS_20, 3 },
++    /* emoji and ZWJ */
++    { "ok \360\237\221\251\342\200\215\360\237\222\273 done", 3, { "ok", " \360\237\221\251\342\200\215\360\237\222\273", " done" },
++      MELLUM_CASE_IDS_21, 7 },
++    /* Python */
++    { "def add(a, b):\012    return a + b  # 2024\012", 20, { "def", " add", "(", "a", ",", " b", "):", "\012   ", " return", " a", " +", " b", " ", " #", " ", "2", "0", "2", "4", "\012" },
++      MELLUM_CASE_IDS_22, 22 },
++    /* JSON tool call */
++    { "{\"name\": \"read\", \"arguments\": {\"path\": \"hello.py\", \"offset\": 10}}", 24, { "{\"", "name", "\":", " \"", "read", "\",", " \"", "arguments", "\":", " {\"", "path", "\":", " \"", "hello", ".", "py", "\",", " \"", "offset", "\":", " ", "1", "0", "}}" },
++      MELLUM_CASE_IDS_23, 24 },
++    /* prose */
++    { "The quick brown fox jumps over the lazy dog; it's 3:45pm.", 19, { "The", " quick", " brown", " fox", " jumps", " over", " the", " lazy", " dog", ";", " it", "'s", " ", "3", ":", "4", "5", "pm", "." },
++      MELLUM_CASE_IDS_24, 19 },
++    /* Cyrillic and Greek */
++    { "\320\237\321\200\320\270\320\262\320\265\321\202 \316\272\317\214\317\203\316\274\316\265", 2, { "\320\237\321\200\320\270\320\262\320\265\321\202", " \316\272\317\214\317\203\316\274\316\265" },
++      MELLUM_CASE_IDS_25, 6 },
++    /* Arabic digits */
++    { "\331\241\331\242\331\243 and 456", 8, { "\331\241", "\331\242", "\331\243", " and", " ", "4", "5", "6" },
++      MELLUM_CASE_IDS_26, 11 },
++    /* a long space run before code */
++    { "x =        1\012\011\011if y:\012", 10, { "x", " =", "        ", "1", "\012\011", "\011", "if", " y", ":", "\012" },
++      MELLUM_CASE_IDS_27, 14 },
++    /* shell */
++    { "ls -la /tmp && echo \"$HOME\" | wc -c", 14, { "ls", " -", "la", " /", "tmp", " &&", " echo", " \"$", "HOME", "\"", " |", " wc", " -", "c" },
++      MELLUM_CASE_IDS_28, 14 },
++    /* marker spellings are text here */
++    { "<filename>main.c<fim_prefix>", 11, { "<", "filename", ">", "main", ".", "c", "<", "fim", "_", "prefix", ">" },
++      MELLUM_CASE_IDS_29, 12 },
++};
+diff --git a/tests/mellum_tool_text.h b/tests/mellum_tool_text.h
+new file mode 100644
+index 00000000..8934c458
+--- /dev/null
++++ b/tests/mellum_tool_text.h
+@@ -0,0 +1,95 @@
++/* Mellum 2.1's tool-bearing chat text, written the way chat_template.jinja writes it.
++ * Header-only so tests/test_mellum_config.c and tests/ds4_agent_test.c share one builder.
++ *
++ * The four tool lines are Pi's read, bash, edit and write (Pi, MIT; see
++ * tests/gen_mellum_chat_ids.py).  Each is the bytes `tools | tojson` emits under transformers'
++ * apply_chat_template (json.dumps with the default ", " and ": " separators, insertion order, no
++ * key sorting, no HTML escaping).  tests/test_mellum_config.c compares what these functions build to the text jinja2
++ * rendered (tests/gen_mellum_chat_ids.py), so a typo here is a red test, not a silent drift.
++ *
++ * The functions return the *contents* of a turn, not the <|im_start|>role / <|im_end|> framing:
++ * ds4_chat_append_message adds that.  The caller frees the result. */
++#ifndef MELLUM_TOOL_TEXT_H
++#define MELLUM_TOOL_TEXT_H
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#define MTT_N_TOOLS 4
++
++static const char *const mtt_tool_json[MTT_N_TOOLS] = {
++    "{\"type\": \"function\", \"function\": {\"name\": \"read\", \"description\": \"Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.\""
++    ", \"parameters\": {\"type\": \"object\", \"required\": [\"path\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to read (relative or absolute)\"}, \"offset\": {\"type\": \"number\", \"description\": \"Line number to start reading from (1-indexed)\"}, \"limit\": {\"type\": \"number\", \"description\": \"Maximum number of lines to read\"}}}, \"strict\": false}}",
++    "{\"type\": \"function\", \"function\": {\"name\": \"bash\", \"description\": \"Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.\""
++    ", \"parameters\": {\"type\": \"object\", \"required\": [\"command\"], \"properties\": {\"command\": {\"type\": \"string\", \"description\": \"Shell command to execute\"}, \"timeout\": {\"type\": \"number\", \"description\": \"Timeout in seconds (optional, no default timeout)\"}}}, \"strict\": false}}",
++    "{\"type\": \"function\", \"function\": {\"name\": \"edit\", \"description\": \"Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\""
++    ", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"edits\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to edit (relative or absolute)\"}, \"edits\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"required\": [\"oldText\", \"newText\"], \"properties\": {\"oldText\": {\"type\": \"string\", \"description\": \"Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.\"}, \"newText\": {\"type\": \"string\", \"description\": \"Replacement text for this targeted edit.\"}}}, \"description\": \"One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.\"}}}, \"strict\": false}}",
++    "{\"type\": \"function\", \"function\": {\"name\": \"write\", \"description\": \"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\""
++    ", \"parameters\": {\"type\": \"object\", \"required\": [\"path\", \"content\"], \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"Path to the file to write (relative or absolute)\"}, \"content\": {\"type\": \"string\", \"description\": \"Content to write to the file\"}}}, \"strict\": false}}",
++};
++
++static const char mtt_tools_head[] =
++    "# Tools\n\nYou may call one or more functions to assist with the user query.\n\n"
++    "You are provided with function signatures within <tools></tools> XML tags:\n<tools>";
++static const char mtt_tools_tail[] =
++    "\n</tools>\n\nFor each function call, return a json object with function name and arguments "
++    "within <tool_call></tool_call> XML tags:\n<tool_call>\n"
++    "{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>";
++
++static char *mtt_dup_cat(const char *const *parts, int n) {
++    size_t len = 1;
++    for (int i = 0; i < n; i++) len += strlen(parts[i]);
++    char *out = malloc(len), *p = out;
++    if (!out) { fputs("mellum_tool_text: out of memory\n", stderr); exit(2); }
++    for (int i = 0; i < n; i++) { size_t k = strlen(parts[i]); memcpy(p, parts[i], k); p += k; }
++    *p = '\0';
++    return out;
++}
++
++/* The system turn's content with tools: the template writes the system message (if there is one)
++ * and a blank line, then the tools block.  A NULL `preamble` is "no system message"; an empty
++ * string still writes the two newlines, as the template does for an empty system message. */
++static char *mtt_system_text(const char *preamble) {
++    const char *parts[2 + 2 * MTT_N_TOOLS + 2];
++    int n = 0;
++    if (preamble) { parts[n++] = preamble; parts[n++] = "\n\n"; }
++    parts[n++] = mtt_tools_head;
++    for (int i = 0; i < MTT_N_TOOLS; i++) { parts[n++] = "\n"; parts[n++] = mtt_tool_json[i]; }
++    parts[n++] = mtt_tools_tail;
++    return mtt_dup_cat(parts, n);
++}
++
++/* An assistant turn that carries reasoning and one tool call, empty content:
++ *   <think>\n{reasoning}\n</think>\n\n<tool_call>\n{"name": "{name}", "arguments": {args}}\n</tool_call>
++ * `reasoning` is stripped of leading and trailing newlines first (reasoning_content.strip('\n')); a
++ * NULL or empty reasoning writes no think block, as the template does.  `args_json` is written
++ * verbatim, which is what the template does for string arguments and what tojson gives a dict. */
++static char *mtt_assistant_text(const char *reasoning, const char *name, const char *args_json) {
++    const char *parts[9];
++    int n = 0;
++    char *r = NULL;
++    if (reasoning && reasoning[0]) {
++        const char *s = reasoning;
++        size_t len = strlen(s);
++        while (len && *s == '\n') { s++; len--; }
++        while (len && s[len - 1] == '\n') len--;
++        if (len) {
++            r = malloc(len + 1);
++            if (!r) { fputs("mellum_tool_text: out of memory\n", stderr); exit(2); }
++            memcpy(r, s, len);
++            r[len] = '\0';
++            parts[n++] = "<think>\n"; parts[n++] = r; parts[n++] = "\n</think>\n\n";
++        }
++    }
++    parts[n++] = "<tool_call>\n{\"name\": \"";
++    parts[n++] = name;
++    parts[n++] = "\", \"arguments\": ";
++    parts[n++] = args_json;
++    parts[n++] = "}\n</tool_call>";
++    char *out = mtt_dup_cat(parts, n);
++    free(r);
++    return out;
++}
++
++#endif
+diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
+index 6a016fb2..40ada9a1 100644
+--- a/tests/test_mellum_config.c
++++ b/tests/test_mellum_config.c
+@@ -7,6 +7,14 @@
+ #include "mellum_fixture.h"
+ #include <sys/wait.h>
+ 
++typedef struct { const char *role, *content; } fx_msg;
++typedef struct { const char *name; bool think; int nmsg; const fx_msg *msgs; int nids; const int *ids; } fx_case;
++typedef struct { const char *name; bool think; int nids; const int *ids; } fx_prefix;
++typedef struct { const char *name; int nmsg; const char *text; int nids; const int *ids; } fx_tool_case;
++#include "mellum_chat_ids.inc"
++#include "mellum_tool_text.h"
++#include "../ds4_prompt_prefix.h"
++
+ #define CHECK(c) do { if (!(c)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
+ 
+ /* Run fn in a child; return its exit status and what it wrote to stderr. */
+@@ -582,6 +590,458 @@ static void check_mellum_plan(void) {
+     check_mellum_attention_scratch();
+ }
+ 
++/* ---- stop classes ---------------------------------------------------------------------
++ * 2.1's special ids, as its tokenizer_config.json spells and types them: <|im_end|> (28) ends
++ * a turn (EOS), <|endoftext|> (0) ends a document (EOS-alt), the other CONTROL tokens are
++ * protocol except the corpus markers 3-20, which are content in a reply; <think>, </think>
++ * and the tool tags (USER_DEFINED) are none.  Unnamed CONTROL tokens fail closed. */
++static const int EOS_IDS[] = {28};
++static const int EOS_ALT_IDS[] = {0};
++static const int PROTOCOL_IDS[] = {1, 2, 21, 22, 25, 26, 27, 33, 34};   /* 33, 34: reserved, fail-closed */
++static const int MARKER_IDS[] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
++static const int NONE_IDS[] = {23, 24, 29, 30, 31, 32, 35};
++/* ds4_token_is_stop is true exactly here */
++static const int STOP_IDS[] = {0, 1, 2, 21, 22, 25, 26, 27, 28, 33, 34};
++
++#define N_OF(a) (sizeof(a) / sizeof((a)[0]))
++
++static bool in_list(const int *l, size_t n, int id) {
++    for (size_t i = 0; i < n; i++) if (l[i] == id) return true;
++    return false;
++}
++
++static void child_vocab_load(const char *path) {
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    ds4_vocab v;
++    vocab_load(&v, &m);
++}
++
++static void expect_vocab_refused(mf_mutation mu, const char *needle, const char *label) {
++    char path[512], err[4096];
++    mellum_fixture_write(mu, path, sizeof(path));
++    const int rc = run_child(child_vocab_load, path, err, sizeof(err));
++    unlink(path);
++    if (rc != 1 || !strstr(err, needle)) {
++        fprintf(stderr, "FAIL %s: exit %d, stderr [%s], wanted exit 1 naming '%s'\n", label, rc, err, needle);
++        exit(1);
++    }
++    printf("ok   vocab refused: %-30s names %s\n", label, needle);
++}
++
++/* The classes of the engine whose vocabulary is loaded (the shape is Mellum's): the literal
++ * sets, every id, and both think modes. */
++static void check_mellum_stop_classes(ds4_engine *e, const char *what) {
++    CHECK(ds4_model_is_mellum());
++    for (size_t i = 0; i < N_OF(EOS_IDS); i++) CHECK(ds4_token_stop_class(e, EOS_IDS[i]) == DS4_STOP_EOS);
++    for (size_t i = 0; i < N_OF(EOS_ALT_IDS); i++) CHECK(ds4_token_stop_class(e, EOS_ALT_IDS[i]) == DS4_STOP_EOS_ALT);
++    for (size_t i = 0; i < N_OF(PROTOCOL_IDS); i++) CHECK(ds4_token_stop_class(e, PROTOCOL_IDS[i]) == DS4_STOP_PROTOCOL);
++    for (size_t i = 0; i < N_OF(MARKER_IDS); i++) CHECK(ds4_token_stop_class(e, MARKER_IDS[i]) == DS4_STOP_MARKER);
++    for (size_t i = 0; i < N_OF(NONE_IDS); i++) CHECK(ds4_token_stop_class(e, NONE_IDS[i]) == DS4_STOP_NONE);
++    for (int id = 0; id < e->vocab.n_vocab; id++) {
++        const bool want = in_list(STOP_IDS, N_OF(STOP_IDS), id);
++        if (ds4_token_is_stop(e, id) != want) {
++            fprintf(stderr, "FAIL %s: id %d stop=%d, the literal set says %d\n", what, id,
++                    ds4_token_is_stop(e, id), want);
++            exit(1);
++        }
++        /* think mode sits on top of the class lookup: ids 23 and 24 (<think>, </think>) are stops
++         * under DS4_THINK_NONE only; every other id follows the class in both modes */
++        const bool think_id = id == 23 || id == 24;
++        if (ds4_token_is_stop_for_think_mode(e, id, DS4_THINK_HIGH) != want ||
++            ds4_token_is_stop_for_think_mode(e, id, DS4_THINK_NONE) != (want || think_id)) {
++            fprintf(stderr, "FAIL %s: id %d think-mode stops high=%d none=%d, wanted %d and %d\n", what, id,
++                    ds4_token_is_stop_for_think_mode(e, id, DS4_THINK_HIGH),
++                    ds4_token_is_stop_for_think_mode(e, id, DS4_THINK_NONE), want, want || think_id);
++            exit(1);
++        }
++    }
++    CHECK(ds4_token_stop_class(e, -1) == DS4_STOP_NONE && ds4_token_stop_class(e, e->vocab.n_vocab) == DS4_STOP_NONE);
++    CHECK(!ds4_token_is_stop(e, -1) && !ds4_token_is_stop(e, e->vocab.n_vocab));
++    printf("ok   %s: stop classes and stops (literal sets, every id, both think modes)\n", what);
++}
++
++static void check_mellum_stops_tiny(void) {
++    char path[512];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    static ds4_engine e;
++    memset(&e, 0, sizeof(e));
++    vocab_load(&e.vocab, &m);
++    check_mellum_stop_classes(&e, "Mellum (tiny vocabulary)");
++    vocab_free(&e.vocab);
++    model_close(&m);
++    unlink(path);
++}
++
++static void check_mellum_unnamed_control_is_protocol(void) {
++    char path[512];
++    mellum_fixture_write(MF_EXTRA_CONTROL, path, sizeof(path));
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    static ds4_engine e;
++    memset(&e, 0, sizeof(e));
++    vocab_load(&e.vocab, &m);
++    CHECK(e.vocab.n_vocab == 292);
++    CHECK(ds4_token_stop_class(&e, 291) == DS4_STOP_PROTOCOL && ds4_token_is_stop(&e, 291));
++    /* sibling: the named markers beside it stay content */
++    CHECK(ds4_token_stop_class(&e, 7) == DS4_STOP_MARKER && !ds4_token_is_stop(&e, 7));
++    CHECK(ds4_token_stop_class(&e, 290) == DS4_STOP_NONE && !ds4_token_is_stop(&e, 290));
++    vocab_free(&e.vocab);
++    model_close(&m);
++    unlink(path);
++    printf("ok   Mellum: an unnamed CONTROL token (<zzz>) is protocol, the named markers are not\n");
++}
++
++/* Flash Next's classes, model-free on the tiny vocabulary read as a Qwen model: eos and
++ * <|endoftext|> stop, nothing else does (the truth table before the classes), <think> and
++ * </think> are class none. */
++static void check_qwen_stop_classes_tiny(void) {
++    char path[512];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    g_ds4_shape = DS4_SHAPE_QWEN4_EXP;
++    CHECK(!ds4_model_is_mellum() && ds4_model_is_qwen4());
++    static ds4_engine e;
++    memset(&e, 0, sizeof(e));
++    vocab_load(&e.vocab, &m);
++    const int eos = vocab_lookup(&e.vocab, "<|im_end|>"), alt = vocab_lookup(&e.vocab, "<|endoftext|>");
++    const int ts = vocab_lookup(&e.vocab, "<think>"), te = vocab_lookup(&e.vocab, "</think>");
++    CHECK(eos == 28 && alt == 0 && ts == 23 && te == 24);
++    CHECK(ds4_token_stop_class(&e, eos) == DS4_STOP_EOS);
++    CHECK(ds4_token_stop_class(&e, alt) == DS4_STOP_EOS_ALT);
++    CHECK(ds4_token_stop_class(&e, ts) == DS4_STOP_NONE && ds4_token_stop_class(&e, te) == DS4_STOP_NONE);
++    for (int id = 0; id < e.vocab.n_vocab; id++) {
++        const bool before = id == eos || id == alt;
++        CHECK(ds4_token_is_stop(&e, id) == before);
++        CHECK(ds4_token_is_stop_for_think_mode(&e, id, DS4_THINK_HIGH) == before);
++        CHECK(ds4_token_is_stop_for_think_mode(&e, id, DS4_THINK_NONE) == (before || id == ts || id == te));
++        if (id != eos && id != alt) CHECK(ds4_token_stop_class(&e, id) == DS4_STOP_NONE);
++    }
++    vocab_free(&e.vocab);
++    model_close(&m);
++    unlink(path);
++    printf("ok   qwen4exp (tiny vocabulary): eos EOS, <|endoftext|> EOS-alt, <think> none, is_stop unchanged\n");
++}
++
++/* ---- chat prefix ----------------------------------------------------------------------- */
++static void expect_ids(const char *label, const ds4_tokens *got, const int *want, int n) {
++    bool ok = got->len == n;
++    for (int i = 0; ok && i < n; i++) ok = got->v[i] == want[i];
++    if (!ok) {
++        fprintf(stderr, "FAIL %s: got %d ids [", label, got->len);
++        for (int i = 0; i < got->len; i++) fprintf(stderr, "%s%d", i ? " " : "", got->v[i]);
++        fprintf(stderr, "], want %d [", n);
++        for (int i = 0; i < n; i++) fprintf(stderr, "%s%d", i ? " " : "", want[i]);
++        fprintf(stderr, "]\n");
++        exit(1);
++    }
++}
++
++static int count_id(const ds4_tokens *t, int id) {
++    int n = 0;
++    for (int i = 0; i < t->len; i++) n += t->v[i] == id;
++    return n;
++}
++
++/* Push the byte-level ids of an ASCII string: in the tiny vocabulary byte c is id 35 + c. */
++static void push_bytes(ds4_tokens *t, const char *s) {
++    for (; *s; s++) ds4_tokens_push(t, 35 + (unsigned char)*s);
++}
++
++/* Model-free: 2.1's template opens the assistant turn with nothing after the tag when
++ * thinking is on (the model writes <think> itself) and with an empty think block when off;
++ * the system turn has no reasoning-effort instruction. */
++static void check_mellum_chat_tiny(void) {
++    char path[512];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    static ds4_engine e;
++    memset(&e, 0, sizeof(e));
++    vocab_load(&e.vocab, &m);
++
++    ds4_tokens want = {0}, got = {0};
++    ds4_tokens_push(&want, 27);
++    push_bytes(&want, "assistant\n");
++    ds4_chat_append_assistant_prefix(&e, &got, DS4_THINK_HIGH);
++    expect_ids("tiny: think-on prefix", &got, want.v, want.len);
++    CHECK(count_id(&got, 23) == 0);
++    want.len = got.len = 0;
++    ds4_tokens_push(&want, 27);
++    push_bytes(&want, "assistant\n");
++    ds4_tokens_push(&want, 23); push_bytes(&want, "\n\n"); ds4_tokens_push(&want, 24); push_bytes(&want, "\n\n");
++    ds4_chat_append_assistant_prefix(&e, &got, DS4_THINK_NONE);
++    expect_ids("tiny: think-off prefix", &got, want.v, want.len);
++    /* the CLI -p path: no system turn when none is given, whatever the think mode
++     * (Qwen's adds a reasoning-effort system turn here) */
++    for (int high = 0; high < 2; high++) {
++        want.len = got.len = 0;
++        ds4_encode_chat_prompt(&e, NULL, "hi", high ? DS4_THINK_HIGH : DS4_THINK_LOW, &got);
++        ds4_tokens_push(&want, 27); push_bytes(&want, "user\nhi"); ds4_tokens_push(&want, 28); push_bytes(&want, "\n");
++        ds4_tokens_push(&want, 27); push_bytes(&want, "assistant\n");
++        expect_ids("tiny: encode_chat_prompt think-on", &got, want.v, want.len);
++    }
++    /* a tool message is a user turn whose <tool_response> wrapper is tokens 31 and 32, as the
++     * template's text encodes (tests/mellum_chat_ids.inc pins it on the real vocabulary) */
++    want.len = got.len = 0;
++    ds4_chat_append_message(&e, &got, "tool", "42 files");
++    ds4_tokens_push(&want, 27); push_bytes(&want, "user\n"); ds4_tokens_push(&want, 31);
++    push_bytes(&want, "\n42 files\n"); ds4_tokens_push(&want, 32); ds4_tokens_push(&want, 28);
++    push_bytes(&want, "\n");
++    expect_ids("tiny: tool message", &got, want.v, want.len);
++    {   /* the agent's text-only observation path renders the same turn */
++        const char *parts[] = {"42 files"};
++        char err[128] = "";
++        got.len = 0;
++        CHECK(ds4_chat_append_multimodal_message(&e, &got, "tool", parts, NULL, 0, NULL, err, sizeof(err)) == 1);
++        expect_ids("tiny: tool message, multimodal path", &got, want.v, want.len);
++    }
++    /* the system turn's text is the template's: the tools block's <tool_call> is token 29 */
++    got.len = 0;
++    ds4_chat_append_message(&e, &got, "system", "call <tool_call> here");
++    CHECK(count_id(&got, 29) == 1);
++    {   /* the CLI's -sys path renders the system turn the same way */
++        ds4_tokens each = {0};
++        ds4_chat_append_message(&e, &each, "system", "call <tool_call> here");
++        ds4_chat_append_message(&e, &each, "user", "hi");
++        ds4_chat_append_assistant_prefix(&e, &each, DS4_THINK_HIGH);
++        got.len = 0;
++        ds4_encode_chat_prompt(&e, "call <tool_call> here", "hi", DS4_THINK_HIGH, &got);
++        expect_ids("tiny: encode_chat_prompt with a system prompt", &got, each.v, each.len);
++        ds4_tokens_free(&each);
++    }
++    {   /* ds4_chat_append_tool_results: one result is that same turn; no results, or a NULL
++         * one, is refused and appends nothing */
++        const char *one[] = {"42 files"}, *holed[] = {"42 files", NULL};
++        got.len = 0;
++        CHECK(ds4_chat_append_tool_results(&e, &got, one, 1) == 1);
++        expect_ids("tiny: one tool result", &got, want.v, want.len);
++        got.len = 0;
++        CHECK(ds4_chat_append_tool_results(&e, &got, one, 0) == 0 && got.len == 0);
++        CHECK(ds4_chat_append_tool_results(&e, &got, holed, 2) == 0 && got.len == 0);
++        CHECK(ds4_chat_append_tool_results(&e, &got, NULL, 1) == 0 && got.len == 0);
++    }
++    {   /* two results are one user turn, a <tool_response> block each */
++        const char *two[] = {"42 files", "7 dirs"};
++        want.len = got.len = 0;
++        ds4_tokens_push(&want, 27); push_bytes(&want, "user\n"); ds4_tokens_push(&want, 31);
++        push_bytes(&want, "\n42 files\n"); ds4_tokens_push(&want, 32); push_bytes(&want, "\n");
++        ds4_tokens_push(&want, 31); push_bytes(&want, "\n7 dirs\n"); ds4_tokens_push(&want, 32);
++        ds4_tokens_push(&want, 28); push_bytes(&want, "\n");
++        CHECK(ds4_chat_append_tool_results(&e, &got, two, 2) == 1);
++        expect_ids("tiny: two tool results", &got, want.v, want.len);
++    }
++    /* an imported history (a prompt-prefix file): ds4_chat_append_message already closes each
++     * turn, so the assistant turn ends with one <|im_end|>, as the template writes it */
++    ds4_prompt_prefix_turn turns[] = {{DS4_PROMPT_PREFIX_USER, "hi"}, {DS4_PROMPT_PREFIX_ASSISTANT, "ok"}};
++    const ds4_prompt_prefix history = {turns, 2};
++    want.len = got.len = 0;
++    ds4_tokens_push(&want, 27); push_bytes(&want, "user\nhi"); ds4_tokens_push(&want, 28); push_bytes(&want, "\n");
++    ds4_tokens_push(&want, 27); push_bytes(&want, "assistant\nok"); ds4_tokens_push(&want, 28); push_bytes(&want, "\n");
++    ds4_prompt_prefix_append(&e, &got, &history);
++    expect_ids("tiny: imported history", &got, want.v, want.len);
++    /* its reasoning is dropped, as the template drops it from every assistant turn before the latest
++     * user message, which a prefix file's turns all are */
++    turns[1].content = "<think>\nwhy\n</think>\n\nok";
++    got.len = 0;
++    ds4_prompt_prefix_append(&e, &got, &history);
++    expect_ids("tiny: imported history, reasoning dropped", &got, want.v, want.len);
++    turns[1].content = "ok";
++    /* DeepSeek's max-effort preamble is not Mellum's: its template has no effort text, so max thinking
++     * prefixes nothing */
++    got.len = 0;
++    ds4_chat_append_think_prefix(&e, &got, DS4_THINK_MAX);
++    ds4_chat_append_max_effort_prefix(&e, &got);
++    CHECK(got.len == 0);
++    /* sibling: Flash Next keeps its own prefix (<think> and a newline when thinking) */
++    g_ds4_shape = DS4_SHAPE_QWEN4_EXP;
++    want.len = got.len = 0;
++    ds4_tokens_push(&want, 27); push_bytes(&want, "assistant\n"); ds4_tokens_push(&want, 23); push_bytes(&want, "\n");
++    ds4_chat_append_assistant_prefix(&e, &got, DS4_THINK_HIGH);
++    expect_ids("tiny: Flash Next think-on prefix", &got, want.v, want.len);
++    /* sibling: Flash Next's system text stays plain */
++    got.len = 0;
++    ds4_chat_append_message(&e, &got, "system", "call <tool_call> here");
++    CHECK(count_id(&got, 29) == 0);
++    /* sibling: Flash Next's tool message keeps its wrapper as plain text */
++    got.len = 0;
++    ds4_chat_append_message(&e, &got, "tool", "42 files");
++    CHECK(count_id(&got, 31) == 0 && count_id(&got, 32) == 0);
++    {   /* and two results are two tool messages, as its template renders them */
++        const char *two[] = {"42 files", "7 dirs"};
++        ds4_tokens each = {0};
++        ds4_chat_append_message(&e, &each, "tool", two[0]);
++        ds4_chat_append_message(&e, &each, "tool", two[1]);
++        got.len = 0;
++        CHECK(ds4_chat_append_tool_results(&e, &got, two, 2) == 1);
++        expect_ids("tiny: Flash Next, two tool results", &got, each.v, each.len);
++        ds4_tokens_free(&each);
++    }
++    /* sibling: Flash Next's imported assistant turn is unchanged, its EOS still pushed after the
++     * closed turn (MELLUM.md records the double close as a possible upstream issue) */
++    got.len = 0;
++    ds4_prompt_prefix_append(&e, &got, &history);
++    CHECK(count_id(&got, 28) == 3 && got.v[got.len - 1] == 28);
++    /* sibling: Flash Next's max thinking still pushes the preamble it pushed before */
++    got.len = 0;
++    ds4_chat_append_think_prefix(&e, &got, DS4_THINK_MAX);
++    CHECK(got.len > 0);
++    ds4_tokens_free(&want); ds4_tokens_free(&got);
++    vocab_free(&e.vocab);
++    model_close(&m);
++    unlink(path);
++    printf("ok   chat (tiny vocabulary): prefix arms, no effort turn, tool turn, imported history; Flash Next keeps "
++           "its prefix, tool text and imported history\n");
++}
++
++static void text_cat(char **buf, size_t *len, const char *s) {
++    size_t k = strlen(s);
++    *buf = realloc(*buf, *len + k + 1);
++    CHECK(*buf != NULL);
++    memcpy(*buf + *len, s, k + 1);
++    *len += k;
++}
++
++/* The tool-bearing shapes: Pi's four tools in the system turn, an assistant turn with reasoning
++ * and one call, tool results.  Two checks per shape: the text mellum_tool_text.h builds equals
++ * what jinja2 rendered, and the engine's renderer gives the ids the tokenizer gives that text. */
++static void check_mellum_tool_renders(ds4_engine *e) {
++    for (size_t i = 0; i < N_OF(fx_tool_cases); i++) {
++        const fx_tool_case *tc = &fx_tool_cases[i];
++        char *sys = mtt_system_text(fx_tool_system);
++        char *asst = tc->nmsg >= 3 ? mtt_assistant_text(fx_tool_reasoning, fx_tool_call_name, fx_tool_call_args) : NULL;
++        char *text = NULL;
++        size_t tlen = 0;
++        text_cat(&text, &tlen, "<|im_start|>system\n");
++        text_cat(&text, &tlen, sys);
++        text_cat(&text, &tlen, "<|im_end|>\n<|im_start|>user\n");
++        text_cat(&text, &tlen, fx_tool_user);
++        text_cat(&text, &tlen, "<|im_end|>\n");
++        if (asst) {
++            text_cat(&text, &tlen, "<|im_start|>assistant\n");
++            text_cat(&text, &tlen, asst);
++            text_cat(&text, &tlen, "<|im_end|>\n");
++        }
++        if (tc->nmsg >= 4) {
++            text_cat(&text, &tlen, "<|im_start|>user\n<tool_response>\n");
++            text_cat(&text, &tlen, fx_tool_result);
++            text_cat(&text, &tlen, "\n</tool_response>");
++            if (tc->nmsg >= 5) {
++                text_cat(&text, &tlen, "\n<tool_response>\n");
++                text_cat(&text, &tlen, fx_tool_result_2);
++                text_cat(&text, &tlen, "\n</tool_response>");
++            }
++            text_cat(&text, &tlen, "<|im_end|>\n");
++        }
++        text_cat(&text, &tlen, "<|im_start|>assistant\n");
++        if (strcmp(text, tc->text) != 0) {
++            size_t k = 0;
++            while (text[k] && text[k] == tc->text[k]) k++;
++            fprintf(stderr, "FAIL %s: mellum_tool_text.h's text differs from jinja2's at byte %zu\n", tc->name, k);
++            exit(1);
++        }
++        ds4_tokens got = {0};
++        ds4_chat_append_message(e, &got, "system", sys);
++        ds4_chat_append_message(e, &got, "user", fx_tool_user);
++        if (asst) ds4_chat_append_message(e, &got, "assistant", asst);
++        const char *results[] = {fx_tool_result, fx_tool_result_2};
++        if (tc->nmsg >= 4) CHECK(ds4_chat_append_tool_results(e, &got, results, (size_t)tc->nmsg - 3) == 1);
++        ds4_chat_append_assistant_prefix(e, &got, DS4_THINK_HIGH);
++        expect_ids(tc->name, &got, tc->ids, tc->nids);
++        ds4_tokens_free(&got);
++        free(text); free(asst); free(sys);
++    }
++}
++
++/* The real GGUF: the renderer against ids from 2.1's own template (tests/gen_mellum_chat_ids.py). */
++static void check_mellum_chat_model(const char *model_path) {
++    ds4_model m;
++    model_open(&m, model_path, false, false);
++    config_validate_model(&m);
++    static ds4_engine e;
++    memset(&e, 0, sizeof(e));
++    vocab_load(&e.vocab, &m);
++    CHECK(e.vocab.im_start_id == 27 && e.vocab.im_end_id == 28);
++    for (size_t i = 0; i < N_OF(fx_prefixes); i++) {
++        ds4_tokens got = {0};
++        ds4_chat_append_assistant_prefix(&e, &got, fx_prefixes[i].think ? DS4_THINK_HIGH : DS4_THINK_NONE);
++        expect_ids(fx_prefixes[i].name, &got, fx_prefixes[i].ids, fx_prefixes[i].nids);
++        ds4_tokens_free(&got);
++    }
++    for (size_t i = 0; i < N_OF(fx_cases); i++) {
++        const fx_case *fc = &fx_cases[i];
++        ds4_tokens got = {0};
++        for (int j = 0; j < fc->nmsg; j++) {
++            if (strcmp(fc->msgs[j].role, "tool")) {
++                ds4_chat_append_message(&e, &got, fc->msgs[j].role, fc->msgs[j].content);
++                continue;
++            }
++            /* a run of tool messages is one turn's results */
++            const char *parts[8];
++            size_t n = 0;
++            while (j < fc->nmsg && !strcmp(fc->msgs[j].role, "tool") && n < N_OF(parts))
++                parts[n++] = fc->msgs[j++].content;
++            j--;
++            CHECK(ds4_chat_append_tool_results(&e, &got, parts, n) == 1);
++        }
++        ds4_chat_append_assistant_prefix(&e, &got, fc->think ? DS4_THINK_HIGH : DS4_THINK_NONE);
++        expect_ids(fc->name, &got, fc->ids, fc->nids);
++        ds4_tokens_free(&got);
++    }
++    check_mellum_tool_renders(&e);
++    for (size_t i = 0; i < N_OF(fx_histories); i++) {
++        /* the CLI's order: a system turn, the prefix file's turns, the live prompt, the generation prompt */
++        const fx_case *fc = &fx_histories[i];
++        ds4_prompt_prefix_turn turns[8];
++        ds4_prompt_prefix history = {turns, 0};
++        ds4_tokens got = {0};
++        int j = 0;
++        if (!strcmp(fc->msgs[0].role, "system")) ds4_chat_append_message(&e, &got, "system", fc->msgs[j++].content);
++        for (; j < fc->nmsg - 1 && history.count < N_OF(turns); j++) {
++            const bool assistant = !strcmp(fc->msgs[j].role, "assistant");
++            turns[history.count++] = (ds4_prompt_prefix_turn){
++                assistant ? DS4_PROMPT_PREFIX_ASSISTANT : DS4_PROMPT_PREFIX_USER, (char *)fc->msgs[j].content};
++        }
++        ds4_prompt_prefix_append(&e, &got, &history);
++        ds4_chat_append_message(&e, &got, "user", fc->msgs[fc->nmsg - 1].content);
++        ds4_chat_append_assistant_prefix(&e, &got, fc->think ? DS4_THINK_HIGH : DS4_THINK_NONE);
++        expect_ids(fc->name, &got, fc->ids, fc->nids);
++        ds4_tokens_free(&got);
++    }
++    {   /* the CLI -p path: system and prompt through encode_chat_prompt */
++        ds4_tokens got = {0};
++        ds4_encode_chat_prompt(&e, "You are a helpful assistant.", "Hello, world!", DS4_THINK_HIGH, &got);
++        expect_ids("encode_chat_prompt think on", &got, fx_cases[0].ids, fx_cases[0].nids);
++        got.len = 0;
++        ds4_encode_chat_prompt(&e, "You are a helpful assistant.", "Hello, world!", DS4_THINK_NONE, &got);
++        expect_ids("encode_chat_prompt think off", &got, fx_cases[1].ids, fx_cases[1].nids);
++        ds4_tokens_free(&got);
++    }
++    vocab_free(&e.vocab);
++    model_close(&m);
++    printf("ok   Mellum (real GGUF): %zu renders, %zu with tools, %zu imported histories and 2 prefixes equal 2.1's "
++           "template ids\n", N_OF(fx_cases), N_OF(fx_tool_cases), N_OF(fx_histories));
++}
++static void check_mellum_stops_model(const char *path) {
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    static ds4_engine e;
++    memset(&e, 0, sizeof(e));
++    vocab_load(&e.vocab, &m);
++    CHECK(e.vocab.n_vocab == 98304);
++    check_mellum_stop_classes(&e, "Mellum (real GGUF)");
++    vocab_free(&e.vocab);
++    model_close(&m);
++}
+ static void check_sampling_defaults(void) {
+     static ds4_engine e;
+     float t = -1, p = -1, m = -1;
+@@ -663,6 +1123,8 @@ static void check_real_model(void) {
+         exit(1);
+     }
+     printf("ok   real model: keys validated, every tensor bound and checked\n");
++    check_mellum_stops_model(path);
++    check_mellum_chat_model(path);
+ }
+ 
+ int main(void) {
+@@ -694,6 +1156,11 @@ int main(void) {
+     expect_refused(MF_NO_OUTPUT_NORM, "output_norm.weight", "no output_norm");
+     expect_refused(MF_NO_ATTN_Q_NORM, "blk.5.attn_q_norm.weight", "no attn_q_norm in layer 5");
+     expect_refused(MF_BAD_ATTN_Q_DIM, "blk.5.attn_q.weight", "attn_q of the wrong width");
++    expect_vocab_refused(MF_NO_TOKEN_TYPE, "tokenizer.ggml.token_type", "no token_type array");
++    expect_vocab_refused(MF_TOKEN_TYPE_SHORT, "tokenizer.ggml.token_type", "token_type one entry short");
++    expect_vocab_refused(MF_TOKEN_TYPE_U32, "tokenizer.ggml.token_type", "token_type stored as uint32");
++    expect_vocab_refused(MF_NO_IM_START, "<|im_start|>", "<|im_start|> absent");
++    expect_vocab_refused(MF_NO_IM_END, "<|im_end|>", "<|im_end|> absent");
+     expect_open_mtp_refused("a drafter path is refused by name, not as a Qwen error");
+     expect_open_option_refused(1, "tensor parallelism is refused, naming Mellum");
+     expect_open_option_refused(2, "a distributed slice is refused, naming Mellum");
+@@ -705,6 +1172,10 @@ int main(void) {
+     check_mellum_steering_refused();
+     check_mellum_plan();
+     check_memory_plan();
++    check_mellum_stops_tiny();
++    check_mellum_unnamed_control_is_protocol();
++    check_qwen_stop_classes_tiny();
++    check_mellum_chat_tiny();
+     check_sampling_defaults();
+     check_payload_refused();
+     check_real_model();
+diff --git a/tests/test_mellum_tokenizer.c b/tests/test_mellum_tokenizer.c
+new file mode 100644
+index 00000000..60e00790
+--- /dev/null
++++ b/tests/test_mellum_tokenizer.c
+@@ -0,0 +1,137 @@
++/* The mellum2 pre-tokenizer and BPE against Mellum 2.1's own tokenizer
++ * (tests/mellum_tokenizer_cases.inc, generated by
++ * tests/gen_mellum_tokenizer_cases.py).  The pieces need no model; the ids need
++ * the GGUF's vocabulary and merges and are checked when DS4_TEST_MELLUM_MODEL
++ * is set.  Includes ds4.c to reach the static segmenter. */
++#include "../ds4.c"
++
++typedef struct {
++    const char *text;
++    int n_pieces;
++    const char *piece[32];
++    const int *ids;
++    int n_ids;
++} mellum_tokenizer_case;
++
++#include "mellum_tokenizer_cases.inc"
++
++#define N_CASES (sizeof(MELLUM_TOKENIZER_CASES) / sizeof(MELLUM_TOKENIZER_CASES[0]))
++
++static int g_failures;
++
++typedef struct {
++    uint64_t len[256];
++    size_t n;
++    uint64_t expect_start;
++    bool gap;
++} collect_state;
++
++static void collect_piece(void *ud, uint64_t start, uint64_t end) {
++    collect_state *s = ud;
++    if (start != s->expect_start || end <= start) s->gap = true;
++    s->expect_start = end;
++    if (s->n < sizeof(s->len) / sizeof(s->len[0])) s->len[s->n] = end - start;
++    s->n++;
++}
++
++static void show(const char *s, size_t n, char *out, size_t cap) {
++    size_t o = 0;
++    for (size_t i = 0; i < n && o + 5 < cap; i++) {
++        const unsigned char c = (unsigned char)s[i];
++        if (c >= 0x20 && c < 0x7f) out[o++] = (char)c;
++        else o += (size_t)snprintf(out + o, cap - o, "\\x%02x", c);
++    }
++    out[o] = '\0';
++}
++
++/* The segmenter's pieces equal the reference pre-tokenizer's, case by case. */
++static void check_pieces(void) {
++    int bad = 0;
++    for (size_t k = 0; k < N_CASES; k++) {
++        const mellum_tokenizer_case *c = &MELLUM_TOKENIZER_CASES[k];
++        collect_state st;
++        memset(&st, 0, sizeof(st));
++        const size_t len = strlen(c->text);
++        mellum_segment_pieces(c->text, len, collect_piece, &st);
++        bool ok = !st.gap && st.expect_start == len && st.n == (size_t)c->n_pieces;
++        uint64_t at = 0;
++        for (size_t i = 0; ok && i < st.n; i++) {
++            const size_t want = strlen(c->piece[i]);
++            ok = st.len[i] == want && !memcmp(c->text + at, c->piece[i], want);
++            at += st.len[i];
++        }
++        if (!ok) {
++            char text[256];
++            show(c->text, len, text, sizeof(text));
++            fprintf(stderr, "FAIL pieces \"%s\": got %zu, want %d\n", text, st.n, c->n_pieces);
++            bad++;
++        }
++    }
++    g_failures += bad;
++    printf("%s %zu cases: pieces equal the reference pre-tokenizer's\n", bad ? "FAIL" : "ok  ", N_CASES);
++}
++
++/* Bytes that are not UTF-8 must still be tiled, whatever the classes say. */
++static void check_invalid_utf8(void) {
++    static const char *const bad[] = {
++        "\377", "a\303", "\360\237", "\200\200x", "x\342\200", "1\377 2", "\300\257",
++    };
++    int n_bad = 0;
++    for (size_t k = 0; k < sizeof(bad) / sizeof(bad[0]); k++) {
++        collect_state st;
++        memset(&st, 0, sizeof(st));
++        mellum_segment_pieces(bad[k], strlen(bad[k]), collect_piece, &st);
++        if (st.gap || st.expect_start != strlen(bad[k])) {
++            fprintf(stderr, "FAIL invalid UTF-8 case %zu does not tile\n", k);
++            n_bad++;
++        }
++    }
++    g_failures += n_bad;
++    printf("%s invalid UTF-8 is tiled, never dropped\n", n_bad ? "FAIL" : "ok  ");
++}
++
++/* With the real vocabulary and merges, the ids equal the reference encode. */
++static void check_ids(const char *path) {
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    ds4_vocab vocab;
++    vocab_load(&vocab, &m);
++    int bad = 0;
++    for (size_t k = 0; k < N_CASES; k++) {
++        const mellum_tokenizer_case *c = &MELLUM_TOKENIZER_CASES[k];
++        token_vec got = {0};
++        bpe_tokenize_text(&vocab, c->text, &got);
++        bool ok = got.len == c->n_ids;
++        for (int i = 0; ok && i < got.len; i++) ok = got.v[i] == c->ids[i];
++        if (!ok) {
++            char text[256];
++            show(c->text, strlen(c->text), text, sizeof(text));
++            fprintf(stderr, "FAIL ids \"%s\": got %d ids [", text, got.len);
++            for (int i = 0; i < got.len; i++) fprintf(stderr, "%s%d", i ? " " : "", got.v[i]);
++            fprintf(stderr, "], want %d [", c->n_ids);
++            for (int i = 0; i < c->n_ids; i++) fprintf(stderr, "%s%d", i ? " " : "", c->ids[i]);
++            fprintf(stderr, "]\n");
++            bad++;
++        }
++        token_vec_free(&got);
++    }
++    vocab_free(&vocab);
++    model_close(&m);
++    g_failures += bad;
++    printf("%s %zu cases: ids equal the reference encode (real GGUF)\n", bad ? "FAIL" : "ok  ", N_CASES);
++}
++
++int main(void) {
++    check_pieces();
++    check_invalid_utf8();
++    const char *model = getenv("DS4_TEST_MELLUM_MODEL");
++    if (model && model[0]) check_ids(model);
++    else printf("skip ids: DS4_TEST_MELLUM_MODEL unset\n");
++    if (g_failures) {
++        fprintf(stderr, "test-mellum-tokenizer: %d failure(s)\n", g_failures);
++        return 1;
++    }
++    printf("test-mellum-tokenizer: ok\n");
++    return 0;
++}
