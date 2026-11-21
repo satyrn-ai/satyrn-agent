@@ -167,3 +167,56 @@ measured paths, and every per-prefix gate above was re-run on the exported patch
 
 Physical memory rows (36/24/16/8 GB) are pending: this machine is an M5 Max with 128 GiB, not the M4 Max Studio
 the spec measures, and no 24 GB, 16 GB or 8 GB machine is reachable.
+
+## Common-layer Metal math-mode regression (2026-11-21)
+
+The Metal language-version pin in `patches/common` sets `MTLCompileOptions.languageVersion` without
+setting `mathMode`. On this machine's SDK an explicit language version changes the default math mode
+from fast to strict: every patched build compiled its shaders at strict IEEE-754 and lost about 43% of
+prefill. The unpatched reference was unaffected, which made the port look slow at every prefix.
+
+Isolation on the M5 Max, published MXFP4, 2,056-token prompt, context 3,072, `-n 1`, one process each:
+
+| Build | Prefill |
+|---|---:|
+| port `f5463ed1` (0005), as shipped, own shaders | 2,331 / 2,365 / 2,367 t/s |
+| same binary, reference's `metal/` | 2,338 / 2,367 / 2,357 t/s |
+| reference `d2d9338`, own shaders | 4,135 / 4,152 / 4,124 t/s |
+| same binary, port's `metal/` | 4,112 / 4,121 / 4,123 t/s |
+
+Shaders are not the variable; the binary is. The only substantive difference in `ds4_metal.m` between
+the two trees is `ds4_gpu_compile_options()` (common patch 0002/0003). Ablation on the 0006 tree,
+same model and prompt:
+
+| `ds4_gpu_compile_options` | Prefill |
+|---|---:|
+| `[MTLCompileOptions new]` (the reference's path) | 4,023 / 4,024 t/s |
+| `languageVersion = 3.2` | 2,338 / 2,368 t/s |
+| `languageVersion = 4.0` | 2,331 / 2,367 t/s |
+| `languageVersion = 4.0; mathMode = MTLMathModeFast` | 4,132 / 4,144 t/s |
+
+The pin is active in every build: Nix's SDK reports `__MAC_OS_X_VERSION_MAX_ALLOWED = __MAC_15_5`
+(so the 3.2 branch), Xcode's reports `__MAC_27_2` (so the 4.0 branch); only a build with the macro
+undefined compiles the pin out. The pin landed on 2026-10-26 (`9c7eb1f`), before every Mellum
+measurement, so the recorded port-side numbers above (0004 3,956 / 0005 3,964 / 0006 3,994 /
+MXFP4 4,085 t/s) cannot be reproduced with the common layer as exported. They match the reference
+binary's numbers, which is consistent with the harness mix-up that the "corrected harness" section
+replaced.
+
+**Current-0005 MXFP4 comparison, with `mathMode = MTLMathModeFast` added to the pin.** Port `f5463ed1`
+and reference `d2d9338`, tree `36b14b9c`, published MXFP4 (`cf09584a…8166`), one machine, each engine
+from its own tree, `ARMS=AA`, n=6 after the per-block drop:
+
+| Metric | Port 0005 | Reference | Delta |
+|---|---:|---:|---:|
+| Prefill | 4,081 t/s | 4,078 t/s | +0.07% |
+| Decode | 148.12 t/s | 151.58 t/s | -2.3% |
+
+Raw runs: `/tmp/mellum-step2-fixed/{port0005,ref}-{prefill,decode}/runs.txt`. The comparison passes
+its 10% gate **only** with the math-mode fix; without it prefill is 2,254-2,330 t/s, 43% down.
+
+The fix belongs in common patches 0002/0003: set `options.mathMode = MTLMathModeFast;` next to each
+`languageVersion` assignment. That restores the reference's documented fast default (`fastMathEnabled`
+defaults to YES) while keeping the language pin that the Python-host SDK case needs. Because common is
+shared, every prefix tree changes and the oracle, kernel and performance gates must be re-run before
+the numbers above replace the recorded ones. Main inherits the same ~43% prefill cost today.

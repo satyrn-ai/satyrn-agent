@@ -811,6 +811,17 @@ tip `9892cc0a`, combined tip `b4a71c81`. `ds4-check --build` passes for common,
 Mellum and qwen35; the shell suite is 53/53; `make test-mellum`,
 `test-mellum-kernels` (992 checks) and `test-qwen4-kernels` pass.
 
+- [ ] **Fix the common Metal pin's math mode before trusting any performance number.**
+
+`patches/common` 0002/0003 set `MTLCompileOptions.languageVersion` without `mathMode`, so every
+patched build compiles shaders at strict IEEE-754 and loses ~43% prefill (port 2,330 t/s against the
+reference's 4,135 t/s on the same MXFP4 prompt). Adding `options.mathMode = MTLMathModeFast;` restores
+4,081 / 4,078 t/s and the current-0005 MXFP4 gate passes (prefill +0.07%, decode -2.3%). Evidence and
+the ablation table are in [mellum-engine-evidence.md](../../reports/mellum-engine-evidence.md#common-layer-metal-math-mode-regression-2026-11-21).
+Changing common re-exports common → Mellum → qwen35, so re-run the oracle, the 992 kernels, the shell
+and static gates, and the prefix performance pairs, and disclose the change in the PR body. Main
+carries the same cost until this lands.
+
 - [ ] **Reconcile the evidence before claiming current acceptance.**
 
 Keep raw `ece0d5fe`/`8b8ef87a` runs attached to those measured trees; record any
