@@ -80,3 +80,25 @@ is made**; the 43% recovery belongs to the Mellum workload where it was measured
 - Model-free Python suite: 290 passed, 100% line and branch coverage.
 
 Raw run logs: `/tmp/qwen-perf-abba/`, `/tmp/qwen-live-fixed.log`, `/tmp/xcode-lib/`.
+
+## Second finding: the toolchain's SDK decides the tensor path (added 2026-11-21)
+
+The fix above removes the math-mode loss, but the prefill gap had two causes. The Metal 4 tensor probe
+is compiled out when the C SDK is older than 26 (`#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000`), so
+the engine reports `tensor_matmul=off` and falls back to the simdgroup path. That costs the same ~43%
+and is independent of the pins and of math mode:
+
+| Build | SDK | `tensor_matmul` | Prefill |
+| --- | --- | --- | ---: |
+| reference `d2d9338`, Xcode clang | 27.2 | on | 4,150 t/s |
+| reference `d2d9338`, Nix clang | 15.5 | **off** | 2,326 / 2,354 t/s |
+| port 0005, Nix clang, pins + math fast | 15.5 | **off** | 2,327–2,353 t/s |
+| port 0005, Xcode clang, 4.0 pin, safe math | 27.2 | on | 2,331–2,367 t/s |
+| port 0005, Xcode clang, 4.0 pin, math fast | 27.2 | on | 4,041–4,137 t/s |
+
+The dev/CI build (`devenv shell -- make`, `ds4py build` under devenv) uses Nix clang and is in the
+"tensor off" row, so its performance is not comparable with the reference build. Acceptance runs must
+record the compiler, the SDK's `__MAC_OS_X_VERSION_MAX_ALLOWED`, and the `tensor_matmul` flag, and the
+Mellum performance pairs must be measured with an SDK-26-or-later build. Correctness gates — oracle,
+kernels, rewind, streaming parity — are unaffected by which path is taken, and the parity runs above
+use the 2048-token prompt (`68132d36…`) with 512 generated ids, `7 GiB`/`2 GiB` caches (979/652 slots).
