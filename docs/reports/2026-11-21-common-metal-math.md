@@ -102,3 +102,24 @@ record the compiler, the SDK's `__MAC_OS_X_VERSION_MAX_ALLOWED`, and the `tensor
 Mellum performance pairs must be measured with an SDK-26-or-later build. Correctness gates — oracle,
 kernels, rewind, streaming parity — are unaffected by which path is taken, and the parity runs above
 use the 2048-token prompt (`68132d36…`) with 512 generated ids, `7 GiB`/`2 GiB` caches (979/652 slots).
+
+## Policy update: the Nix toolchain is canonical (added 2026-11-21)
+
+All builds and measurements use the Nix toolchain. Consequences:
+
+- The reference for any performance comparison must also be built with Nix. The valid current-0005
+  MXFP4 pair is then port `f5463ed1` 2,327 t/s against a Nix-built `d2d9338` 2,326 t/s prefill
+  (eight stable single-process runs each, same prompt, context 3,072), i.e. parity within 0.1%; the
+  previously quoted 4,081 / 4,078 pair used the Xcode toolchain and is supplementary, not canonical.
+- Under Nix the math-mode fix is inert for performance: the tensor path is off, so 3.2 + safe and
+  3.2 + fast both measure ~2,330 t/s. The fix still matters because it makes the effective math
+  configuration deterministic across toolchains — an SDK-26 build would otherwise run strict while
+  everything else runs fast, changing numerics for the same source.
+- Runtime-gating the 4.0 pin and the probe is not sufficient: `ds4_gpu_detect_metal4_features()` is
+  itself wrapped in `#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000` and uses `MTLGPUFamilyMetal4`, so an
+  old-SDK build still reports `tensor_matmul=off` (measured: language=4.0, math fast, 2,312–2,328 t/s).
+  Reaching the tensor path under Nix needs that detection block runtime-gated as well, with a documented
+  fallback for `MTLGPUFamilyMetal4`, or a newer apple-sdk. That is Koudai's Metal 4 gating, not this
+  patch; it is tracked in #37.
+- The runner-based series (0004/0005/0006 and the MXFP4 pair) must be re-measured on a quiet host; the
+  runs collected while this machine was busy (PyCharm ~200% CPU) are not usable, and are not quoted.
