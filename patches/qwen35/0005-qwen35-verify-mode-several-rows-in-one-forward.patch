@@ -1,4 +1,4 @@
-From cdc55057f1b89137900c90f9aed63fe73349a3c2 Mon Sep 17 00:00:00 2001
+From 785aef712d50917aa1ea6243fe796903c6f55ca1 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 05:05:49 +0900
 Subject: [PATCH 05/18] qwen35: verify mode, several rows in one forward
@@ -25,10 +25,10 @@ Carried-commits: 0b5f915 c7e9af6 dd6ad4f e0fa969 df2fb7e 754c338 46e6192 bc7f488
  create mode 100644 tests/test_qwen35_verify_live.c
 
 diff --git a/.gitignore b/.gitignore
-index dee544d4..a85b3f5e 100644
+index 7338c8a5..2f7cee01 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -83,6 +83,7 @@
+@@ -84,6 +84,7 @@
  /tests/test_linux_memory
  /tests/test_rocm_memory
  /tests/test_qwen4_kernels
@@ -37,7 +37,7 @@ index dee544d4..a85b3f5e 100644
  /tests/test_qwen4_vision
  /tests/test_deepseek4_vision_image
 diff --git a/Makefile b/Makefile
-index 2bf5c35b..757b4d4e 100644
+index 6b851691..b3d1730a 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -105,7 +105,10 @@ help:
@@ -970,10 +970,10 @@ index 17c5667b..335cdaab 100644
   * batch verify for KV side effects, then obey the leader's commit frame
   * (keep, or roll back and replay). flags are the VERIFY frame's
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 5bc59e34..01e45ef5 100644
+index 9aeca64a..0b035be5 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
-@@ -791,6 +791,20 @@ int ds4_gpu_matmul_quant_tensor(
+@@ -797,6 +797,20 @@ int ds4_gpu_matmul_quant_tensor(
          const ds4_gpu_tensor *x,
          uint64_t                n_tok);
  
@@ -994,7 +994,7 @@ index 5bc59e34..01e45ef5 100644
  /* Dense Q6_K matvec (Metal only), for the Q6_K tensors of dense qwen35's
   * Q4_K_M recipes: selected down projections and the output head. */
  int ds4_gpu_matmul_q6_K_tensor(
-@@ -803,6 +817,22 @@ int ds4_gpu_matmul_q6_K_tensor(
+@@ -809,6 +823,22 @@ int ds4_gpu_matmul_q6_K_tensor(
          const ds4_gpu_tensor *x,
          uint64_t              n_tok);
  
@@ -1017,7 +1017,7 @@ index 5bc59e34..01e45ef5 100644
  /* The same product through the tiled prefill kernel (Metal only): each
   * weight is read once per 32 tokens instead of once per token.  Dense
   * qwen35 uses it for prompt batches. */
-@@ -3542,6 +3572,9 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
+@@ -3548,6 +3578,9 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
  /* snap_state/snap2_state (optional) receive the state right after tokens
   * snap_tok/snap2_tok; two points serve the 3-row MTP verifier */
  void ds4_gpu_qwen4_set_verify_rows_exact(bool on);
@@ -1027,7 +1027,7 @@ index 5bc59e34..01e45ef5 100644
  int ds4_gpu_qwen4_gdn_scan_tensor(
          ds4_gpu_tensor *out, ds4_gpu_tensor *state, const ds4_gpu_tensor *qkv,
          const ds4_gpu_tensor *a, const ds4_gpu_tensor *b,
-@@ -3565,6 +3598,17 @@ int ds4_gpu_qwen35_attn_prep_tensor(
+@@ -3571,6 +3604,17 @@ int ds4_gpu_qwen35_attn_prep_tensor(
          uint64_t g_q_offset, uint64_t g_k_offset,
          uint32_t n_tokens, uint32_t n_head, uint32_t n_head_kv, uint32_t head_dim, uint32_t n_rot,
          uint32_t pos0, uint32_t cache_cap, float rope_base, float eps);
@@ -1045,7 +1045,7 @@ index 5bc59e34..01e45ef5 100644
  int ds4_gpu_qwen4_ple_gate_tensor(
          ds4_gpu_tensor *gated, ds4_gpu_tensor *normed, const ds4_gpu_tensor *R,
          const ds4_gpu_tensor *key, const ds4_gpu_tensor *value,
-@@ -3693,6 +3737,30 @@ int ds4_gpu_qwen4_gdn_front_tensor(
+@@ -3699,6 +3743,30 @@ int ds4_gpu_qwen4_gdn_front_tensor(
          uint32_t weight_type, uint32_t n_tokens, uint32_t n_k_head, uint32_t n_v_head, uint32_t head_dim,
          uint32_t conv_kernel, uint32_t in_dim, ds4_gpu_tensor *snap_state, uint32_t snap_tok,
          ds4_gpu_tensor *snap2_state, uint32_t snap2_tok);
@@ -1077,10 +1077,10 @@ index 5bc59e34..01e45ef5 100644
   * resampled position embedding [n_patches][n_embd]; out receives
   * [n_patches/4][n_out].  Weights are read from the mapped mmproj GGUF. */
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 2529922b..5a4b282e 100644
+index f0e4bc55..4ef0553d 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -4815,6 +4815,7 @@ static NSString *ds4_gpu_full_source(void) {
+@@ -4873,6 +4873,7 @@ static NSString *ds4_gpu_full_source(void) {
          @[@"DS4_METAL_QWEN4_SOURCE",      @"metal/qwen4.metal"],
          @[@"DS4_METAL_QWEN4_VISION_SOURCE", @"metal/qwen4_vision.metal"],
          @[@"DS4_METAL_MELLUM_SOURCE",     @"metal/mellum.metal"],
@@ -1088,7 +1088,7 @@ index 2529922b..5a4b282e 100644
      ];
  
      NSMutableString *source = [NSMutableString stringWithString:base];
-@@ -20299,6 +20300,93 @@ int ds4_gpu_matmul_quant_decode_mpp_model_view_tensor(
+@@ -20355,6 +20356,93 @@ int ds4_gpu_matmul_quant_decode_mpp_model_view_tensor(
                                              false);
  }
  
@@ -1182,7 +1182,7 @@ index 2529922b..5a4b282e 100644
  /* Dense Q6_K projection: the matvec of the Q4_K_M recipes' Q6_K tensors
   * (down projections, output head) for dense qwen35. */
  typedef struct {
-@@ -20380,6 +20468,111 @@ int ds4_gpu_matmul_q6_K_tensor(
+@@ -20436,6 +20524,111 @@ int ds4_gpu_matmul_q6_K_tensor(
      return 1;
  }
  
@@ -1294,7 +1294,7 @@ index 2529922b..5a4b282e 100644
  int ds4_gpu_matmul_quant_rows_scalar_tensor(
          ds4_gpu_tensor       *out,
          const void             *model_map,
-@@ -48603,6 +48796,7 @@ enum {
+@@ -48659,6 +48852,7 @@ enum {
      QWEN4_K_MOE_MM_DOWN_NAXC_ADDR,
      QWEN4_K_MOE_MM_DOWN_NAXC64_ADDR,
      QWEN4_K_QWEN35_GDN_OUT,
@@ -1302,7 +1302,7 @@ index 2529922b..5a4b282e 100644
      QWEN4_K_COUNT,
  };
  
-@@ -48731,6 +48925,7 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+@@ -48787,6 +48981,7 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
      "kernel_qwen4_moe_mm_down_naxc_addr",
      "kernel_qwen4_moe_mm_down_naxc64_addr",
      "kernel_qwen35_gdn_out",
@@ -1310,7 +1310,7 @@ index 2529922b..5a4b282e 100644
  };
  
  typedef struct {
-@@ -49138,16 +49333,26 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
+@@ -49194,16 +49389,26 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
                            MTLSizeMake(n_k_head, n_tokens, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -1341,7 +1341,7 @@ index 2529922b..5a4b282e 100644
      const uint64_t state_bytes = (uint64_t)n_v_head * head_dim * head_dim * sizeof(float);
      qwen4_bind bd[7];
      if (n_tokens == 0 || head_dim < 32 || head_dim > 128 || (head_dim % 32) != 0 || n_k_head == 0 ||
-@@ -49168,7 +49373,8 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
+@@ -49224,7 +49429,8 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
      } else {
          bd[6] = bd[3];
      }
@@ -1351,7 +1351,7 @@ index 2529922b..5a4b282e 100644
          getenv("DS4_QWEN4_NO_GDN_R4") == NULL;
      if (head_dim == 128u && (n_tokens > 8u || decode_r4)) {
          /* SIMD groups own independent value rows, so changing their grouping
-@@ -49189,6 +49395,40 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
+@@ -49245,6 +49451,40 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
                            MTLSizeMake(head_dim, n_v_head, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -1392,7 +1392,7 @@ index 2529922b..5a4b282e 100644
  static ds4_gpu_tensor *g_qwen4_gdn_slots;
  
  /* One decode step for every row of a batch against its own slot of the state
-@@ -50104,6 +50344,32 @@ int ds4_gpu_mellum_attn_full_rows_tensor(
+@@ -50160,6 +50400,32 @@ int ds4_gpu_mellum_attn_full_rows_tensor(
      return 1;
  }
  
@@ -1425,7 +1425,7 @@ index 2529922b..5a4b282e 100644
  int ds4_gpu_qwen4_moe_mid_tensor(
          ds4_gpu_tensor *mid, const ds4_gpu_tensor *x, const ds4_gpu_tensor *selected,
          const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset,
-@@ -50882,24 +51148,26 @@ int ds4_gpu_qwen4_mtp_combine_tensor(
+@@ -50938,24 +51204,26 @@ int ds4_gpu_qwen4_mtp_combine_tensor(
                            MTLSizeMake((n + 255u) / 256u, 1, 1), MTLSizeMake(256, 1, 1), 0);
  }
  
@@ -1457,7 +1457,7 @@ index 2529922b..5a4b282e 100644
      if (n_tokens == 0 || n_k_head == 0 || head_dim % 32 != 0 || n_v_head % n_k_head != 0 ||
          conv_kernel < 2 || conv_kernel > 4 || row_bytes == 0 ||
          !qwen4_bind_tensor(&b[0], qkv, (uint64_t)n_tokens * conv_dim * sizeof(float), "gdn front qkv") ||
-@@ -50925,15 +51193,48 @@ int ds4_gpu_qwen4_gdn_front_tensor(
+@@ -50981,15 +51249,48 @@ int ds4_gpu_qwen4_gdn_front_tensor(
      } else {
          b[11] = b[1];
      }

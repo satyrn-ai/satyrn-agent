@@ -1,4 +1,4 @@
-From 3c064cb579b95a3f9a285a882091473c65b004e2 Mon Sep 17 00:00:00 2001
+From e97883a6eee57e1fd29e3b26c095234b81a3797f Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 06:49:14 +0900
 Subject: [PATCH 06/18] qwen35: the DFlash drafter
@@ -26,10 +26,10 @@ Carried-commits: 4fff88b e2d05e2 14bee95 8f3af76 bc952fc 6b1a8aa 6d2c2d0
  create mode 100644 tests/test_dflash_open.c
 
 diff --git a/.gitignore b/.gitignore
-index a85b3f5e..72eb643c 100644
+index 2f7cee01..b0dc29cc 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -86,6 +86,8 @@
+@@ -87,6 +87,8 @@
  /tests/test_qwen35_verify_live
  /tests/test_qwen4_moe_mm_specialize
  /tests/test_qwen4_vision
@@ -39,7 +39,7 @@ index a85b3f5e..72eb643c 100644
  /tests/test_image_decode
  /tests/test_deepseek41_metal
 diff --git a/Makefile b/Makefile
-index 757b4d4e..0acb73e5 100644
+index b3d1730a..226baaa8 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -109,6 +109,7 @@ help:
@@ -1485,10 +1485,10 @@ index 335cdaab..28511ce0 100644
   * batch verify for KV side effects, then obey the leader's commit frame
   * (keep, or roll back and replay). flags are the VERIFY frame's
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 01e45ef5..adf8957e 100644
+index 0b035be5..e0c78dc4 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
-@@ -817,9 +817,10 @@ int ds4_gpu_matmul_q6_K_tensor(
+@@ -823,9 +823,10 @@ int ds4_gpu_matmul_q6_K_tensor(
          const ds4_gpu_tensor *x,
          uint64_t              n_tok);
  
@@ -1502,7 +1502,7 @@ index 01e45ef5..adf8957e 100644
   * tiling depends only on the weight shape, so row t of the output is bitwise
   * the same for every n_tok and whatever the other rows hold. */
  int ds4_gpu_matmul_mma_rows_tensor(
-@@ -4043,6 +4044,59 @@ int ds4_gpu_mellum_moe_add_tensor(
+@@ -4049,6 +4050,59 @@ int ds4_gpu_mellum_moe_add_tensor(
          ds4_gpu_tensor *out, const ds4_gpu_tensor *res, const ds4_gpu_tensor *x, ds4_gpu_tensor *logits,
          ds4_gpu_tensor *selected, ds4_gpu_tensor *weights, ds4_gpu_tensor *mid, ds4_gpu_tensor *part,
          const void *model_map, uint64_t model_size, const ds4_gpu_mellum_moe *p, uint32_t n_tokens);
@@ -1563,10 +1563,10 @@ index 01e45ef5..adf8957e 100644
  #ifdef __cplusplus
  }
 diff --git a/ds4_metal.m b/ds4_metal.m
-index 5a4b282e..a5b84a94 100644
+index 4ef0553d..da342a29 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -4816,6 +4816,7 @@ static NSString *ds4_gpu_full_source(void) {
+@@ -4874,6 +4874,7 @@ static NSString *ds4_gpu_full_source(void) {
          @[@"DS4_METAL_QWEN4_VISION_SOURCE", @"metal/qwen4_vision.metal"],
          @[@"DS4_METAL_MELLUM_SOURCE",     @"metal/mellum.metal"],
          @[@"DS4_METAL_QWEN35_MMA_SOURCE", @"metal/qwen35_mma.metal"],
@@ -1574,7 +1574,7 @@ index 5a4b282e..a5b84a94 100644
      ];
  
      NSMutableString *source = [NSMutableString stringWithString:base];
-@@ -20488,15 +20489,18 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -20544,15 +20545,18 @@ int ds4_gpu_matmul_mma_rows_tensor(
          const ds4_gpu_tensor *x,
          uint64_t              n_tok) {
      if (!g_initialized && !ds4_gpu_init()) return 0;
@@ -1597,7 +1597,7 @@ index 5a4b282e..a5b84a94 100644
      if (out_dim > UINT64_MAX / row_bytes) return 0;
      const uint64_t weight_bytes = out_dim * row_bytes;
      const uint64_t x_bytes = n_tok * in_dim * sizeof(float);
-@@ -20513,14 +20517,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -20569,14 +20573,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
       * llama.cpp's few-row tiling at one 8-row src1 tile
       * (ggml_metal_op_mul_mat_mma_tiling, ggml-metal-device.cpp, a46709b):
       * NSG simdgroups split K, from 32 for at most 64 weight rows down to 8
@@ -1614,7 +1614,7 @@ index 5a4b282e..a5b84a94 100644
      const uint64_t nt_smem = 16384u / ((uint64_t)nsg * 256u);
      const uint64_t nt_rows = out_dim / (128u * 8u);
      const uint64_t nt_limit = nt_smem < nt_rows ? nt_smem : nt_rows;
-@@ -20528,7 +20532,7 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -20584,7 +20588,7 @@ int ds4_gpu_matmul_mma_rows_tensor(
      while (nt > 1 && (uint64_t)nt > nt_limit) nt /= 2;
  
      char fn_name[64];
@@ -1623,7 +1623,7 @@ index 5a4b282e..a5b84a94 100644
  
      @autoreleasepool {
          id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
-@@ -52235,3 +52239,176 @@ int ds4_gpu_mellum_stream_restore_tensor(const ds4_gpu_tensor *save, ds4_gpu_ten
+@@ -52291,3 +52295,176 @@ int ds4_gpu_mellum_stream_restore_tensor(const ds4_gpu_tensor *save, ds4_gpu_ten
      }
      return 1;
  }

@@ -1,4 +1,4 @@
-From e110428ba3dd7e6f0445a745f7cfacb2bae3723c Mon Sep 17 00:00:00 2001
+From 8e62c93a3cba4822f375dec4ba781085aa285428 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 10:38:08 +0200
 Subject: [PATCH 11/18] qwen35: dense attention prep and causal attention on
@@ -39,16 +39,16 @@ Carried-commits: none (authored here)
  create mode 100644 tests/test_qwen35_cuda_attention.c
 
 diff --git a/.gitignore b/.gitignore
-index 939d9802..620458f2 100644
+index db658cfb..b44d1989 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -128,3 +128,4 @@ __pycache__/
+@@ -129,3 +129,4 @@ __pycache__/
  /tests/mellum_trace
  /tests/test_qwen35_cuda_quant
  /tests/test_qwen35_cuda_recurrent
 +/tests/test_qwen35_cuda_attention
 diff --git a/Makefile b/Makefile
-index c2f7fa04..37e8829a 100644
+index 124920c5..f50afe63 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -786,6 +786,16 @@ tests/test_qwen35_cuda_recurrent: tests/test_qwen35_cuda_recurrent.o tests/qwen3

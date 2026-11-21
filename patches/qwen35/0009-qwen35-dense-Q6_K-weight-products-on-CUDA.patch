@@ -1,4 +1,4 @@
-From abbde3973250fe3203bbf644c55cba700b9aff80 Mon Sep 17 00:00:00 2001
+From 8e35e79e232f58f120b2f77539cdbd02dab958b7 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 10:20:02 +0200
 Subject: [PATCH 09/18] qwen35: dense Q6_K weight products on CUDA
@@ -31,16 +31,16 @@ Carried-commits: none (authored here)
  create mode 100644 tests/test_qwen35_cuda_quant.c
 
 diff --git a/.gitignore b/.gitignore
-index 72eb643c..c1484dd0 100644
+index b0dc29cc..6a50f463 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -126,3 +126,4 @@ __pycache__/
+@@ -127,3 +127,4 @@ __pycache__/
  /tools/mellum_s4_measure
  /tests/test_metal_tensor_lifetime
  /tests/mellum_trace
 +/tests/test_qwen35_cuda_quant
 diff --git a/Makefile b/Makefile
-index 0acb73e5..7b96e7b0 100644
+index 226baaa8..f9b1cd4a 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -763,6 +763,19 @@ tests/test_qwen4_cuda: tests/test_qwen4_cuda.o ds4_cuda.o ds4_image.o $(MMQ_OBJS

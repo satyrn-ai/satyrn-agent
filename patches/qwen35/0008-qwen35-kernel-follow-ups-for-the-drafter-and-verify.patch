@@ -1,4 +1,4 @@
-From 7c1d5ca794f3c0c64645d42bcf0a9700726420c8 Mon Sep 17 00:00:00 2001
+From 6fe5b5277deb8de62169121f87a636285b0f920e Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 21:25:08 +0900
 Subject: [PATCH 08/18] qwen35: kernel follow-ups for the drafter and verify
@@ -54,10 +54,10 @@ index 964d2c33..3eb26078 100644
                                              g->pos3, g->qwen35_verify_table, (uint64_t)attn_slot * 8u,
                                              g->qwen35_verify_part, T, DS4_N_HEAD, DS4_N_HEAD_KV, DS4_N_HEAD_DIM,
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 9387f7d9..6ccec2f8 100644
+index b2abbed1..0d31269f 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
-@@ -311,6 +311,8 @@ enum {
+@@ -317,6 +317,8 @@ enum {
      DS4_GPU_TEST_OUTPUT_HC_WEIGHTS4 = 1u << 5,
      DS4_GPU_TEST_HC_RMS_SCALE_PROJ = 1u << 6,
      DS4_GPU_TEST_Q6_K_MM_BYTEWISE = 1u << 7,
@@ -66,7 +66,7 @@ index 9387f7d9..6ccec2f8 100644
  };
  void ds4_gpu_test_set_flags(uint32_t flags);
  void ds4_gpu_release_zero_prefix_prefill_mask_cache(void);
-@@ -823,7 +825,11 @@ int ds4_gpu_matmul_q6_K_tensor(
+@@ -829,7 +831,11 @@ int ds4_gpu_matmul_q6_K_tensor(
   * kernels), for qwen35's verify (Q4_K, Q6_K) and the DFlash drafter (Q4_0,
   * in_dim a multiple of 32).  Its sums are not in the one-row kernels' order, but its
   * tiling depends only on the weight shape, so row t of the output is bitwise
@@ -79,7 +79,7 @@ index 9387f7d9..6ccec2f8 100644
  int ds4_gpu_matmul_mma_rows_tensor(
          ds4_gpu_tensor       *out,
          const void           *model_map,
-@@ -3613,6 +3619,23 @@ int ds4_gpu_qwen35_attn_verify_tensor(
+@@ -3619,6 +3625,23 @@ int ds4_gpu_qwen35_attn_verify_tensor(
          ds4_gpu_tensor *table, uint64_t entry0, ds4_gpu_tensor *part,
          uint32_t n_tokens, uint32_t n_head, uint32_t n_head_kv, uint32_t head_dim,
          uint32_t pos0, float scale);
@@ -103,7 +103,7 @@ index 9387f7d9..6ccec2f8 100644
  /* Dense qwen35 prefill attention with llama.cpp's flash-attention tiling
   * (kernel_flash_attn_ext: 8 queries of one head per threadgroup, 64 keys per
   * step): causal over the f16 caches' rows 0..pos0+n_tokens-1, out =
-@@ -4094,7 +4117,9 @@ int ds4_gpu_dflash_conv_tensor(
+@@ -4100,7 +4123,9 @@ int ds4_gpu_dflash_conv_tensor(
  /* Non-causal windowed attention of a block's rows (row t at pos0 + t) over
   * the ring slots holding a committed position tp (0 <= tp < pos0, within
   * window of the row) and over every block row; f16 ring K/V, f32 block K/V,
@@ -115,10 +115,10 @@ index 9387f7d9..6ccec2f8 100644
          ds4_gpu_tensor *out, const ds4_gpu_tensor *q,
          const ds4_gpu_tensor *k_blk, const ds4_gpu_tensor *v_blk,
 diff --git a/ds4_metal.m b/ds4_metal.m
-index cb79f181..096b784f 100644
+index 73ded02f..b03f43cc 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -20532,7 +20532,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
+@@ -20588,7 +20588,14 @@ int ds4_gpu_matmul_mma_rows_tensor(
      while (nt > 1 && (uint64_t)nt > nt_limit) nt /= 2;
  
      char fn_name[64];
@@ -134,7 +134,7 @@ index cb79f181..096b784f 100644
  
      @autoreleasepool {
          id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
-@@ -48806,6 +48813,8 @@ enum {
+@@ -48862,6 +48869,8 @@ enum {
      QWEN4_K_QWEN35_GDN_HIST_COMMIT,
      QWEN4_K_QWEN35_ATTN_FA,
      QWEN4_K_QWEN35_ATTN_FA_PAD,
@@ -143,7 +143,7 @@ index cb79f181..096b784f 100644
      QWEN4_K_COUNT,
  };
  
-@@ -48937,6 +48946,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+@@ -48993,6 +49002,8 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
      "kernel_qwen35_gdn_hist_commit",
      "kernel_qwen35_attn_fa",
      "kernel_qwen35_attn_fa_pad",
@@ -152,7 +152,7 @@ index cb79f181..096b784f 100644
  };
  
  typedef struct {
-@@ -50424,6 +50435,72 @@ int ds4_gpu_qwen35_attn_verify_tensor(
+@@ -50480,6 +50491,72 @@ int ds4_gpu_qwen35_attn_verify_tensor(
                                                   n_head, n_head_kv, head_dim, 0u, scale);
  }
  
@@ -225,7 +225,7 @@ index cb79f181..096b784f 100644
  int ds4_gpu_qwen4_moe_mid_tensor(
          ds4_gpu_tensor *mid, const ds4_gpu_tensor *x, const ds4_gpu_tensor *selected,
          const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset,
-@@ -52433,7 +52510,9 @@ int ds4_gpu_dflash_attn_tensor(
+@@ -52489,7 +52566,9 @@ int ds4_gpu_dflash_attn_tensor(
          !qwen4_bind_tensor(&b[6], out, q_bytes, "dflash attention output")) {
          return 0;
      }

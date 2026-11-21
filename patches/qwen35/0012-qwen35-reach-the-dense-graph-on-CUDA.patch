@@ -1,4 +1,4 @@
-From a219a8f577e3f4a167937e523229856b626a9827 Mon Sep 17 00:00:00 2001
+From c73ec125f5836781e20d3e88eb10efb197be1257 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 11:56:27 +0200
 Subject: [PATCH 12/18] qwen35: reach the dense graph on CUDA
@@ -49,16 +49,16 @@ Carried-commits: none (authored here)
  create mode 100644 tests/test_qwen35_host.c
 
 diff --git a/.gitignore b/.gitignore
-index 620458f2..a085360f 100644
+index b44d1989..4e42cfdf 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -129,3 +129,4 @@ __pycache__/
+@@ -130,3 +130,4 @@ __pycache__/
  /tests/test_qwen35_cuda_quant
  /tests/test_qwen35_cuda_recurrent
  /tests/test_qwen35_cuda_attention
 +/tests/test_qwen35_host
 diff --git a/Makefile b/Makefile
-index 37e8829a..9cf38b2a 100644
+index f50afe63..97a03be8 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -798,6 +798,21 @@ test-qwen35-cuda-attention: tests/test_qwen35_cuda_attention
