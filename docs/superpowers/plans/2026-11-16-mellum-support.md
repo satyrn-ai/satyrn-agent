@@ -776,9 +776,11 @@ reconstruction equals the tree at every boundary and all three builds (`common`,
 `make test-qwen4-kernels` passes (all qwen4 kernel tests), `make test-mellum-kernels` passes (992 checks,
 0 failures), and `pytest tests/abnormal tests/e2e/live` gave 48 passed, 1 failed at the time. The failure was
 `test_harness_tui`'s `error: model response ended with max_tokens` on the round after `/switch`; it also
-reproduced on a `ds4py build` of `eed5c4f`'s own qwen35 series. It is now **fixed** (#34): the restore was
-verified identical and the round simply needs more than the marginal 256-token cap; the scenario now runs
-at 512 and the live suite is 49/49 (`3a30dd3`).
+reproduced on a `ds4py build` of `eed5c4f`'s own qwen35 series. It is now **fixed** (#34): the harness put
+the wall clock into a system note, so the round's length was date-dependent; PR #40 pins the clock
+(`e032345`, `4e56bdf`) and the live suite is 49/49 with the original 256-token caps. My earlier cap raise
+(`3a30dd3`) was superseded and is reverted here; the restore itself was verified identical (3,906 tokens,
+36 segments, 7 user turns) throughout.
 of every Qwen behavior. Preserve both build identities and track the failing acceptance explicitly.
 The recorded DFlash parity and metric cases pass.
 
@@ -834,8 +836,9 @@ and 151.38 t/s decode against the Nix-rebuilt reference's 4,063 / 150.70 (+0.20%
 within 0.3% across 0004→0006 and against the reference. Streaming parity is exact on 512 ids for both
 quants (Q8 3+3, 979 slots; MXFP4 3+3, 652 slots). The oracle passes against the Nix-SDK-26 reference
 (exact prefill byte-equal, optimized 63/65 at 1,100 with permitted near-ties and 65/65 at 2,200, greedy
-64/64 equal logits). Qwen's live suite is **49/49** after the #34 cap fix (`3a30dd3`); the old 48/49 was
-the marginal token cap in that scenario, not a restore defect.
+64/64 equal logits). Qwen's live suite is **49/49** after #40's clock pin (`e032345`, `4e56bdf`); the old
+48/49 was date-dependent generation length, not a restore defect. The cap raise (`3a30dd3`) was reverted
+in favour of the pinned clock.
 
 On the final combined export, rebuild the test executables and
 run Mellum config/tokenizer, 992 kernels, rewind, fast paths, the published-Q8
