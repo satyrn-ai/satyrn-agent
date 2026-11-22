@@ -162,21 +162,21 @@ def test_real_metal_satyrn_harness_tui(
                 return evidence
 
             assert tui.footer.custom["dflash"] == "dflash: on, accept — (0/0)"
-            first = await prompt(corpus["greedy-parity"]["prompt"], max_tokens=256)
+            first = await prompt(corpus["greedy-parity"]["prompt"], max_tokens=512)
             assert first.after.drafts_offered > 0
             assert first.after.drafts_accepted > 0
 
             tool_start = len(events)
             await prompt(
                 "Use the read_file tool on README.md now, then report its identifying text. Do not answer from memory.",
-                max_tokens=256,
+                max_tokens=512,
             )
             tool_events = [event.payload["event"] for event in events[tool_start:] if event.kind == "agent_event"]
             tool_calls = sum(isinstance(event, FunctionToolCallEvent) for event in tool_events)
             tool_results = sum(isinstance(event, FunctionToolResultEvent) for event in tool_events)
             assert tool_calls > 0
             assert tool_results > 0
-            await prompt("Which file did you just read, and what identifying text did it contain?", max_tokens=256)
+            await prompt("Which file did you just read, and what identifying text did it contain?", max_tokens=512)
 
             assert await command("/think-budget 2 32") == (
                 "think budget 2 tokens, bias 32.0, close bias, until first write off"
@@ -190,7 +190,7 @@ def test_real_metal_satyrn_harness_tui(
             assert await command("/think-budget until-first-write on") == (
                 "think budget 2 tokens, bias 32.0, close force, until first write on"
             )
-            await prompt(corpus["think-budget"]["prompt"], max_tokens=256)
+            await prompt(corpus["think-budget"]["prompt"], max_tokens=512)
             assert await command("/think-budget close bias") == (
                 "think budget 2 tokens, bias 32.0, close bias, until first write on"
             )
@@ -202,15 +202,15 @@ def test_real_metal_satyrn_harness_tui(
             )
             assert await command("/think-budget off") == "think budget off"
             assert await command("/think-budget") == "think budget off"
-            await prompt("Give one concise sentence about durable agent state.", max_tokens=256)
+            await prompt("Give one concise sentence about durable agent state.", max_tokens=512)
 
             await command("/dflash off")
             assert tui.footer.custom["dflash"].startswith("dflash: off,")
-            await prompt("Give one concise sentence about ordinary decoding.", max_tokens=256)
+            await prompt("Give one concise sentence about ordinary decoding.", max_tokens=512)
             await command("/dflash on")
             assert tui.footer.custom["dflash"].startswith("dflash: on,")
             resumed_before = controller.state.recorder.snapshot()
-            await prompt("Give one concise sentence about speculative decoding.", max_tokens=256)
+            await prompt("Give one concise sentence about speculative decoding.", max_tokens=512)
             resumed_after = controller.state.recorder.snapshot()
             assert resumed_after.drafts_offered > resumed_before.drafts_offered
 
@@ -230,18 +230,18 @@ def test_real_metal_satyrn_harness_tui(
             assert await command("/think-budget") == (
                 "think budget 64 tokens, bias 2.0, close bias, until first write off"
             )
-            await prompt("Confirm the README identifying text is still in our history.", max_tokens=256)
+            await prompt("Confirm the README identifying text is still in our history.", max_tokens=512)
 
             before_compact = controller.state.recorder.snapshot()
             compacted = await command("/compact")
             assert compacted.startswith("Compacted "), compacted
             assert controller.state.recorder.snapshot() == before_compact
-            await prompt("Continue with one concise sentence about the compacted history.", max_tokens=256)
+            await prompt("Continue with one concise sentence about the compacted history.", max_tokens=512)
             compacted_save = await command("/save")
             compacted_id = compacted_save.split()[1]
             await command("/new")
             await command(f"/switch {compacted_id}")
-            await prompt("Give one final concise status sentence.", max_tokens=256)
+            await prompt("Give one final concise status sentence.", max_tokens=512)
 
         try:
             asyncio.run(asyncio.wait_for(scenario(), timeout=1800))
