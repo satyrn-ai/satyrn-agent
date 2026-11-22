@@ -27,7 +27,7 @@ Approval of the checkpoint does not complete the spec's full acceptance.
 | Engine 0001–0006 | Implemented/exported; published-model numerical and tokenizer results recorded | Fix missing Make dependencies for the restored `.inc` files before merge |
 | Exact-prefill placement and reference layout | Koudai's decisions implemented; 0003 exact oracle recorded | Preserve the original measured trees; no new design ruling needed |
 | Task 17 | All 18 qwen35 patches rebased and exported; common/Mellum/full targets reconstruct | Fresh CI after push; focused review of the unreviewed relocation and conflict resolutions |
-| Published-Q8 per-prefix evidence | Recorded; older different-hash measurements remain historical | Reconcile provenance rather than repeat every unchanged gate |
+| Published-file per-prefix evidence | Closed on the current export under Nix SDK 26: config (0001, Q8), tokenizer 30/30 (0002), rewind (0003), fastpath 45/45 (0004), MXFP4 accepted (0005); older runs keep their measured trees | None |
 | Task 15 MXFP4 performance | Current-0005 pair measured on the absorbed export under Nix SDK 26: 4,071 vs 4,063 t/s prefill, 151.38 vs 150.70 decode (n=6); Q8 0004→0006 flat within 0.28% of the reference, decode 0.42–0.72% above | Physical M4 Max row still required |
 | Resident/streamed 512-token parity | Final combined-stack runs recorded: 3+3 per quant on `23df126b`/`4d987745`, ids identical within and across modes (Q8 979 slots, MXFP4 652); older `8b8ef87a`/`ece0d5fe` runs keep their measured trees | None |
 | Physical 36/24/16/8 GB matrix | Pending; M4 Max n=1 screen is supplemental | Koudai: 36/24/16 GB; Paul: 8 GB; all spec thresholds still apply |

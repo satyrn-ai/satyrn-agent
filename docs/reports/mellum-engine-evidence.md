@@ -133,6 +133,23 @@ links `libds4` only and never compiles the test sources, which is why each prefi
 as a suite. The table was re-run on the absorbed export — after the common fast-math patch, the Mellum
 include-dependency fix and the macOS 26 SDK bump — under the Nix toolchain; the 509 and 662 counts for
 0003/0004 were re-verified on that export, the 0006/combined 992, config, tokenizer, oracle and parity on the
+
+### Published-file per-prefix gates, current export (Nix SDK 26)
+
+Run on 2026-11-22 from each prefix's own tree (shaders load relative to the tree, so the test binaries
+must run with that tree as cwd), with the SHA-verified published files:
+
+| Prefix | Commit | Gate | Result |
+| --- | --- | --- | --- |
+| 0001 | `def0de0f` | `tests/test_mellum_config`, Q8 `69e0ac02…` | ok — real model: keys validated, every tensor bound and checked |
+| 0002 | `02b9a068` | `tests/test_mellum_tokenizer`, Q8 | 30/30 ids equal the reference encode (real GGUF) |
+| 0003 | `5a4ab110` | `ds4_test --mellum-rewind`, Q8 | ok — replay differs in 0 of 98,304 from a fresh sync |
+| 0004 | `ece3f5d0` | `make test-mellum-fastpath`, Q8 | PASS (45 checks) |
+| 0005 | `3e02b200` | `tests/test_mellum_config`, MXFP4 `cf09584a…` | ok — MXFP4 accepted, every tensor bound; mixtures refused by name |
+
+The 0003 oracle re-run is recorded above. Physical memory rows remain the only open acceptance item on
+this side.
+
 combined tip. The six patches applied in order reconstruct to tree `71f9b64c` from a pristine clone
 (`ds4-check --model mellum --build`).
 
