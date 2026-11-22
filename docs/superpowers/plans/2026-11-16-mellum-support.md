@@ -28,8 +28,8 @@ Approval of the checkpoint does not complete the spec's full acceptance.
 | Exact-prefill placement and reference layout | Koudai's decisions implemented; 0003 exact oracle recorded | Preserve the original measured trees; no new design ruling needed |
 | Task 17 | All 18 qwen35 patches rebased and exported; common/Mellum/full targets reconstruct | Fresh CI after push; focused review of the unreviewed relocation and conflict resolutions |
 | Published-Q8 per-prefix evidence | Recorded; older different-hash measurements remain historical | Reconcile provenance rather than repeat every unchanged gate |
-| Task 15 MXFP4 performance | The corrected table measures 0006, not the required current 0005 export | Current-0005 MXFP4/reference n=6 pair and attributable numerical/Q8 non-regression evidence |
-| Resident/streamed 512-token parity | Both quants reported 3/3 on `8b8ef87a`; raw ledger also contains older `ece0d5fe` runs | Preserve measured tree IDs and record final combined-stack runs with raw IDs |
+| Task 15 MXFP4 performance | Current-0005 pair measured on the absorbed export under Nix SDK 26: 4,071 vs 4,063 t/s prefill, 151.38 vs 150.70 decode (n=6); Q8 0004→0006 flat within 0.28% of the reference, decode 0.42–0.72% above | Physical M4 Max row still required |
+| Resident/streamed 512-token parity | Final combined-stack runs recorded: 3+3 per quant on `23df126b`/`4d987745`, ids identical within and across modes (Q8 979 slots, MXFP4 652); older `8b8ef87a`/`ece0d5fe` runs keep their measured trees | None |
 | Physical 36/24/16/8 GB matrix | Pending; M4 Max n=1 screen is supplemental | Koudai: 36/24/16 GB; Paul: 8 GB; all spec thresholds still apply |
 | Qwen live suite | Recorded 48 pass, 1 failure after `/switch`, also reported on main's engine | Track the baseline failure explicitly; do not call the full live gate green |
 | ds4-py companions A/B | Not present among the current PRs in `rochecompaan/ds4-py` | Koudai authors, Roché reviews/merges; then Task 18 can consume one reviewed descendant containing both |
@@ -646,7 +646,7 @@ git add patches/mellum && git commit -m "feat(ds4): add the Mellum Q8 fast paths
 
 ### Task 15: Engine patch 0005 — MXFP4_MOE experts
 
-**Status:** Implemented/exported. Older Q8 non-regression is recorded. The MXFP4 pair (4,085/151.99 against 4,074/152.13) was measured at 0006, so it does not close spec §4/§8's current-0005 n=6 comparison. Record that comparison, prefix-specific MXFP4 numerical evidence and attributable Q8 non-regression; physical rows remain pending.
+**Status:** Implemented/exported. The required current-0005 n=6 comparison is closed on the absorbed export under Nix SDK 26: MXFP4 4,071 t/s prefill / 151.38 decode against the Nix-rebuilt `d2d9338` reference's 4,063 / 150.70 (+0.20% / +0.45%), every arm `tensor_matmul=on`. Q8 across 0004→0005→0006 is 3,968 / 3,968 / 3,974 prefill and 128.23 / 128.61 / 128.28 decode against 3,979 / 127.69 (prefill within 0.28% of the reference, decode 0.42–0.72% above). The old 4,085/4,074 row was measured at 0006 on a superseded tree with a different toolchain and is history only. Physical rows remain pending.
 
 **Files:**
 - Create: `patches/mellum/0005-mellum-mxfp4-moe-experts.patch`

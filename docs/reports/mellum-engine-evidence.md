@@ -14,7 +14,7 @@ blob already in the Hugging Face cache. The existing file in `~/models` was not 
 
 Six patches export from commits `0e61bdb8`..`d7b36619` (the current `From` headers), each exactly its own
 delta, authored `pauleveritt <pauleveritt@me.com>`, with the three required trailers. Applying them in order
-reconstructs tree `ca243153` from a pristine clone, and `ds4-check --model mellum --build` passes. The
+reconstructs tree `71f9b64c` from a pristine clone, and `ds4-check --model mellum --build` passes. The `From` headers are now `def0de0f`..`86f044c1`; the earlier `0e61bdb8`..`d7b36619` range and the `ca243153` tree above are superseded exports (the last delta was moving the include-dependency block out of the Darwin-only Makefile branch). The
 per-prefix table below is authoritative for the current export; older ledger entries that name `cd3911c3`,
 `3130743c…`, `5e05d49a` or `8b8ef87a` describe superseded exports. Re-verified 2026-11-20 by materializing each prefix from
 a pristine clone of the pin plus `patches/common` and patches `0001..N`: `d607f0f0`, `9974c264`, `dc4d8de4`,
@@ -99,7 +99,7 @@ The MXFP4 file verifies: sha256 `cf09584a…8166`, 7,029,537,056 bytes. These ar
 ## SSD streaming (0006) on the exported artifact
 
 Tree `ece0d5fe`, context 32768, 512 greedy tokens, three resident and three streamed processes on Q8_0. The
-current 0006 tree is `ca243153`; its only deltas from `ece0d5fe` are the reference `.inc` relocation, removing
+measured 0006 tree there was `ca243153` (historical; the current export is `71f9b64c`); its only deltas from `ece0d5fe` are the reference `.inc` relocation, removing
 duplicate host-contract test lines from `tests/test_mellum_config.c`, and correcting the oracle-script header, so
 the engine source is unchanged. The
 prompt's SHA-256 is `f3b0e01b…6806`. Resident ids agree across all three runs, streamed ids agree across all
@@ -118,19 +118,22 @@ then built and tested. Model: the SHA-verified Q8_0 file (`69e0ac02…6841f`, 12
 
 | Prefix | Tree | config | kernels | model-backed gates |
 |---|---|---:|---:|---|
-| 0001 | `89f3c557` | ok | target absent | real-model config: keys validated, every tensor bound; a drafter path refused by name |
-| 0002 | `70eea3b1` | ok | target absent | tokenizer with the real model: 30/30 ids equal the reference encode |
-| 0003 | `cec4127d` | ok | 509 | `ds4_test --mellum-rewind`: OK |
-| 0004 | `35f966a3` | ok | 662 | `make test-mellum-fastpath`: 45/45 |
-| 0005 | `cce6d946` | ok | 662 | MXFP4 config accepted; mixtures refused by name |
-| 0006 | `fff1d8f9` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
+| 0001 | `0b4d8a8b` | ok | target absent | real-model config: keys validated, every tensor bound; a drafter path refused by name |
+| 0002 | `c7cd6d48` | ok | target absent | tokenizer with the real model: 30/30 ids equal the reference encode |
+| 0003 | `10b1a73c` | ok | 509 | `ds4_test --mellum-rewind`: OK; published-Q8 oracle PASS (see below) |
+| 0004 | `dfa685aa` | ok | 662 | `make test-mellum-fastpath`: 45/45 |
+| 0005 | `27b4430b` | ok | 662 | MXFP4 config accepted; mixtures refused by name |
+| 0006 | `71f9b64c` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
 
-The check counts belong to their prefix: 0003 is 509, 0004 and 0005 are 662, 0006 is 992. `ds4-check --build`
+The kernel counts were measured on the absorbed export immediately before the include-dependency
+placement fix; the only delta between those trees and the current ones is `Makefile` prerequisites
+(`git diff --stat` reports `Makefile` alone for every prefix), so the results carry. The check counts
+belong to their prefix: 0003 is 509, 0004 and 0005 are 662, 0006 is 992. `ds4-check --build`
 links `libds4` only and never compiles the test sources, which is why each prefix above was also built and run
 as a suite. The table was re-run on the absorbed export — after the common fast-math patch, the Mellum
 include-dependency fix and the macOS 26 SDK bump — under the Nix toolchain; the 509 and 662 counts for
 0003/0004 were re-verified on that export, the 0006/combined 992, config, tokenizer, oracle and parity on the
-combined tip. The six patches applied in order reconstruct to tree `fff1d8f9` from a pristine clone
+combined tip. The six patches applied in order reconstruct to tree `71f9b64c` from a pristine clone
 (`ds4-check --model mellum --build`).
 
 ## Oracle against an immutable `d2d9338` build
@@ -143,8 +146,18 @@ The same script run against the 0003 tree (the exact graph, before the 0004 fast
 its release prefill and its "exact" run are the same bytes. This is the published-Q8 exact oracle Koudai asked
 for on 0003.
 
+**Re-run on the SDK-26 0003 prefix (2026-11-21).** Tree `10b1a73c`, published Q8 (`69e0ac02…6841f`),
+reference `/tmp/ds4-ref-nix` (`d2d9338` rebuilt with `apple-sdk_26`, `tensor_matmul=on`). The 0003 prefix
+predates the oracle harness, so `tests/mellum_oracle_compare.sh`, `tests/mellum_logits_compare.py` and the
+three `.tokens` fixtures were copied into a scratch checkout of that tree (harness only; the engine is
+untouched): `sh tests/mellum_oracle_compare.sh /tmp/ds4-ref-nix "$Q8" 64` → PASS. Exact prefill is
+byte-equal at 29, 1,100 and 2,200 (65/65 logits files each); decode is byte-equal; greedy is 64/64 with
+equal logits. The release prefill is byte-equal at 29 and 1,100 and differs only in the permitted near-tie
+form at 2,200 (0/65 byte-equal, 65/65 top-1, max |Δlogit| 8.563). The 509 kernel checks are the kernel
+result, not a substitute for this oracle.
+
 Every run happens before any comparison, so the reference's exact-prefill output exists when it is compared.
-All three cross-engine comparisons are byte-equal in fact at every length. The release `prefill` is held to the
+The exact-prefill and decode comparisons are byte-equal at every length. The release `prefill` is held to the
 near-tie rule at 1,100 and 2,200 only because both engines tile their attention there and a tie could flip; below
 32 rows it is byte-equal too. In-engine, this port's exact prefill is compared to its own decode byte for byte and
 passes at every length.
@@ -164,10 +177,15 @@ Each engine from its own tree, `ARMS=AA`, context 3,072, 2,056-token prompt (`68
 | 0005 (MXFP4) | `b3273aeb` | 4,071 t/s | 151.38 t/s |
 | reference (MXFP4) | `d2d9338`, Nix SDK 26 rebuild | 4,063 t/s | 150.70 t/s |
 
-The current-0005 MXFP4 pair is +0.20% prefill and +0.45% decode; the Q8 series is flat within 0.3%
-across 0004→0006 and against the reference. Binary sha256 (first 16): 0004 `cea4138316d1b0d6`, 0005
+The current-0005 MXFP4 pair is +0.20% prefill and +0.45% decode. Q8 prefill is within 0.28% of the
+reference and within 0.15% across 0004→0006; Q8 decode is within 0.25% across the port prefixes and
+0.42–0.72% above the reference. All well inside the 10% gate. Binary sha256 (first 16): 0004 `cea4138316d1b0d6`, 0005
 `ec85117cefac5e66`, 0006 `ce12609ed5556476`, reference `7c7cbb3436d0ff58`. Raw:
 `/tmp/mellum-perf-sdk26/`.
+
+The measured engine commits predate the include-dependency placement fix; the tree delta is `Makefile`
+only, so the binaries and numbers stand, and the current export's equivalent trees are 0004
+`dfa685aa`, 0005 `27b4430b`, 0006 `71f9b64c`.
 
 The tables below are historical and were measured on superseded exports with other toolchains; they are
 kept for provenance only.
