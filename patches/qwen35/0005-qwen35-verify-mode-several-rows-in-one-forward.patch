@@ -1,4 +1,4 @@
-From f893f4c785d15e4a9d704b22dd93634dca53e3c7 Mon Sep 17 00:00:00 2001
+From 0005cba6c07646bdbb371478d10e966e7f51ea8c Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 7 Oct 2026 05:05:49 +0900
 Subject: [PATCH 05/18] qwen35: verify mode, several rows in one forward
@@ -11,7 +11,7 @@ Carried-commits: 0b5f915 c7e9af6 dd6ad4f e0fa969 df2fb7e 754c338 46e6192 bc7f488
 ---
  .gitignore                      |   1 +
  Makefile                        |  28 +-
- ds4.c                           | 522 ++++++++++++++++++++--
+ ds4.c                           | 521 ++++++++++++++++++++--
  ds4.h                           |  42 ++
  ds4_gpu.h                       |  68 +++
  ds4_metal.m                     | 323 +++++++++++++-
@@ -20,15 +20,15 @@ Carried-commits: 0b5f915 c7e9af6 dd6ad4f e0fa969 df2fb7e 754c338 46e6192 bc7f488
  metal/qwen4.metal               |  52 ++-
  tests/test_qwen35_verify_live.c | 303 +++++++++++++
  tests/test_qwen4_kernels.c      | 739 ++++++++++++++++++++++++++++++++
- 11 files changed, 2385 insertions(+), 52 deletions(-)
+ 11 files changed, 2385 insertions(+), 51 deletions(-)
  create mode 100644 metal/qwen35_mma.metal
  create mode 100644 tests/test_qwen35_verify_live.c
 
 diff --git a/.gitignore b/.gitignore
-index b60b89ce..ae61076a 100644
+index 7338c8a5..2f7cee01 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -83,6 +83,7 @@
+@@ -84,6 +84,7 @@
  /tests/test_linux_memory
  /tests/test_rocm_memory
  /tests/test_qwen4_kernels
@@ -37,12 +37,12 @@ index b60b89ce..ae61076a 100644
  /tests/test_qwen4_vision
  /tests/test_deepseek4_vision_image
 diff --git a/Makefile b/Makefile
-index d4877fbe..7e3a658b 100644
+index c3fe6165..6610da07 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -89,7 +89,10 @@ help:
- 	@echo "  make test-mxfp4-metal  Check the MXFP4 half LUT, then run Metal MXFP4 exactness tests"
- 	@echo "  make test-qwen4-kernels  Run the Qwen3.8 Metal kernel tests"
+@@ -102,7 +102,10 @@ help:
+ 	@echo "  make test-mellum      Run the Mellum 2.1 model-free tests"
+ 	@echo "  make test-mellum-kernels  Run the Mellum 2.1 Metal kernel tests (macOS)"
  	@echo "  make test-qwen4-q2       Check exact low-bit decode and prefill tile parity"
 +	@echo "  make test-qwen35-verify  Check the qwen35 verify-mode kernels against their one-row twins"
  	@echo "  make test-qwen4-vision  Compare the Qwen3.8 vision tower with HF (set DS4_QWEN4_SNAPSHOT, DS4_QWEN4_MMPROJ, DS4_QWEN4_IMAGE)"
@@ -51,7 +51,7 @@ index d4877fbe..7e3a658b 100644
  	@echo "  make dspark-verify-depth  Run DSpark speculative verification smoke if support GGUF is present"
  	@echo "  make mtp-verify-depth  Run legacy MTP speculative verification smoke if MTP GGUF is present"
  	@echo "  make clean        Remove build outputs"
-@@ -909,12 +912,20 @@ test-qwen4-q2: $(QWEN4_KERNEL_TEST) tests/test_qwen4_moe_mm_specialize
+@@ -945,12 +948,20 @@ test-qwen4-q2: $(QWEN4_KERNEL_TEST) tests/test_qwen4_moe_mm_specialize
  	DS4_TEST_QWEN4_MV_EXACT=1 ./$(QWEN4_KERNEL_TEST)
  	./tests/test_qwen4_moe_mm_specialize
  
@@ -72,7 +72,7 @@ index d4877fbe..7e3a658b 100644
  tests/test_glm53_kda_rocm.o: tests/test_glm53_kda.c ds4_gpu.h
  	$(CC) $(filter-out -ffast-math,$(CFLAGS)) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD -I. -c -o $@ $<
  
-@@ -1032,6 +1043,21 @@ else
+@@ -1100,6 +1111,21 @@ else
  	$(DS4_LINK) -o $@ $^ $(DS4_LINK_LIBS)
  endif
  
@@ -94,7 +94,7 @@ index d4877fbe..7e3a658b 100644
  ds4.o ds4_cpu.o ds4_cpu_test_hooks.o ds4_cuda_test_hooks.o ds4_metal.o ds4_cuda.o ds4_rocm.o tests/test_qwen4_cuda.o tests/test_qwen4_kernels.o tests/test_qwen4_ngram_state.o: ds4_qwen4_vision.h
  
  ds4_cuda.o: ds4_cuda.cu ds4_gpu.h ds4_gpu_copy.h ds4_gpu_tp.h ds4_gpu_mgpu.h ds4_linux_memory.h ds4_deepseek41_gpu.h ds4_deepseek41_cuda.cuh ds4_glm53_vision_gpu.cuh ds4_deepseek4_vision_gpu.cuh ds4_qwen4_cuda.cuh ds4_image.h ds4_iq2_tables_cuda.inc cuda/mmq/ds4_mmq.h
-@@ -1405,7 +1431,7 @@ clean:
+@@ -1475,7 +1501,7 @@ clean:
  	rm -f tests/test_metal_tp_cancel
  	rm -f ds4 ds4-server ds4-bench ds4-eval ds4-agent ds4_cpu ds4_native ds4_server_test ds4_test ds4_agent_test gguf-tools/quality-testing/score_official gguf-tools/quality-testing/score_official.o speed-bench/metal_decode_schedule_bench speed-bench/metal_prefill_variant_bench speed-bench/*.o tests/test_q4k_dot tests/test_mxfp4_dot tests/test_mxfp4_metal tests/test_mxfp4_rocm tests/test_mxfp4_cuda tests/test_metal_session_batch tests/test_metal_moe_prefill tests/test_qwen4_moe_mm_specialize tests/test_qwen4_conv_parallel tests/test_q8_prefill_variants tests/test_metal_dense_mpp tests/test_glm53_kda tests/test_glm53_kda_rocm tests/test_glm53_vision_engine tests/test_glm53_vision_prompt tests/test_deepseek4_vision_image tests/test_prompt_prefix tests/test_gpu_xdev tests/test_gpu_model_cache tests/test_gpu_lookup_cache_strict tests/test_engine_mgpu_refusal tests/test_engine_mgpu_runtime tests/test_engine_correctness tests/test_sampling tests/test_cuda_session_batch tests/test_cuda_mixed_batch tests/*.o *.o tests/cuda_long_context_smoke tests/cuda_long_context_smoke.o
  	rm -f tests/test_image_decode
@@ -104,10 +104,10 @@ index d4877fbe..7e3a658b 100644
  
  # The active tokenizer includes generated Unicode classes.
 diff --git a/ds4.c b/ds4.c
-index 00b8eedf..149ac082 100644
+index e838421c..194971b2 100644
 --- a/ds4.c
 +++ b/ds4.c
-@@ -58854,6 +58854,11 @@ static const ds4_vision_span *qwen4_fake_spans(size_t *count) {
+@@ -59193,6 +59193,11 @@ static const ds4_vision_span *qwen4_fake_spans(size_t *count) {
      X(moe_lists) X(moe_counts) X(sh_gate) X(sh_up) X(sh_mid) X(sh_out) \
      X(hc_u) X(hc_lo_act)
  
@@ -119,7 +119,7 @@ index 00b8eedf..149ac082 100644
  typedef struct ds4_qwen4_gpu_graph {
      uint32_t ctx_cap;
      uint32_t pos;
-@@ -58926,6 +58931,19 @@ typedef struct ds4_qwen4_gpu_graph {
+@@ -59300,6 +59305,19 @@ typedef struct ds4_qwen4_gpu_graph {
      bool snap_after_first;   /* set by the caller for a 2-token verify: snapshot the state after row 0 */
      bool snap_after_second;  /* 3-token verify: also snapshot the state after row 1 */
      bool verify_rows_exact;  /* 3-token verify: split attention into 2/1-row sub-batches */
@@ -139,7 +139,7 @@ index 00b8eedf..149ac082 100644
      bool snap_valid;
      /* multimodal: per-position (t, h, w) rope positions, the text counter
       * offset, and the image spans of the prompt being prefilled */
-@@ -59077,6 +59095,8 @@ static void qwen4_graph_free(ds4_qwen4_gpu_graph *g) {
+@@ -59455,6 +59473,8 @@ static void qwen4_graph_free(ds4_qwen4_gpu_graph *g) {
          &g->mtp_e, &g->mtp_cat, &g->mtp_proj, &g->mtp_R, &g->mtp_argmax, &g->mtp_argmax_tmp,
          &g->snap_ple_hist, &g->snap2_ple_hist, &g->snap0_ple_hist, &g->pos3,
          &g->draft_head, &g->steer_dirs, &g->ffn_gate, &g->ffn_up, &g->ffn_mid,
@@ -148,16 +148,16 @@ index 00b8eedf..149ac082 100644
      };
      if (g->owns_scratch) {
          ds4_gpu_tensor **scratch[] = {
-@@ -59121,6 +59141,7 @@ static void qwen4_graph_free(ds4_qwen4_gpu_graph *g) {
-         ds4_gpu_tensor_free(g->snap0_lin_hist[il]);
-     }
+@@ -59510,6 +59530,7 @@ static void qwen4_graph_free(ds4_qwen4_gpu_graph *g) {
+     for (uint32_t il = 0; il < DS4_MAX_LAYER; il++)
+         for (int t = 0; t < 3; t++) ds4_gpu_tensor_free(g->mellum_stream_addr[il][t]);
      free(g->host_logits);
 +    free(g->qwen35_verify_host);
      memset(g, 0, sizeof(*g));
  }
  
-@@ -59518,13 +59539,36 @@ static void qwen4_graph_reset(ds4_qwen4_gpu_graph *g) {
-     g->snap_after_second = false;
+@@ -59910,13 +59931,36 @@ static void qwen4_graph_reset(ds4_qwen4_gpu_graph *g) {
+     if (ds4_model_is_mellum()) (void)mellum_graph_forget_ring(g);
  }
  
 -/* rows > 0 limits the product to a contiguous leading prefix of w. */
@@ -195,7 +195,7 @@ index 00b8eedf..149ac082 100644
      /* Qwen's recurrent graph keeps activations in FP32. The generic CUDA
       * projections can round them to half or quantize them for other models. */
      if (in_dim <= UINT32_MAX && out_dim <= UINT32_MAX)
-@@ -59532,6 +59576,15 @@ static bool qwen4_gemv_rows(ds4_gpu_tensor *out, const ds4_model *m, const ds4_t
+@@ -59924,6 +59968,15 @@ static bool qwen4_gemv_rows(ds4_gpu_tensor *out, const ds4_model *m, const ds4_t
                                             w->type, n_tok, (uint32_t)in_dim, (uint32_t)out_dim);
  #else
  
@@ -211,7 +211,7 @@ index 00b8eedf..149ac082 100644
      /* Small F16 batches use float operands. Two/three-row verification and
       * large prefills retain their existing kernels. The legacy switch is an
       * arithmetic/performance control, not a user tuning option. */
-@@ -59600,7 +59653,14 @@ static bool qwen4_gemv_rows(ds4_gpu_tensor *out, const ds4_model *m, const ds4_t
+@@ -59992,7 +60045,14 @@ static bool qwen4_gemv_rows(ds4_gpu_tensor *out, const ds4_model *m, const ds4_t
  
  static bool qwen4_gemv(ds4_gpu_tensor *out, const ds4_model *m, const ds4_tensor *w,
                         const ds4_gpu_tensor *x, uint32_t n_tok) {
@@ -227,7 +227,7 @@ index 00b8eedf..149ac082 100644
  }
  
  /* The MTP draft only needs its argmax, and the tokenizer assigns ids in
-@@ -59670,6 +59730,8 @@ static bool qwen4_graph_fused(const ds4_qwen4_gpu_graph *g, uint32_t T) {
+@@ -60062,6 +60122,8 @@ static bool qwen4_graph_fused(const ds4_qwen4_gpu_graph *g, uint32_t T) {
      static int no_fuse = -1;
      if (no_fuse < 0) no_fuse = getenv("DS4_QWEN4_NO_FUSE") != NULL;
      if (no_fuse || T <= 2u) return T <= 2u && !no_fuse;
@@ -236,7 +236,7 @@ index 00b8eedf..149ac082 100644
      /* T = 3 takes the fused kernels for the speculative verify only; prefill
       * tails of three tokens keep their historical kernel selection. */
      return T == 3u && g->verify_rows_exact;
-@@ -59736,8 +59798,53 @@ static bool qwen4_graph_hc_mix(ds4_qwen4_gpu_graph *g, const ds4_model *m,
+@@ -60128,8 +60190,53 @@ static bool qwen4_graph_hc_mix(ds4_qwen4_gpu_graph *g, const ds4_model *m,
                                                    up->type, T, DS4_N_EMBD, DS4_N_HC, DS4_N_HC_LOWRANK);
  }
  
@@ -290,7 +290,7 @@ index 00b8eedf..149ac082 100644
      const uint32_t conv_dim = DS4_N_LIN_CONV_DIM;
      bool paired = false;
      if (T == 1u && !g->mtp_R && ds4_gpu_qwen4_decode_fusions_enabled() &&
-@@ -59746,8 +59853,8 @@ static bool qwen4_graph_linear(ds4_qwen4_gpu_graph *g, const ds4_model *m, const
+@@ -60138,8 +60245,8 @@ static bool qwen4_graph_linear(ds4_qwen4_gpu_graph *g, const ds4_model *m, const
              l->lin_qkv->abs_offset, l->lin_gate->abs_offset, DS4_N_EMBD,
              l->lin_qkv->dim[1], l->lin_gate->dim[1], g->mixed, T) != 0;
      }
@@ -301,7 +301,7 @@ index 00b8eedf..149ac082 100644
          return false;
      }
      bool ok;
-@@ -59759,8 +59866,8 @@ static bool qwen4_graph_linear(ds4_qwen4_gpu_graph *g, const ds4_model *m, const
+@@ -60151,8 +60258,8 @@ static bool qwen4_graph_linear(ds4_qwen4_gpu_graph *g, const ds4_model *m, const
                                              DS4_N_EMBD, g->snap_after_first ? g->snap_lin_hist[il] : NULL, 0u,
                                              g->snap_after_second ? g->snap2_lin_hist[il] : NULL, 1u) != 0;
      } else {
@@ -312,7 +312,7 @@ index 00b8eedf..149ac082 100644
               ds4_gpu_qwen4_conv_stream_tensor(g->qkv, g->layer_lin_hist[il], m->map, m->size, l->lin_conv->abs_offset,
                                                T, conv_dim, DS4_N_LIN_CONV, true) &&
               ds4_gpu_qwen4_gdn_prep_tensor(g->qkv, g->ga, g->gb, m->map, m->size, l->lin_a->abs_offset,
-@@ -59783,7 +59890,7 @@ static bool qwen4_graph_linear(ds4_qwen4_gpu_graph *g, const ds4_model *m, const
+@@ -60175,7 +60282,7 @@ static bool qwen4_graph_linear(ds4_qwen4_gpu_graph *g, const ds4_model *m, const
          ok = ds4_gpu_qwen4_gdn_out_tensor(g->lin_o, g->z, m->map, m->size, l->lin_norm->abs_offset, T,
                                            DS4_N_LIN_V_HEAD, DS4_N_LIN_HEAD_DIM, DS4_RMS_EPS) != 0;
      }
@@ -321,7 +321,7 @@ index 00b8eedf..149ac082 100644
      return ok;
  }
  
-@@ -60111,22 +60218,99 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
+@@ -60504,22 +60611,99 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
  #if defined(__APPLE__)
  /* Dense qwen35 gated GQA attention over positions 0..pos: [q|gate] per head,
   * RMS-normed q and k with partial NeoX rope, f16 K/V, softmax(qk/sqrt(D))v
@@ -435,7 +435,7 @@ index 00b8eedf..149ac082 100644
  }
  
  /* Embedding rows dequantized on the host into R, and text rope positions. */
-@@ -60152,46 +60336,121 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
+@@ -60545,46 +60729,121 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
                                          const int *tokens, uint32_t T, float *logits_out, bool all_rows) {
      const uint32_t pos0 = g->pos, E = DS4_N_EMBD, F = DS4_N_FF_DENSE;
      const uint32_t n_trunk = DS4_N_LAYER - DS4_N_NEXTN_PREDICT;
@@ -566,17 +566,10 @@ index 00b8eedf..149ac082 100644
      return ok;
  }
  #endif
-@@ -60204,16 +60463,17 @@ static bool qwen35_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model
- static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds4_weights *w,
-                                        const int *tokens, uint32_t T, float *logits_out, bool all_rows) {
-     if (!g || T == 0 || T > g->cap_tokens || g->pos + T > g->ctx_cap) return false;
--    if (all_rows && T > g->n_logit_rows) return false;
-     for (uint32_t t = 0; t < T; t++) {
-         if (tokens[t] < 0 || tokens[t] >= (int)DS4_N_VOCAB) {
-             fprintf(stderr, "ds4: Qwen3.8 token id %d is outside the vocabulary\n", tokens[t]);
-             return false;
-         }
+@@ -60606,9 +60865,11 @@ static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *
      }
+     /* Mellum has its own forward: no hyper-connections, GDN or PLE, and nothing here stages into host_row */
+     if (ds4_model_is_mellum()) return mellum_graph_forward_tokens(g, m, w, tokens, T, logits_out, all_rows);
 +    /* qwen35 checks all_rows itself, after a verify has grown the logit rows */
  #if defined(__APPLE__)
      if (ds4_model_is_qwen35()) return qwen35_graph_forward_tokens(g, m, w, tokens, T, logits_out, all_rows);
@@ -585,7 +578,7 @@ index 00b8eedf..149ac082 100644
      const uint32_t pos0 = g->pos;
      const uint32_t n_trunk = DS4_N_LAYER - DS4_N_NEXTN_PREDICT;
      const uint32_t hc_dim = DS4_N_EMBD * DS4_N_HC;
-@@ -60588,7 +60848,8 @@ static bool qwen4_graph_mtp_steps(ds4_qwen4_gpu_graph *g, const ds4_model *m, co
+@@ -61010,7 +61271,8 @@ static bool qwen4_graph_mtp_steps(ds4_qwen4_gpu_graph *g, const ds4_model *m, co
          ok = last && qwen4_graph_hc_mix(g, m, l->nextn_hc_head_norm, l->nextn_hc_head_down, l->nextn_hc_head_up, NULL, 1) &&
               (gathered ? ds4_gpu_qwen4_matmul_q8_0_weights_tensor(g->logits, g->draft_head, (uint32_t)w->output->dim[0],
                                                                    head_rows, g->mixed) != 0
@@ -595,7 +588,7 @@ index 00b8eedf..149ac082 100644
      }
      g->R = R_save;
      if (ok && gpu_argmax) ok = ds4_gpu_qwen4_argmax_tensor(g->mtp_argmax, g->mtp_argmax_tmp,
-@@ -60674,7 +60935,7 @@ static bool qwen4_graph_mtp_chain_step(ds4_qwen4_gpu_graph *g, const ds4_model *
+@@ -61096,7 +61358,7 @@ static bool qwen4_graph_mtp_chain_step(ds4_qwen4_gpu_graph *g, const ds4_model *
          last = ds4_gpu_tensor_view(g->mtp_R, 0, hc * emb_bytes);
          g->R = last;
          ok = last && qwen4_graph_hc_mix(g, m, l->nextn_hc_head_norm, l->nextn_hc_head_down, l->nextn_hc_head_up, NULL, 1) &&
@@ -604,7 +597,7 @@ index 00b8eedf..149ac082 100644
      }
      g->R = R_save;
      if (ok) ok = ds4_gpu_qwen4_argmax_tensor(g->mtp_argmax, g->mtp_argmax_tmp, g->logits, chain_head_rows) != 0;
-@@ -61729,6 +61990,12 @@ struct ds4_session {
+@@ -62152,6 +62414,12 @@ struct ds4_session {
      float *qwen4_verify_logits;
      uint64_t qwen4_spec_cycles;
      uint64_t qwen4_spec_accepted;
@@ -617,7 +610,7 @@ index 00b8eedf..149ac082 100644
  #endif
      uint32_t glm_dense_cache_len;
      /* GLM MTP speculative state.  parent is the token that conditioned the
-@@ -61821,6 +62088,24 @@ struct ds4_session {
+@@ -62245,6 +62513,24 @@ struct ds4_session {
      bool greedy_splitkv_anchor_valid;
  };
  
@@ -642,47 +635,47 @@ index 00b8eedf..149ac082 100644
  static bool ds4_session_tp_leader(const ds4_session *s);
  
  #ifndef DS4_NO_GPU
-@@ -64160,6 +64445,7 @@ int ds4_session_stage_payload(ds4_session *s, ds4_session_payload_file *out,
-         return 1;
+@@ -64600,6 +64886,7 @@ int ds4_session_stage_payload(ds4_session *s, ds4_session_payload_file *out,
      }
      memset(out, 0, sizeof(*out));
+     if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
 +    if (ds4_session_verify_refuses(s, "payload staging", err, errlen)) return 1;
      if (!s || !s->checkpoint_valid) {
          payload_set_err(err, errlen, "session has no valid checkpoint to stage");
          return 1;
-@@ -64579,6 +64865,7 @@ static int qwen4_session_load_payload(ds4_session *s, FILE *fp, const uint32_t *
- #endif
+@@ -65020,6 +65307,7 @@ static int qwen4_session_load_payload(ds4_session *s, FILE *fp, const uint32_t *
  
  int ds4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_t errlen) {
+     if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
 +    if (ds4_session_verify_refuses(s, "payload save", err, errlen)) return 1;
      if (!s || !fp || !s->checkpoint_valid) {
          payload_set_err(err, errlen, "session has no valid checkpoint to save");
          return 1;
-@@ -64930,6 +65217,7 @@ int ds4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_t errlen)
- }
+@@ -65372,6 +65660,7 @@ int ds4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_t errlen)
  
  int ds4_session_load_payload(ds4_session *s, FILE *fp, uint64_t payload_bytes, char *err, size_t errlen) {
+     if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
 +    if (ds4_session_verify_refuses(s, "payload load", err, errlen)) return 1;
      if (!s || !fp) {
          payload_set_err(err, errlen, "invalid session payload load");
          return 1;
-@@ -65563,6 +65851,7 @@ int ds4_session_save_snapshot(ds4_session *s, ds4_session_snapshot *snap, char *
-         payload_set_err(err, errlen, "invalid session snapshot save");
+@@ -66006,6 +66295,7 @@ int ds4_session_save_snapshot(ds4_session *s, ds4_session_snapshot *snap, char *
          return 1;
      }
+     if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
 +    if (ds4_session_verify_refuses(s, "snapshot save", err, errlen)) return 1;
      if (s->distributed) {
          payload_set_err(err, errlen, "distributed session snapshots are not supported yet");
          return 1;
-@@ -65609,6 +65898,7 @@ int ds4_session_load_snapshot(ds4_session *s, const ds4_session_snapshot *snap,
-         payload_set_err(err, errlen, "invalid session snapshot load");
+@@ -66053,6 +66343,7 @@ int ds4_session_load_snapshot(ds4_session *s, const ds4_session_snapshot *snap,
          return 1;
      }
+     if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
 +    if (ds4_session_verify_refuses(s, "snapshot load", err, errlen)) return 1;
      if (s->distributed) {
          payload_set_err(err, errlen, "distributed session snapshots are not supported yet");
          return 1;
-@@ -77254,6 +77544,7 @@ static int ds4_session_sync_lockstep(ds4_session *s, const ds4_tokens *prompt,
+@@ -77812,6 +78103,7 @@ static int ds4_session_sync_lockstep(ds4_session *s, const ds4_tokens *prompt,
   * once its matching prefill completes, surfacing worker-side failures
   * here instead of as a gate timeout mid-decode. */
  int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t errlen) {
@@ -690,7 +683,7 @@ index 00b8eedf..149ac082 100644
  #ifndef DS4_NO_GPU
      if (s) s->dspark_rewind_end = 0;
  #endif
-@@ -77355,6 +77646,7 @@ int ds4_session_sync_multimodal(
+@@ -77913,6 +78205,7 @@ int ds4_session_sync_multimodal(
          snprintf(err, errlen, "invalid multimodal prompt");
          return 1;
      }
@@ -698,7 +691,7 @@ index 00b8eedf..149ac082 100644
      if (image_count != 0 && !s->engine->vision_ready) {
          snprintf(err, errlen, "vision encoder is not loaded");
          return 1;
-@@ -79617,6 +79909,7 @@ static void ds4_session_prepare_support_draft(ds4_session *s,
+@@ -80189,6 +80482,7 @@ static void ds4_session_prepare_support_draft(ds4_session *s,
  static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
                                       char *err, size_t errlen) {
      if (!s) return 1;
@@ -706,7 +699,7 @@ index 00b8eedf..149ac082 100644
  #ifndef DS4_NO_GPU
      s->dspark_rewind_end = 0;
  #endif
-@@ -82259,6 +82552,7 @@ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count
+@@ -82831,6 +83125,7 @@ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count
              if (err && errlen) snprintf(err, errlen, "decode batch item %d has an invalid token", i);
              return 1;
          }
@@ -714,7 +707,7 @@ index 00b8eedf..149ac082 100644
          for (int j = 0; j < i; j++) {
              if (items[j].session == s) {
                  if (err && errlen) snprintf(err, errlen, "decode batch repeats session at items %d and %d", j, i);
-@@ -82460,6 +82754,7 @@ int ds4_sessions_eval_batch(ds4_decode_item *items, int count,
+@@ -83032,6 +83327,7 @@ int ds4_sessions_eval_batch(ds4_decode_item *items, int count,
              }
              return 1;
          }
@@ -722,7 +715,7 @@ index 00b8eedf..149ac082 100644
          for (int j = 0; j < i; j++) {
              if (items[j].session == s) {
                  if (err && errlen) {
-@@ -82515,6 +82810,10 @@ int ds4_sessions_eval_batch_with_prefill(
+@@ -83087,6 +83383,10 @@ int ds4_sessions_eval_batch_with_prefill(
          if (err && errlen) snprintf(err, errlen, "invalid mixed model batch");
          return 1;
      }
@@ -733,7 +726,7 @@ index 00b8eedf..149ac082 100644
      if (!prefill_session->checkpoint_valid ||
          prefill_prompt->len <= prefill_session->checkpoint.len ||
          prefill_prompt->len > prefill_session->ctx_size ||
-@@ -86921,6 +87220,7 @@ static int ds4_session_eval_speculative_argmax_impl(
+@@ -87493,6 +87793,7 @@ static int ds4_session_eval_speculative_argmax_impl(
          int *accepted, int accepted_cap,
          char *err, size_t errlen) {
      if (!s || max_tokens <= 0 || accepted_cap <= 0) return 0;
@@ -741,7 +734,7 @@ index 00b8eedf..149ac082 100644
      if (!s->checkpoint_valid) {
          payload_set_err(err, errlen, "speculative decode requires a synchronized checkpoint");
          return -1;
-@@ -87803,6 +88103,7 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
+@@ -88375,6 +88676,7 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
      if (!s || !accepted || !rng || max_tokens <= 0 || accepted_cap <= 0) {
          return 0;
      }
@@ -749,7 +742,7 @@ index 00b8eedf..149ac082 100644
      if (!s->checkpoint_valid) {
          payload_set_err(err, errlen, "speculative decode requires a synchronized checkpoint");
          return -1;
-@@ -87939,6 +88240,151 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
+@@ -88511,6 +88813,151 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
  #endif
  }
  
@@ -901,7 +894,7 @@ index 00b8eedf..149ac082 100644
  void ds4_session_invalidate(ds4_session *s) {
      if (!s) return;
      if (ds4_session_tp_leader(s) &&
-@@ -87948,6 +88394,9 @@ void ds4_session_invalidate(ds4_session *s) {
+@@ -88520,6 +88967,9 @@ void ds4_session_invalidate(ds4_session *s) {
      s->checkpoint_valid = false;
      s->checkpoint.len = 0;
      s->mtp_draft_valid = false;
@@ -911,7 +904,7 @@ index 00b8eedf..149ac082 100644
      free(s->checkpoint_images);
      s->checkpoint_images = NULL;
      s->checkpoint_image_count = 0;
-@@ -88101,6 +88550,11 @@ bool ds4_session_rewind_speculative(ds4_session *s, int pos) {
+@@ -88673,6 +89123,11 @@ bool ds4_session_rewind_speculative(ds4_session *s, int pos) {
  
  void ds4_session_rewind(ds4_session *s, int pos) {
      if (!s) return;
@@ -924,10 +917,10 @@ index 00b8eedf..149ac082 100644
      if (pos >= s->checkpoint.len) return;
      if (ds4_session_rewind_speculative(s, pos)) return;
 diff --git a/ds4.h b/ds4.h
-index 2d2cfc1d..68f883ea 100644
+index 17c5667b..335cdaab 100644
 --- a/ds4.h
 +++ b/ds4.h
-@@ -586,6 +586,48 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
+@@ -606,6 +606,48 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
                                   float top_p, float min_p, uint64_t *rng,
                                   int *accepted, int accepted_cap,
                                   char *err, size_t errlen);
@@ -977,10 +970,10 @@ index 2d2cfc1d..68f883ea 100644
   * batch verify for KV side effects, then obey the leader's commit frame
   * (keep, or roll back and replay). flags are the VERIFY frame's
 diff --git a/ds4_gpu.h b/ds4_gpu.h
-index 1df3c5fa..179edbf7 100644
+index 9aeca64a..0b035be5 100644
 --- a/ds4_gpu.h
 +++ b/ds4_gpu.h
-@@ -789,6 +789,20 @@ int ds4_gpu_matmul_quant_tensor(
+@@ -797,6 +797,20 @@ int ds4_gpu_matmul_quant_tensor(
          const ds4_gpu_tensor *x,
          uint64_t                n_tok);
  
@@ -1001,7 +994,7 @@ index 1df3c5fa..179edbf7 100644
  /* Dense Q6_K matvec (Metal only), for the Q6_K tensors of dense qwen35's
   * Q4_K_M recipes: selected down projections and the output head. */
  int ds4_gpu_matmul_q6_K_tensor(
-@@ -801,6 +815,22 @@ int ds4_gpu_matmul_q6_K_tensor(
+@@ -809,6 +823,22 @@ int ds4_gpu_matmul_q6_K_tensor(
          const ds4_gpu_tensor *x,
          uint64_t              n_tok);
  
@@ -1024,7 +1017,7 @@ index 1df3c5fa..179edbf7 100644
  /* The same product through the tiled prefill kernel (Metal only): each
   * weight is read once per 32 tokens instead of once per token.  Dense
   * qwen35 uses it for prompt batches. */
-@@ -3540,6 +3570,9 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
+@@ -3548,6 +3578,9 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
  /* snap_state/snap2_state (optional) receive the state right after tokens
   * snap_tok/snap2_tok; two points serve the 3-row MTP verifier */
  void ds4_gpu_qwen4_set_verify_rows_exact(bool on);
@@ -1034,7 +1027,7 @@ index 1df3c5fa..179edbf7 100644
  int ds4_gpu_qwen4_gdn_scan_tensor(
          ds4_gpu_tensor *out, ds4_gpu_tensor *state, const ds4_gpu_tensor *qkv,
          const ds4_gpu_tensor *a, const ds4_gpu_tensor *b,
-@@ -3563,6 +3596,17 @@ int ds4_gpu_qwen35_attn_prep_tensor(
+@@ -3571,6 +3604,17 @@ int ds4_gpu_qwen35_attn_prep_tensor(
          uint64_t g_q_offset, uint64_t g_k_offset,
          uint32_t n_tokens, uint32_t n_head, uint32_t n_head_kv, uint32_t head_dim, uint32_t n_rot,
          uint32_t pos0, uint32_t cache_cap, float rope_base, float eps);
@@ -1052,7 +1045,7 @@ index 1df3c5fa..179edbf7 100644
  int ds4_gpu_qwen4_ple_gate_tensor(
          ds4_gpu_tensor *gated, ds4_gpu_tensor *normed, const ds4_gpu_tensor *R,
          const ds4_gpu_tensor *key, const ds4_gpu_tensor *value,
-@@ -3683,6 +3727,30 @@ int ds4_gpu_qwen4_gdn_front_tensor(
+@@ -3699,6 +3743,30 @@ int ds4_gpu_qwen4_gdn_front_tensor(
          uint32_t weight_type, uint32_t n_tokens, uint32_t n_k_head, uint32_t n_v_head, uint32_t head_dim,
          uint32_t conv_kernel, uint32_t in_dim, ds4_gpu_tensor *snap_state, uint32_t snap_tok,
          ds4_gpu_tensor *snap2_state, uint32_t snap2_tok);
@@ -1084,18 +1077,18 @@ index 1df3c5fa..179edbf7 100644
   * resampled position embedding [n_patches][n_embd]; out receives
   * [n_patches/4][n_out].  Weights are read from the mapped mmproj GGUF. */
 diff --git a/ds4_metal.m b/ds4_metal.m
-index eb17dda0..8a97174d 100644
+index f0e4bc55..4ef0553d 100644
 --- a/ds4_metal.m
 +++ b/ds4_metal.m
-@@ -4807,6 +4807,7 @@ static NSString *ds4_gpu_full_source(void) {
-         @[@"DS4_METAL_SET_ROWS_SOURCE",   @"metal/set_rows.metal"],
+@@ -4873,6 +4873,7 @@ static NSString *ds4_gpu_full_source(void) {
          @[@"DS4_METAL_QWEN4_SOURCE",      @"metal/qwen4.metal"],
          @[@"DS4_METAL_QWEN4_VISION_SOURCE", @"metal/qwen4_vision.metal"],
+         @[@"DS4_METAL_MELLUM_SOURCE",     @"metal/mellum.metal"],
 +        @[@"DS4_METAL_QWEN35_MMA_SOURCE", @"metal/qwen35_mma.metal"],
      ];
  
      NSMutableString *source = [NSMutableString stringWithString:base];
-@@ -20076,6 +20077,93 @@ int ds4_gpu_matmul_quant_decode_mpp_model_view_tensor(
+@@ -20355,6 +20356,93 @@ int ds4_gpu_matmul_quant_decode_mpp_model_view_tensor(
                                              false);
  }
  
@@ -1189,7 +1182,7 @@ index eb17dda0..8a97174d 100644
  /* Dense Q6_K projection: the matvec of the Q4_K_M recipes' Q6_K tensors
   * (down projections, output head) for dense qwen35. */
  typedef struct {
-@@ -20157,6 +20245,111 @@ int ds4_gpu_matmul_q6_K_tensor(
+@@ -20436,6 +20524,111 @@ int ds4_gpu_matmul_q6_K_tensor(
      return 1;
  }
  
@@ -1301,23 +1294,23 @@ index eb17dda0..8a97174d 100644
  int ds4_gpu_matmul_quant_rows_scalar_tensor(
          ds4_gpu_tensor       *out,
          const void             *model_map,
-@@ -48358,6 +48551,7 @@ enum {
-     QWEN4_K_VIS_BIAS_RESIDUAL,
-     QWEN4_K_VIS_BIAS_ACT,
+@@ -48659,6 +48852,7 @@ enum {
+     QWEN4_K_MOE_MM_DOWN_NAXC_ADDR,
+     QWEN4_K_MOE_MM_DOWN_NAXC64_ADDR,
      QWEN4_K_QWEN35_GDN_OUT,
 +    QWEN4_K_QWEN35_GDN_HIST_COMMIT,
      QWEN4_K_COUNT,
  };
  
-@@ -48464,6 +48658,7 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
-     "kernel_qwen4_vis_bias_residual",
-     "kernel_qwen4_vis_bias_act",
+@@ -48787,6 +48981,7 @@ static const char *const qwen4_kernel_names[QWEN4_K_COUNT] = {
+     "kernel_qwen4_moe_mm_down_naxc_addr",
+     "kernel_qwen4_moe_mm_down_naxc64_addr",
      "kernel_qwen35_gdn_out",
 +    "kernel_qwen35_gdn_hist_commit",
  };
  
  typedef struct {
-@@ -48869,16 +49064,26 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
+@@ -49194,16 +49389,26 @@ int ds4_gpu_qwen4_gdn_prep_tensor(
                            MTLSizeMake(n_k_head, n_tokens, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -1348,7 +1341,7 @@ index eb17dda0..8a97174d 100644
      const uint64_t state_bytes = (uint64_t)n_v_head * head_dim * head_dim * sizeof(float);
      qwen4_bind bd[7];
      if (n_tokens == 0 || head_dim < 32 || head_dim > 128 || (head_dim % 32) != 0 || n_k_head == 0 ||
-@@ -48899,7 +49104,8 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
+@@ -49224,7 +49429,8 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
      } else {
          bd[6] = bd[3];
      }
@@ -1358,7 +1351,7 @@ index eb17dda0..8a97174d 100644
          getenv("DS4_QWEN4_NO_GDN_R4") == NULL;
      if (head_dim == 128u && (n_tokens > 8u || decode_r4)) {
          /* SIMD groups own independent value rows, so changing their grouping
-@@ -48920,6 +49126,40 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
+@@ -49245,6 +49451,40 @@ int ds4_gpu_qwen4_gdn_scan_tensor(
                            MTLSizeMake(head_dim, n_v_head, 1), MTLSizeMake(32, 1, 1), 0);
  }
  
@@ -1399,8 +1392,8 @@ index eb17dda0..8a97174d 100644
  static ds4_gpu_tensor *g_qwen4_gdn_slots;
  
  /* One decode step for every row of a batch against its own slot of the state
-@@ -49752,6 +49992,32 @@ int ds4_gpu_qwen4_attn_decode_rows_tensor(
-                           MTLSizeMake(n_head, n_rows, 1), MTLSizeMake(head_dim, 1, 1), 0);
+@@ -50160,6 +50400,32 @@ int ds4_gpu_mellum_attn_full_rows_tensor(
+     return 1;
  }
  
 +int ds4_gpu_qwen35_attn_verify_tensor(
@@ -1432,7 +1425,7 @@ index eb17dda0..8a97174d 100644
  int ds4_gpu_qwen4_moe_mid_tensor(
          ds4_gpu_tensor *mid, const ds4_gpu_tensor *x, const ds4_gpu_tensor *selected,
          const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset,
-@@ -50353,24 +50619,26 @@ int ds4_gpu_qwen4_mtp_combine_tensor(
+@@ -50938,24 +51204,26 @@ int ds4_gpu_qwen4_mtp_combine_tensor(
                            MTLSizeMake((n + 255u) / 256u, 1, 1), MTLSizeMake(256, 1, 1), 0);
  }
  
@@ -1464,7 +1457,7 @@ index eb17dda0..8a97174d 100644
      if (n_tokens == 0 || n_k_head == 0 || head_dim % 32 != 0 || n_v_head % n_k_head != 0 ||
          conv_kernel < 2 || conv_kernel > 4 || row_bytes == 0 ||
          !qwen4_bind_tensor(&b[0], qkv, (uint64_t)n_tokens * conv_dim * sizeof(float), "gdn front qkv") ||
-@@ -50396,15 +50664,48 @@ int ds4_gpu_qwen4_gdn_front_tensor(
+@@ -50981,15 +51249,48 @@ int ds4_gpu_qwen4_gdn_front_tensor(
      } else {
          b[11] = b[1];
      }
@@ -1891,7 +1884,7 @@ index 00000000..1c84900d
 +template [[host_name("kernel_qwen35_mma_q6_K_f32_nt2")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<2, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
 +template [[host_name("kernel_qwen35_mma_q6_K_f32_nt4")]] kernel qwen35_mma_t kernel_qwen35_mma_f32<4, block_q6_K, 16, qwen35_mma_dequantize_q6_K>;
 diff --git a/metal/qwen4.metal b/metal/qwen4.metal
-index 4c587c31..f43df3d4 100644
+index 6d3ec5ae..96741fd3 100644
 --- a/metal/qwen4.metal
 +++ b/metal/qwen4.metal
 @@ -697,7 +697,7 @@ struct ds4_metal_args_qwen4_gdn_scan {
@@ -1950,7 +1943,7 @@ index 4c587c31..f43df3d4 100644
  struct ds4_metal_args_qwen35_q6_matmul {
      uint32_t in_dim;
      uint32_t out_dim;
-@@ -4651,7 +4677,7 @@ struct ds4_metal_args_qwen4_gdn_front {
+@@ -4785,7 +4811,7 @@ struct ds4_metal_args_qwen4_gdn_front {
      uint32_t row_bytes;
      uint32_t snap_tok;     /* copy the conv history after this token into snap_state */
      uint32_t snap2_tok;    /* second snapshot point for 3-row MTP verifies */
@@ -1959,7 +1952,7 @@ index 4c587c31..f43df3d4 100644
      uint32_t pad2;
  };
  
-@@ -4659,7 +4685,11 @@ struct ds4_metal_args_qwen4_gdn_front {
+@@ -4793,7 +4819,11 @@ struct ds4_metal_args_qwen4_gdn_front {
   * threadgroup per k-head owns q_h, k_h and the value heads tiled onto it
   * (j % Hk == h): its threads run the conv over those channels, then
   * simdgroups 0/1 normalize q/k and the others take the alpha/beta rows.
@@ -1972,7 +1965,7 @@ index 4c587c31..f43df3d4 100644
  kernel void kernel_qwen4_gdn_front(
          constant ds4_metal_args_qwen4_gdn_front & args,
          device float       *qkv,      /* [T][C] raw in; conv'd, q/k normalized out */
-@@ -4674,6 +4704,7 @@ kernel void kernel_qwen4_gdn_front(
+@@ -4808,6 +4838,7 @@ kernel void kernel_qwen4_gdn_front(
          device float       *gb,       /* [T][Hv] beta out */
          device float       *snap_state,
          device float       *snap2_state,
@@ -1980,7 +1973,7 @@ index 4c587c31..f43df3d4 100644
          uint3 tgpig [[threadgroup_position_in_grid]],
          ushort tid [[thread_index_in_threadgroup]],
          ushort3 ntg [[threads_per_threadgroup]],
-@@ -4695,9 +4726,18 @@ kernel void kernel_qwen4_gdn_front(
+@@ -4829,9 +4860,18 @@ kernel void kernel_qwen4_gdn_front(
              const uint c = (grp == 0 ? h * D : grp == 1 ? Hk * D + h * D : 2 * Hk * D + (h + (grp - 2) * Hk) * D) + i;
              const float raw = row[c];
              float acc = conv_w[c * K + K - 1] * raw;

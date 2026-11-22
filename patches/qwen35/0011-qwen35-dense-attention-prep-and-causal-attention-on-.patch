@@ -1,4 +1,4 @@
-From db190b95fdd552db0cfa4c92c5f40493dfc307bb Mon Sep 17 00:00:00 2001
+From 6fb3343b0ccf5c05583082103da18a140039e1aa Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Wed, 11 Nov 2026 10:38:08 +0200
 Subject: [PATCH 11/18] qwen35: dense attention prep and causal attention on
@@ -39,19 +39,19 @@ Carried-commits: none (authored here)
  create mode 100644 tests/test_qwen35_cuda_attention.c
 
 diff --git a/.gitignore b/.gitignore
-index 2f7d7bad..f47da096 100644
+index db658cfb..b44d1989 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -119,3 +119,4 @@ __pycache__/
- /tests/test_q8_prefill_variants
+@@ -129,3 +129,4 @@ __pycache__/
+ /tests/mellum_trace
  /tests/test_qwen35_cuda_quant
  /tests/test_qwen35_cuda_recurrent
 +/tests/test_qwen35_cuda_attention
 diff --git a/Makefile b/Makefile
-index 563b9b73..306ec205 100644
+index 17a9a703..e2d9ff64 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -770,6 +770,16 @@ tests/test_qwen35_cuda_recurrent: tests/test_qwen35_cuda_recurrent.o tests/qwen3
+@@ -783,6 +783,16 @@ tests/test_qwen35_cuda_recurrent: tests/test_qwen35_cuda_recurrent.o tests/qwen3
  .PHONY: test-qwen35-cuda-recurrent
  test-qwen35-cuda-recurrent: tests/test_qwen35_cuda_recurrent
  	./tests/test_qwen35_cuda_recurrent

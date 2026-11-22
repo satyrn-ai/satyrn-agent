@@ -1,0 +1,2249 @@
+From def0de0fe07018554aa79527cc1700084029d67c Mon Sep 17 00:00:00 2001
+From: pauleveritt <pauleveritt@me.com>
+Date: Thu, 19 Nov 2026 07:29:21 -0500
+Subject: [PATCH 1/6] mellum: model config, memory and host contract
+
+Recognition of general.architecture = mellum inside the QWEN4_EXP family,
+hyperparameter and tensor validation that refuses each bad key or shape by
+name, Q8_0 binding, the memory plan and session allocation with the forward
+entries refusing, ds4_engine_is_mellum, the model's sampler defaults, and a
+false payload predicate with save and load refusing at every entry.
+
+A drafter path with a Mellum model is refused by name before the shared Qwen
+check can answer with the wrong model and the wrong reason: Mellum has no
+DFlash drafter but it does stream.
+
+Upstream: not offered, fork only
+Retire-when: upstream runs Mellum 2.1 with this host contract
+Carried-commits: 83e39b632296bd4c26b4c6b38a638dd5d2df8aa9 0428a4c65b7695c9d947cc557e5569cd733f480b 06b13f83a673b176cef474935d66c5bbfe334d77 5b6758e09ab685dd4cf4ff08e0ba9a5db433e372 1d9b628457b5ca6b6f70d04586fa1c15553d3d4e d3892ee140ef56cd44a430c064cb99a52eb4c7a4 7eef70be896e9e97d2345f0668fe98dc5a05ec3e c9d63e080c8e25b549202cf2b6dd4c028f517deb
+---
+ Makefile                   |  31 ++
+ ds4.c                      | 396 +++++++++++++++++++-
+ ds4.h                      |   8 +-
+ ds4_cli.c                  |  21 +-
+ ds4_mellum_config.inc      | 140 ++++++++
+ ds4_mellum_plan.inc        | 180 ++++++++++
+ tests/mellum_fixture.h     | 256 +++++++++++++
+ tests/test_mellum_config.c | 713 +++++++++++++++++++++++++++++++++++++
+ 8 files changed, 1722 insertions(+), 23 deletions(-)
+ create mode 100644 ds4_mellum_config.inc
+ create mode 100644 ds4_mellum_plan.inc
+ create mode 100644 tests/mellum_fixture.h
+ create mode 100644 tests/test_mellum_config.c
+
+diff --git a/Makefile b/Makefile
+index 5cab2c90..d82b80bf 100644
+--- a/Makefile
++++ b/Makefile
+@@ -69,6 +69,13 @@ DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
+ METAL_LDLIBS := $(LDLIBS)
+ endif
+ 
++# Mellum's code in ds4.c lives in these includes.  Every object that compiles
++# ds4.c or includes it from a test must list them, or an incremental build
++# reports "up to date" after one changes (tests/ds4_series_deps_test.sh).
++# The definition is platform-independent and must precede the rules that use
++# it; the rules themselves sit at the end of the file.
++MELLUM_DS4_INCS = ds4_mellum_config.inc ds4_mellum_plan.inc
++
+ .PHONY: all help clean test test-rocm test-glm53-kda-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+ 
+ ifeq ($(UNAME_S),Darwin)
+@@ -77,6 +84,7 @@ ifeq ($(UNAME_S),Darwin)
+ 
+ all: ds4 ds4-server ds4-bench ds4-eval ds4-agent
+ 
++
+ help:
+ 	@echo "DS4 build targets:"
+ 	@echo "  make              Build Metal ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
+@@ -88,6 +96,7 @@ help:
+ 	@echo "  make check-mxfp4-half-lut  Verify the checked-in MXFP4 half LUT matches the generator"
+ 	@echo "  make test-mxfp4-metal  Check the MXFP4 half LUT, then run Metal MXFP4 exactness tests"
+ 	@echo "  make test-qwen4-kernels  Run the Qwen3.8 Metal kernel tests"
++	@echo "  make test-mellum      Run the Mellum 2.1 model-free tests"
+ 	@echo "  make test-qwen4-q2       Check exact low-bit decode and prefill tile parity"
+ 	@echo "  make test-qwen4-vision  Compare the Qwen3.8 vision tower with HF (set DS4_QWEN4_SNAPSHOT, DS4_QWEN4_MMPROJ, DS4_QWEN4_IMAGE)"
+ 	@echo "  make dspark-verify-depth  Run DSpark speculative verification smoke if support GGUF is present"
+@@ -1012,6 +1021,18 @@ tests/test_qwen4_ngrams: tests/test_qwen4_ngrams.o $(filter-out ds4_cpu.o,$(CPU_
+ test-qwen4-ngrams: tests/test_qwen4_ngrams
+ 	./tests/test_qwen4_ngrams
+ 
++# Mellum 2.1, model-free: recognition, validation and binding on a sparse GGUF
++# (tests/mellum_fixture.h), and how the front ends treat a Mellum engine.
++tests/test_mellum_config.o: tests/test_mellum_config.c tests/mellum_fixture.h ds4.c ds4.h $(MELLUM_DS4_INCS)
++	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -DDS4_NO_GPU -I. -c -o $@ $<
++
++tests/test_mellum_config: tests/test_mellum_config.o $(filter-out ds4_cpu.o,$(CPU_CORE_OBJS))
++	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -o $@ $^ $(LDLIBS)
++
++.PHONY: test-mellum
++test-mellum: tests/test_mellum_config
++	./tests/test_mellum_config
++
+ tests/test_qwen4_ngram_state.o: tests/test_qwen4_ngram_state.c ds4.c ds4.h
+ 	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -I. -c -o $@ $<
+ 
+@@ -1349,6 +1370,7 @@ tests/test_session_state_gpu.o: ds4_tool_text.h
+ clean:
+ 	rm -f tests/test_mmvq_cuda tests/test_mmvq_rocm
+ 	rm -f tests/test_qwen4_ngrams
++	rm -f tests/test_mellum_config
+ 	rm -f tests/test_qwen4_ngram_state
+ 	rm -f tests/test_web_recovery
+ 	rm -f tests/test_metal_ssd_experts
+@@ -1427,3 +1449,12 @@ tests/test_metal_math_options: tests/test_metal_math_options.c ds4_gpu.h $(CORE_
+ test-metal-math-options: tests/test_metal_math_options
+ 	./tests/test_metal_math_options
+ 	DS4_METAL_MATH_SAFE=1 ./tests/test_metal_math_options --safe
++
++# Every object that compiles ds4.c or includes it from a test depends on the
++# Mellum includes.  Kept outside the platform branches so Linux sees it too.
++ds4.o ds4_cpu.o ds4_cpu_test_hooks.o ds4_cuda_test_hooks.o ds4_verify_test_hooks.o \
++	tests/test_deepseek41_dspark.o tests/test_deepseek41_gguf.o \
++	tests/test_deepseek41_graph.o tests/test_deepseek41_prefill.o \
++	tests/test_deepseek_indexer.o tests/test_qwen4_ngram_state.o \
++	tests/test_qwen4_ngrams.o tests/test_session_state.o \
++	tests/test_session_state_gpu.o: $(MELLUM_DS4_INCS)
+diff --git a/ds4.c b/ds4.c
+index a79ffce4..4b9ec77f 100644
+--- a/ds4.c
++++ b/ds4.c
+@@ -497,7 +497,7 @@ enum {
+     DS4_MAX_EMBD             = 7168,
+     DS4_MAX_VOCAB            = 248320,
+     DS4_MAX_HEAD             = 128,
+-    DS4_MAX_HEAD_KV          = 2,
++    DS4_MAX_HEAD_KV          = 4,       /* Mellum 2.1 has 4; read only by its range check */
+     DS4_MAX_HEAD_DIM         = 576,
+     DS4_MAX_VALUE_DIM        = 512,
+     DS4_MAX_ROT              = 64,
+@@ -537,6 +537,12 @@ typedef enum {
+     DS4_VARIANT_FLASH41 = 4,
+     DS4_VARIANT_QWEN4_EXP = 5,
+     DS4_VARIANT_QWEN4_MINI = 6,
++    /* Mellum 2.1 (`mellum` GGUFs): a sparse-MoE transformer with GQA, YaRN and
++     * a 3:1 sliding/full attention pattern, no GDN, HC, PLE, shared expert or
++     * MTP block.  It takes the QWEN4_EXP family so the Qwen vocabulary, chat
++     * and session paths drive it; every Mellum decision is taken ahead of the
++     * Qwen one. */
++    DS4_VARIANT_MELLUM = 7,
+ } ds4_variant;
+ 
+ typedef struct {
+@@ -596,6 +602,12 @@ typedef struct {
+     float rope_yarn_beta_slow;
+     float compress_rope_freq_base;
+     float kda_gate_lower_bound;
++    float rope_freq_base_swa;       /* Mellum: base for the sliding layers */
++    /* Mellum: the GGUF's yarn_attn_factor, 1.2772589 = 1 + 0.1*ln(16).  It is
++     * validated and read nowhere else: the RoPE host computes that magnitude
++     * itself from the scale factor and is passed attn_factor = 1.0, so handing
++     * it this field would apply it twice. */
++    float rope_yarn_attn_factor;
+     uint64_t rope_orig_ctx;
+ } ds4_shape;
+ 
+@@ -877,6 +889,17 @@ static const ds4_shape DS4_SHAPE_QWEN4_MINI = {
+     .rope_orig_ctx = 262144,
+ };
+ 
++/* Mellum 2.1: the widths are read from the GGUF in config_validate_mellum_model.
++ * No hyper-connections (one stream), PLE, GDN, shared expert or MTP block. */
++static const ds4_shape DS4_SHAPE_MELLUM = {
++    .name = "Mellum 2.1",
++    .family = DS4_MODEL_FAMILY_QWEN4_EXP,
++    .variant = DS4_VARIANT_MELLUM,
++    .n_hc = 1,
++    .n_ple_layer = UINT32_MAX,
++    .rms_eps = 1.0e-6f,
++};
++
+ static ds4_shape g_ds4_shape = {
+     .name = "DeepSeek V4 Flash",
+     .family = DS4_MODEL_FAMILY_DEEPSEEK4,
+@@ -964,6 +987,9 @@ static uint32_t g_ds4_compress_ratios[DS4_MAX_LAYER] = {0};
+ #define DS4_COMPRESS_ROPE_FREQ_BASE   (g_ds4_shape.compress_rope_freq_base)
+ #define DS4_KDA_GATE_LOWER_BOUND       (g_ds4_shape.kda_gate_lower_bound)
+ #define DS4_ROPE_ORIG_CTX             (g_ds4_shape.rope_orig_ctx)
++#define DS4_ROPE_FREQ_BASE_SWA        (g_ds4_shape.rope_freq_base_swa)
++/* validated only; never an input to a kernel (see the shape field) */
++#define DS4_ROPE_YARN_ATTN_FACTOR     (g_ds4_shape.rope_yarn_attn_factor)
+ #define DS4_N_HC_LOWRANK              (g_ds4_shape.n_hc_lowrank)
+ #define DS4_N_LIN_K_HEAD              (g_ds4_shape.n_lin_k_head)
+ #define DS4_N_LIN_V_HEAD              (g_ds4_shape.n_lin_v_head)
+@@ -1010,19 +1036,39 @@ static bool ds4_model_is_qwen4(void) {
+     return DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_QWEN4_EXP;
+ }
+ 
+-/* Trunk layers repeat 3 GDN + 1 full attention; the MTP block is attention. */
++/* Mellum 2.1.  Also true for ds4_model_is_qwen4(). */
++static bool ds4_model_is_mellum(void) {
++    return DS4_MODEL_VARIANT == DS4_VARIANT_MELLUM;
++}
++
++/* Mellum's attention pattern: three sliding-window layers, then one full
++ * layer, i.e. layer il slides unless il % 4 == 3.  The validator checks this
++ * rule against the GGUF's sliding_window_pattern array. */
++static bool ds4_mellum_pattern_rule(uint32_t il) {
++    return (il + 1u) % 4u != 0u;
++}
++
++static bool ds4_mellum_layer_is_sliding(uint32_t il) {
++    return ds4_model_is_mellum() && ds4_mellum_pattern_rule(il);
++}
++
++/* Trunk layers repeat 3 GDN + 1 full attention; the MTP block is attention.
++ * Mellum has no GDN layer.  The guard is load-bearing: a Mellum shape leaves
++ * n_full_attn_interval 0, arm64 does not trap on % 0 (udiv gives 0, so
++ * x % 0 == x), and the rule below would call every Mellum layer linear. */
+ static bool ds4_qwen4_layer_is_linear(uint32_t il) {
+-    return ds4_model_is_qwen4() &&
++    return !ds4_model_is_mellum() &&
++           ds4_model_is_qwen4() &&
+            il + DS4_N_NEXTN_PREDICT < DS4_N_LAYER &&
+            (il + 1u) % DS4_N_FULL_ATTN_INTERVAL != 0u;
+ }
+ 
+ static bool ds4_qwen4_layer_is_ple(uint32_t il) {
+-    return ds4_model_is_qwen4() && il == DS4_N_PLE_LAYER;
++    return ds4_model_is_qwen4() && !ds4_model_is_mellum() && il == DS4_N_PLE_LAYER;
+ }
+ 
+ static bool ds4_qwen4_layer_is_nextn(uint32_t il) {
+-    return ds4_model_is_qwen4() && DS4_N_NEXTN_PREDICT != 0 &&
++    return ds4_model_is_qwen4() && !ds4_model_is_mellum() && DS4_N_NEXTN_PREDICT != 0 &&
+            il + DS4_N_NEXTN_PREDICT >= DS4_N_LAYER;
+ }
+ 
+@@ -5346,7 +5392,8 @@ static void tensor_expect_routed_expert(
+ 
+ static bool weights_have_output_head(const ds4_weights *w) {
+     if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA ||
+-        DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_DEEPSEEK41) {
++        DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_DEEPSEEK41 ||
++        ds4_model_is_mellum()) {
+         return w && w->output_norm && w->output;
+     }
+     if (ds4_model_is_qwen4()) {
+@@ -5362,7 +5409,8 @@ static bool weights_have_output_head(const ds4_weights *w) {
+ 
+ static bool weights_have_partial_output_head(const ds4_weights *w) {
+     if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA ||
+-        DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_DEEPSEEK41) {
++        DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_DEEPSEEK41 ||
++        ds4_model_is_mellum()) {
+         return w && (w->output_norm || w->output);
+     }
+     if (ds4_model_is_qwen4()) {
+@@ -5443,7 +5491,18 @@ static bool weights_glm_dsa_layer_has_required(const ds4_layer_weights *l, uint3
+     return true;
+ }
+ 
++/* Mellum: pre-norm GQA attention (q/k norm, no gate, no GDN) and a routed-only
++ * MoE FFN; no shared expert, HC, PLE, indexer or MTP tensors. */
++static bool weights_mellum_layer_has_required(const ds4_layer_weights *l, uint32_t il) {
++    (void)il;
++    return l && l->attn_norm && l->ffn_norm &&
++           l->attn_q && l->attn_k && l->attn_v && l->attn_output &&
++           l->attn_q_norm && l->attn_k_norm &&
++           l->ffn_gate_inp && l->ffn_gate_exps && l->ffn_up_exps && l->ffn_down_exps;
++}
++
+ static bool weights_qwen4_layer_has_required(const ds4_layer_weights *l, uint32_t il) {
++    if (ds4_model_is_mellum()) return weights_mellum_layer_has_required(l, il);
+     if (!l) return false;
+     if (!l->hc_attn_norm || !l->hc_attn_down || !l->hc_attn_up || !l->hc_attn_inject ||
+         !l->hc_ffn_norm || !l->hc_ffn_down || !l->hc_ffn_up || !l->hc_ffn_inject) {
+@@ -5639,6 +5698,57 @@ static void weights_validate_qwen4_layout(
+     }
+ }
+ 
++/* Mellum layout: every projection and routed expert tensor is Q8_0 (the only
++ * quantization the Mellum kernels exist for), norms and the router are F32. */
++static void weights_validate_mellum_layout(
++        const ds4_weights *w,
++        uint32_t           layer_start,
++        uint32_t           layer_end,
++        bool               require_token_embd,
++        bool               require_output) {
++    const uint64_t E = DS4_N_EMBD;
++    const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
++    const uint64_t kv_dim = (uint64_t)DS4_N_HEAD_KV * DS4_N_HEAD_DIM;
++    const uint32_t Q8 = DS4_TENSOR_Q8_0, F32 = DS4_TENSOR_F32;
++
++    if (!w) ds4_die("internal error: missing weights while validating Mellum layout");
++    if (layer_start >= DS4_N_LAYER) ds4_die("invalid first layer in Mellum weight layout validation");
++    if (layer_end == UINT32_MAX) layer_end = DS4_N_LAYER - 1u;
++    if (layer_end >= DS4_N_LAYER || layer_end < layer_start) {
++        ds4_die("invalid layer range in Mellum weight layout validation");
++    }
++    if (require_token_embd && !w->token_embd) ds4_die("required token embedding tensor is missing");
++    if (w->token_embd) tensor_expect_layout(w->token_embd, Q8, 2, E, DS4_N_VOCAB, 0);
++
++    const bool have_output = weights_have_output_head(w);
++    if (require_output && !have_output) ds4_die("required output head tensors are missing");
++    if (weights_have_partial_output_head(w) && !have_output) ds4_die("partial output head in GGUF");
++    if (have_output) {
++        tensor_expect_layout(w->output_norm, F32, 1, E, 0, 0);
++        tensor_expect_layout(w->output, Q8, 2, E, DS4_N_VOCAB, 0);
++    }
++
++    for (uint32_t il = layer_start; il <= layer_end; il++) {
++        const ds4_layer_weights *l = &w->layer[il];
++        if (!weights_mellum_layer_has_required(l, il)) {
++            fprintf(stderr, "ds4: required Mellum tensors for layer %u are missing\n", il);
++            exit(1);
++        }
++        tensor_expect_layout(l->attn_norm, F32, 1, E, 0, 0);
++        tensor_expect_layout(l->ffn_norm, F32, 1, E, 0, 0);
++        tensor_expect_layout(l->attn_q, Q8, 2, E, q_dim, 0);
++        tensor_expect_layout(l->attn_k, Q8, 2, E, kv_dim, 0);
++        tensor_expect_layout(l->attn_v, Q8, 2, E, kv_dim, 0);
++        tensor_expect_layout(l->attn_output, Q8, 2, q_dim, E, 0);
++        tensor_expect_layout(l->attn_q_norm, F32, 1, DS4_N_HEAD_DIM, 0, 0);
++        tensor_expect_layout(l->attn_k_norm, F32, 1, DS4_N_HEAD_DIM, 0, 0);
++        tensor_expect_layout(l->ffn_gate_inp, F32, 2, E, DS4_N_EXPERT, 0);
++        tensor_expect_layout(l->ffn_gate_exps, Q8, 3, E, DS4_N_FF_EXP, DS4_N_EXPERT);
++        tensor_expect_layout(l->ffn_up_exps, Q8, 3, E, DS4_N_FF_EXP, DS4_N_EXPERT);
++        tensor_expect_layout(l->ffn_down_exps, Q8, 3, DS4_N_FF_EXP, E, DS4_N_EXPERT);
++    }
++}
++
+ static bool weights_layer_has_required(const ds4_layer_weights *l, uint32_t il) {
+     if (!l) return false;
+     if (ds4_model_is_qwen4()) {
+@@ -5899,6 +6009,11 @@ static void weights_validate_layout(
+                                         require_output);
+         return;
+     }
++    if (ds4_model_is_mellum()) {
++        weights_validate_mellum_layout(w, layer_start, layer_end,
++                                       require_token_embd, require_output);
++        return;
++    }
+     if (ds4_model_is_qwen4()) {
+         weights_validate_qwen4_layout(w, layer_start, layer_end,
+                                       require_token_embd, require_output);
+@@ -7153,6 +7268,7 @@ static void config_validate_qwen4_model(const ds4_model *m) {
+     }
+ }
+ 
++#include "ds4_mellum_config.inc"
+ static void config_validate_model(const ds4_model *m) {
+     g_ds4_flash_vision_exp = false;
+     ds4_str arch = {0};
+@@ -7173,6 +7289,10 @@ static void config_validate_model(const ds4_model *m) {
+             config_validate_qwen4_model(m);
+             return;
+         }
++        if (ds4_streq(arch, "mellum")) {
++            config_validate_mellum_model(m);
++            return;
++        }
+     }
+     config_validate_deepseek4_model(m);
+ }
+@@ -7649,7 +7769,16 @@ static void weights_bind_output(
+         const ds4_model *m,
+         bool             required,
+         bool             optional) {
+-    if (ds4_model_is_qwen4()) {
++    if (ds4_model_is_mellum()) {
++        /* untied head: output.weight is its own Q8_0 matrix, never the embedding */
++        if (required) {
++            w->output_norm = required_tensor(m, "output_norm.weight");
++            w->output      = required_tensor(m, "output.weight");
++        } else if (optional) {
++            w->output_norm = model_find_tensor(m, "output_norm.weight");
++            w->output      = model_find_tensor(m, "output.weight");
++        }
++    } else if (ds4_model_is_qwen4()) {
+         if (required) {
+             w->output_hc_norm = required_tensor(m, "output_hc_norm.weight");
+             w->output_hc_down = required_tensor(m, "output_hc_down.weight");
+@@ -7768,7 +7897,29 @@ static void weights_bind_glm_dsa_layer(ds4_layer_weights *l, const ds4_model *m,
+     }
+ }
+ 
++/* Mellum blocks: attn_norm before the GQA mixer (q/k RMS-normed per head, no
++ * output gate), ffn_norm before the routed MoE; no shared expert and no bias
++ * on the router. */
++static void weights_bind_mellum_layer(ds4_layer_weights *l, const ds4_model *m, uint32_t il) {
++    l->attn_norm     = required_tensorf(m, "blk.%u.attn_norm.weight", il);
++    l->ffn_norm      = required_tensorf(m, "blk.%u.ffn_norm.weight", il);
++    l->attn_q        = required_tensorf(m, "blk.%u.attn_q.weight", il);
++    l->attn_k        = required_tensorf(m, "blk.%u.attn_k.weight", il);
++    l->attn_v        = required_tensorf(m, "blk.%u.attn_v.weight", il);
++    l->attn_output   = required_tensorf(m, "blk.%u.attn_output.weight", il);
++    l->attn_q_norm   = required_tensorf(m, "blk.%u.attn_q_norm.weight", il);
++    l->attn_k_norm   = required_tensorf(m, "blk.%u.attn_k_norm.weight", il);
++    l->ffn_gate_inp  = required_tensorf(m, "blk.%u.ffn_gate_inp.weight", il);
++    l->ffn_gate_exps = required_tensorf(m, "blk.%u.ffn_gate_exps.weight", il);
++    l->ffn_up_exps   = required_tensorf(m, "blk.%u.ffn_up_exps.weight", il);
++    l->ffn_down_exps = required_tensorf(m, "blk.%u.ffn_down_exps.weight", il);
++}
++
+ static void weights_bind_qwen4_layer(ds4_layer_weights *l, const ds4_model *m, uint32_t il) {
++    if (ds4_model_is_mellum()) {
++        weights_bind_mellum_layer(l, m, il);
++        return;
++    }
+     l->hc_attn_norm   = required_tensorf(m, "blk.%u.hc_attn_norm.weight", il);
+     l->hc_attn_down   = required_tensorf(m, "blk.%u.hc_attn_down.weight", il);
+     l->hc_attn_up     = required_tensorf(m, "blk.%u.hc_attn_up.weight", il);
+@@ -7937,7 +8088,7 @@ static void weights_bind(
+     } else {
+         w->token_embd = model_find_tensor(m, "token_embd.weight");
+     }
+-    if (ds4_model_is_qwen4()) {
++    if (ds4_model_is_qwen4() && !ds4_model_is_mellum()) {
+         w->ple_embd = model_find_tensor(m, "per_layer_token_embd.weight");
+     }
+     weights_bind_output(w, m, require_output, optional_output);
+@@ -17137,6 +17288,7 @@ static void print_vec_stats(const char *name, const float *x, uint64_t n) {
+         name, minv, maxv, sqrt(ss / (double)n));
+ }
+ 
++#include "ds4_mellum_plan.inc"
+ #ifndef DS4_NO_GPU
+ /*
+  * Metal stores the persistent attention-compressed KV cache in F16. Producers
+@@ -40412,6 +40564,7 @@ static ds4_context_memory glm_graph_context_memory_estimate_for_compact_cap(
+ static ds4_context_memory ds41_graph_memory(uint32_t ctx);
+ #endif
+ static uint32_t qwen4_prefill_chunk_tokens(uint32_t ctx) {
++    if (ds4_model_is_mellum()) return mellum_prefill_cap(ctx, 0);
+     const char *env = getenv("DS4_QWEN4_PREFILL_CHUNK");
+     const unsigned long v = env && env[0] ? strtoul(env, NULL, 10) : 8192ul;
+     uint32_t chunk = v == 0 || v > 65536ul ? 8192u : (uint32_t)v;
+@@ -40424,6 +40577,8 @@ ds4_context_memory ds4_context_memory_estimate_with_prefill_mode(
+         uint32_t    prefill_chunk,
+         bool        ssd_streaming) {
+     ds4_context_memory m = {0};
++    /* Mellum's own table (mellum_requests), never a Flash Next formula. */
++    if (ds4_model_is_mellum()) return mellum_context_memory(ctx_size, prefill_chunk);
+     uint32_t ctx = ctx_size > 0 ? (uint32_t)ctx_size : 1u;
+     if (ds4_backend_uses_graph(backend) && ds4_model_is_qwen4()) {
+         /* per-token f16 K/V and raw indexer keys per attention layer, pooled
+@@ -58537,6 +58692,14 @@ typedef struct ds4_qwen4_gpu_graph {
+     ds4_gpu_tensor *router, *selected, *weights, *mid, *part, *sh_gate_logit;
+     ds4_gpu_tensor *moe_lists, *moe_counts, *sh_gate, *sh_up, *sh_mid, *sh_out, *hc_u, *hc_lo_act;
+     ds4_gpu_tensor *logits;
++    /* Mellum (mellum_graph_alloc).  The K/V caches and rings are layer_k_cache
++     * and layer_v_cache; the rest of its tensors are here, in the order of
++     * mellum_requests: the ring position tags of the sliding layers (one array
++     * per ring, shared by its K and V rows), the prefill, attention and MoE
++     * transients, and the bytes the allocator took. */
++    ds4_gpu_tensor *mellum_tag[DS4_MAX_LAYER];
++    ds4_gpu_tensor *mellum_scratch[MELLUM_SCRATCH_COUNT];
++    uint64_t mellum_allocated_bytes;
+     /* Arena only, grown on demand: one logit row per batch member, the
+      * attention rows' cache table (one entry per row and layer) and their
+      * split partials. */
+@@ -58626,8 +58789,108 @@ static bool qwen4_graph_expert_ok(const ds4_tensor *t) {
+                   (t->dim[0] % 256u) == 0));
+ }
+ 
++static void qwen4_graph_free(ds4_qwen4_gpu_graph *g);
++
++/* Mellum's tensors were validated at load (weights_validate_mellum_layout:
++ * Q8_0 projections and experts, F32 norms and router); what the session
++ * needs is that every layer and the output head are bound, and Metal. */
++static bool mellum_graph_weights_supported(const ds4_weights *w) {
++#if !defined(__APPLE__)
++    (void)w;
++    fprintf(stderr, "ds4: Mellum runs on the Metal graph only\n");
++    return false;
++#else
++    if (!w || !w->token_embd || !w->output || !w->output_norm) {
++        fprintf(stderr, "ds4: Mellum GPU graph: the embedding or output head is not bound\n");
++        return false;
++    }
++    for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
++        if (!weights_mellum_layer_has_required(&w->layer[il], il)) {
++            fprintf(stderr, "ds4: Mellum GPU graph: layer %u is missing a tensor\n", il);
++            return false;
++        }
++    }
++    return true;
++#endif
++}
++
++/* A ring slot with tag -1 holds no row.  Runs at allocation and at reset: a
++ * session that rewinds or restarts must not read the previous run's slots. */
++static bool mellum_graph_forget_ring(ds4_qwen4_gpu_graph *g) {
++    const uint32_t window = DS4_N_SWA;
++    int32_t empty[1024];
++    if (window > sizeof(empty) / sizeof(empty[0])) return false;
++    for (uint32_t i = 0; i < window; i++) empty[i] = -1;
++    for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
++        if (g->mellum_tag[il] &&
++            !ds4_gpu_tensor_write(g->mellum_tag[il], 0, empty, (uint64_t)window * sizeof(empty[0]))) return false;
++    }
++    return true;
++}
++
++/* Every GPU tensor a Mellum session holds, from the one table the plan sums
++ * (mellum_requests).  Allocated at create for cap_tokens rows, never at the
++ * first sync.  Prints once: allocated (the sum of the bytes requested from the
++ * device for these tensors, ds4_gpu_tensor_bytes; not the pages Metal rounds
++ * them up to) against planned (the estimate the startup line reports). */
++static bool mellum_graph_alloc(ds4_qwen4_gpu_graph *g, uint32_t ctx_cap, uint32_t cap_tokens) {
++    g->ctx_cap = ctx_cap;
++    g->cap_tokens = cap_tokens;
++    g->n_logit_rows = 1u;
++    g->owns_scratch = true;
++    mellum_req reqs[MELLUM_MAX_REQS];
++    const uint32_t n = mellum_requests(ctx_cap, cap_tokens, reqs);
++    bool ok = true;
++    uint64_t allocated = 0;
++    for (uint32_t i = 0; i < n && ok; i++) {
++        ds4_gpu_tensor *t = ds4_gpu_tensor_alloc(reqs[i].bytes);
++        if (!t) { ok = false; break; }
++        allocated += ds4_gpu_tensor_bytes(t);
++        const uint32_t x = reqs[i].index;
++        switch (reqs[i].kind) {
++        case MELLUM_REQ_K: g->layer_k_cache[x] = t; break;
++        case MELLUM_REQ_V: g->layer_v_cache[x] = t; break;
++        case MELLUM_REQ_TAG: g->mellum_tag[x] = t; break;
++        case MELLUM_REQ_SCRATCH: g->mellum_scratch[x] = t; break;
++        case MELLUM_REQ_LOGITS: g->logits = t; break;
++        }
++    }
++    ok = ok && mellum_graph_forget_ring(g);
++#if defined(__APPLE__)
++    /* the table's partials are MELLUM_ATTN_MAX_SPLITS wide; the kernels' own count decides what they need */
++    if (ok) {
++        const uint32_t slice = cap_tokens < MELLUM_ATTN_SLICE_ROWS ? cap_tokens : MELLUM_ATTN_SLICE_ROWS;
++        const uint64_t need = ds4_gpu_qwen4_attn_part_floats(slice, DS4_N_HEAD, DS4_N_HEAD_DIM) * sizeof(float);
++        const ds4_gpu_tensor *part = g->mellum_scratch[MELLUM_S_ATTN_PART];
++        if (MELLUM_ATTN_ROW_BYTES != DS4_GPU_QWEN4_ATTN_ROW_BYTES) {
++            fprintf(stderr, "ds4: Mellum rows-table entries are %u bytes in the plan, the kernels use %u\n",
++                    MELLUM_ATTN_ROW_BYTES, (unsigned)DS4_GPU_QWEN4_ATTN_ROW_BYTES);
++            ok = false;
++        } else if (!part || ds4_gpu_tensor_bytes(part) != need) {
++            fprintf(stderr, "ds4: Mellum attention partials are %" PRIu64 " bytes in the plan, the kernels need %" PRIu64 "\n",
++                    part ? ds4_gpu_tensor_bytes(part) : 0u, need);
++            ok = false;
++        }
++    }
++#endif
++    g->host_logits = xmalloc((uint64_t)DS4_N_VOCAB * sizeof(float));
++    g->mellum_allocated_bytes = allocated;
++    if (!ok) {
++        fprintf(stderr, "ds4: Mellum graph allocation failed (ctx %u, chunk %u, %" PRIu64 " bytes taken)\n",
++                ctx_cap, cap_tokens, allocated);
++        qwen4_graph_free(g);
++        return false;
++    }
++    const ds4_context_memory plan =
++        ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, (int)ctx_cap, cap_tokens, false);
++    fprintf(stderr, "mellum: session allocated %" PRIu64 " bytes, planned %" PRIu64 " bytes\n",
++            allocated, plan.total_bytes);
++    return true;
++}
++
+ /* The Metal graph runs a subset of what the loader accepts. */
+ static bool qwen4_graph_weights_supported(const ds4_weights *w) {
++    if (ds4_model_is_mellum()) return mellum_graph_weights_supported(w);
+     if (!qwen4_graph_dense_ok(w->token_embd) || !qwen4_graph_dense_ok(w->output) ||
+         !qwen4_graph_dense_ok(w->output_hc_down) || !qwen4_graph_dense_ok(w->output_hc_up)) {
+         fprintf(stderr, "ds4: Qwen3.8 GPU graph needs Q8_0/Q4_0/F16/BF16/F32 dense weights\n");
+@@ -58739,7 +59002,9 @@ static void qwen4_graph_free(ds4_qwen4_gpu_graph *g) {
+         ds4_gpu_tensor_free(g->snap2_lin_hist[il]);
+         ds4_gpu_tensor_free(g->snap0_lin_state[il]);
+         ds4_gpu_tensor_free(g->snap0_lin_hist[il]);
++        ds4_gpu_tensor_free(g->mellum_tag[il]);
+     }
++    for (uint32_t i = 0; i < MELLUM_SCRATCH_COUNT; i++) ds4_gpu_tensor_free(g->mellum_scratch[i]);
+     free(g->host_logits);
+     memset(g, 0, sizeof(*g));
+ }
+@@ -58838,6 +59103,7 @@ static bool qwen4_graph_alloc(ds4_qwen4_gpu_graph *g, const ds4_weights *w, uint
+                               ds4_gpu_tensor *const *hist_pool, uint32_t slot) {
+     memset(g, 0, sizeof(*g));
+     if (!qwen4_graph_weights_supported(w)) return false;
++    if (ds4_model_is_mellum()) return mellum_graph_alloc(g, ctx_cap, cap_tokens);
+     mtp = mtp && DS4_N_NEXTN_PREDICT != 0;
+     const uint64_t E = DS4_N_EMBD, hc = DS4_N_HC, hc_dim = E * hc, T = cap_tokens;
+     const uint64_t conv_dim = DS4_N_LIN_CONV_DIM;
+@@ -59077,6 +59343,7 @@ static void qwen4_graph_reset(ds4_qwen4_gpu_graph *g) {
+     g->snap0_valid = false;
+     g->snap_after_first = false;
+     g->snap_after_second = false;
++    if (ds4_model_is_mellum()) (void)mellum_graph_forget_ring(g);
+ }
+ 
+ /* rows > 0 limits the product to a contiguous leading prefix of w. */
+@@ -59664,6 +59931,12 @@ static bool qwen4_graph_stage_inputs(ds4_qwen4_gpu_graph *g, const ds4_model *m,
+ static bool qwen4_graph_forward_tokens(ds4_qwen4_gpu_graph *g, const ds4_model *m, const ds4_weights *w,
+                                        const int *tokens, uint32_t T, float *logits_out, bool all_rows) {
+     if (!g || T == 0 || T > g->cap_tokens || g->pos + T > g->ctx_cap) return false;
++    if (ds4_model_is_mellum()) {
++        /* the session entries refuse by name first; this keeps a missed one
++         * from staging into host_row, which Mellum never allocates */
++        fprintf(stderr, "ds4: the Mellum 2.1 forward pass is not ported yet\n");
++        return false;
++    }
+     if (all_rows && T > g->n_logit_rows) return false;
+     for (uint32_t t = 0; t < T; t++) {
+         if (tokens[t] < 0 || tokens[t] >= (int)DS4_N_VOCAB) {
+@@ -60444,6 +60717,7 @@ ds4_context_memory ds4_context_memory_estimate_with_prefill_mode(
+     (void)prefill_chunk;
+     (void)ssd_streaming;
+     ds4_context_memory m = {0};
++    if (ds4_model_is_mellum()) return mellum_context_memory(ctx_size, prefill_chunk);
+     uint32_t ctx = ctx_size > 0 ? (uint32_t)ctx_size : 1u;
+ 
+     m.raw_cap = ds4_default_raw_cap(ctx);
+@@ -62343,6 +62617,15 @@ static void session_cpu_reset_cache(ds4_session *s) {
+     kv_cache_init(&s->cpu_cache, (uint32_t)s->ctx_size, 0);
+ }
+ 
++/* Mellum's sessions cannot be saved or loaded yet: its payload would have to
++ * carry the sliding layers' rings and their position tags, and that layout is
++ * not written.  Every entry point refuses with this one message, ahead of the
++ * Qwen3.8 code its family would otherwise reach. */
++static int mellum_payload_refused(char *err, size_t errlen) {
++    payload_set_err(err, errlen, "Mellum 2.1 session save and load are not supported yet");
++    return 1;
++}
++
+ static bool ds4_layer_payload_range_valid(uint32_t layer_start, uint32_t layer_end) {
+     const uint32_t n_layers = ds4_model_normal_layer_count();
+     return n_layers != 0 && layer_start <= layer_end && layer_end < n_layers;
+@@ -62351,6 +62634,7 @@ static bool ds4_layer_payload_range_valid(uint32_t layer_start, uint32_t layer_e
+ uint64_t ds4_session_layer_payload_bytes(ds4_session *s,
+                                          uint32_t layer_start,
+                                          uint32_t layer_end) {
++    if (ds4_model_is_mellum()) return 0;
+     if (!s || !s->checkpoint_valid ||
+         !ds4_layer_payload_range_valid(layer_start, layer_end))
+         return 0;
+@@ -62420,6 +62704,7 @@ uint64_t ds4_session_layer_payload_bytes(ds4_session *s,
+ int ds4_session_save_layer_payload(ds4_session *s, FILE *fp,
+                                    uint32_t layer_start, uint32_t layer_end,
+                                    char *err, size_t errlen) {
++    if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
+     if (!s || !fp || !s->checkpoint_valid ||
+         !ds4_layer_payload_range_valid(layer_start, layer_end)) {
+         payload_set_err(err, errlen, "invalid session layer payload save");
+@@ -62688,6 +62973,7 @@ int ds4_session_load_layer_payload(ds4_session *s, FILE *fp,
+                                    const int *tokens, uint32_t n_tokens,
+                                    uint32_t layer_start, uint32_t layer_end,
+                                    char *err, size_t errlen) {
++    if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
+     if (!s || !fp || !tokens ||
+         !ds4_layer_payload_range_valid(layer_start, layer_end)) {
+         payload_set_err(err, errlen, "invalid session layer payload load");
+@@ -63509,10 +63795,13 @@ static uint64_t qwen4_payload_tensor_bytes(uint32_t rows, uint32_t mtp_rows);
+ #endif
+ 
+ bool ds4_session_supports_payload(ds4_session *s) {
+-    return s != NULL && !s->distributed && ds4_session_is_qwen4(s);
++    /* Mellum is also a qwen4 engine, but it has no native payload: keep this
++     * predicate false with ds4_session_payload_bytes(). */
++    return s != NULL && !s->distributed && ds4_session_is_qwen4(s) && !ds4_model_is_mellum();
+ }
+ 
+ uint64_t ds4_session_payload_bytes(ds4_session *s) {
++    if (ds4_model_is_mellum()) return 0;
+     if (s && !s->distributed && ds4_session_is_qwen4(s)) {
+ #ifndef DS4_HAS_QWEN4_GPU
+         return 0;
+@@ -63615,6 +63904,7 @@ int ds4_session_stage_payload(ds4_session *s, ds4_session_payload_file *out,
+         return 1;
+     }
+     memset(out, 0, sizeof(*out));
++    if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
+     if (!s || !s->checkpoint_valid) {
+         payload_set_err(err, errlen, "session has no valid checkpoint to stage");
+         return 1;
+@@ -63898,6 +64188,7 @@ static int qwen4_session_load_payload(ds4_session *s, FILE *fp, const uint32_t *
+ #endif
+ 
+ int ds4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_t errlen) {
++    if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
+     if (!s || !fp || !s->checkpoint_valid) {
+         payload_set_err(err, errlen, "session has no valid checkpoint to save");
+         return 1;
+@@ -64249,6 +64540,7 @@ int ds4_session_save_payload(ds4_session *s, FILE *fp, char *err, size_t errlen)
+ }
+ 
+ int ds4_session_load_payload(ds4_session *s, FILE *fp, uint64_t payload_bytes, char *err, size_t errlen) {
++    if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
+     if (!s || !fp) {
+         payload_set_err(err, errlen, "invalid session payload load");
+         return 1;
+@@ -64882,6 +65174,7 @@ int ds4_session_save_snapshot(ds4_session *s, ds4_session_snapshot *snap, char *
+         payload_set_err(err, errlen, "invalid session snapshot save");
+         return 1;
+     }
++    if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
+     if (s->distributed) {
+         payload_set_err(err, errlen, "distributed session snapshots are not supported yet");
+         return 1;
+@@ -64928,6 +65221,7 @@ int ds4_session_load_snapshot(ds4_session *s, const ds4_session_snapshot *snap,
+         payload_set_err(err, errlen, "invalid session snapshot load");
+         return 1;
+     }
++    if (ds4_model_is_mellum()) return mellum_payload_refused(err, errlen);
+     if (s->distributed) {
+         payload_set_err(err, errlen, "distributed session snapshots are not supported yet");
+         return 1;
+@@ -65625,8 +65919,20 @@ static bool ds4_session_greedy_splitkv_replay_exact(
+ }
+ #endif
+ 
++/* A Mellum session can be created (the plan and the allocation) but has no
++ * forward pass yet.  Every entry that would run one refuses here, by name:
++ * the Qwen forward it would otherwise reach stages the embedding into a host
++ * buffer Mellum never allocates. */
++static bool ds4_session_mellum_forward_refuses(const char *what, char *err, size_t errlen) {
++    if (!ds4_model_is_mellum()) return false;
++    if (err && errlen) snprintf(err, errlen, "%s refused: the Mellum 2.1 forward pass is not ported yet", what);
++    fprintf(stderr, "ds4: the Mellum 2.1 forward pass is not ported yet (%s refused)\n", what);
++    return true;
++}
++
+ int ds4_session_eval_argmax(ds4_session *s, int token, char *err, size_t errlen) {
+     if (!s) return -1;
++    if (ds4_session_mellum_forward_refuses("eval", err, errlen)) return -1;
+     if (ds4_session_is_cpu(s) || ds4_session_is_glm(s) || ds4_session_is_ds41(s)) {
+         if (ds4_session_eval(s, token, err, errlen) != 0) return -1;
+         return ds4_session_argmax(s);
+@@ -71863,6 +72169,39 @@ static int ds4_engine_open_internal(ds4_engine **out,
+         return 1;
+     }
+     config_validate_model(&e->model);
++    /* qwen4_graph_load_steering allocates steer_dirs outside mellum_requests, so
++     * a steered Mellum session would hold a tensor its plan does not count. */
++    if (ds4_model_is_mellum() && !opt->inspect_only &&
++        ((opt->directional_steering_file && opt->directional_steering_file[0]) ||
++         opt->directional_steering_attn != 0.0f || opt->directional_steering_ffn != 0.0f)) {
++        fprintf(stderr, "ds4: directional steering is not supported for Mellum 2.1 "
++                        "(its session plan does not count the steering tensor)\n");
++        ds4_engine_close(e);
++        *out = NULL;
++        return 1;
++    }
++    if (ds4_model_is_mellum() && !opt->inspect_only && e->backend != DS4_BACKEND_METAL) {
++        fprintf(stderr, "ds4: Mellum 2.1 runs on the Metal graph only (backend %s)\n",
++                ds4_backend_name(e->backend));
++        ds4_engine_close(e);
++        *out = NULL;
++        return 1;
++    }
++    /* The chunk the host passes (--prefill-chunk) is read as it stands by the
++     * estimate and session create; clamp it here, once, with the one stderr
++     * line, so every reader and ds4_engine_prefill_chunk agree. */
++    g_mellum_clamp_said = false;                 /* per engine: a reopen says it again */
++    if (ds4_model_is_mellum() && e->prefill_chunk != 0) {
++        e->prefill_chunk = mellum_clamp_chunk(e->prefill_chunk);
++    }
++    /* Mellum reports as qwen4 too, so its own refusals come first: the Qwen block below would otherwise name
++     * the wrong model and, for a drafter, the wrong reason (Mellum has no DFlash drafter but does stream). */
++    if (ds4_model_is_mellum() && !opt->inspect_only && opt->mtp_path && opt->mtp_path[0]) {
++        fprintf(stderr, "ds4: Mellum 2.1 has no DFlash drafter: open the model without a drafter path\n");
++        ds4_engine_close(e);
++        *out = NULL;
++        return 1;
++    }
+     if (ds4_model_is_qwen4() && !opt->inspect_only) {
+         const bool backend_ok =
+ #ifdef DS4_HAS_QWEN4_GPU
+@@ -71874,9 +72213,10 @@ static int ds4_engine_open_internal(ds4_engine **out,
+             opt->distributed.role != DS4_DISTRIBUTED_NONE || load_slice ||
+             e->ssd_streaming || opt->dspark || e->power_percent != 100 ||
+             (opt->mtp_path && opt->mtp_path[0])) {
+-            fprintf(stderr, "ds4: Qwen3.8 requires Metal or single-GPU CUDA (or --cpu --first-token-test); "
++            fprintf(stderr, "ds4: %s requires Metal or single-GPU CUDA (or --cpu --first-token-test); "
+                             "tensor parallelism, pipeline execution, SSD streaming, DSpark, "
+-                            "external MTP models and power throttling are not supported\n");
++                            "external MTP models and power throttling are not supported\n",
++                    ds4_model_is_mellum() ? "Mellum 2.1" : "Qwen3.8");
+             ds4_engine_close(e);
+             *out = NULL;
+             return 1;
+@@ -73217,6 +73557,11 @@ bool ds4_engine_is_qwen4(ds4_engine *e) {
+     return ds4_model_is_qwen4();
+ }
+ 
++bool ds4_engine_is_mellum(ds4_engine *e) {
++    (void)e;
++    return ds4_model_is_mellum();
++}
++
+ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
+                                   int *top_k, float *top_p, float *min_p) {
+     if (!temperature || !top_k || !top_p || !min_p) return;
+@@ -73224,7 +73569,11 @@ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
+     *top_k = 0;
+     *top_p = DS4_DEFAULT_TOP_P;
+     *min_p = DS4_DEFAULT_MIN_P;
+-    if (ds4_engine_is_glm_dsa(e)) {
++    if (ds4_model_is_mellum()) {
++        /* Mellum 2.1's generation_config.json carries no sampler keys: plain
++         * temperature 1.0 sampling, with no min_p floor (the generic 0.05). */
++        *min_p = 0.0f;
++    } else if (ds4_engine_is_glm_dsa(e)) {
+         *top_p = 0.95f;
+         *min_p = 0.0f;
+     }
+@@ -74343,7 +74692,11 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
+             free(s);
+             return 1;
+         }
+-        const uint32_t cap_tokens = e->prefill_chunk && e->prefill_chunk < (uint32_t)ctx_size ?
++        /* Mellum's chunk is clamped to its window whichever way it arrives
++         * (host-passed or DS4_QWEN4_PREFILL_CHUNK); the plan uses the same call. */
++        const uint32_t cap_tokens = ds4_model_is_mellum() ?
++            mellum_prefill_cap((uint32_t)ctx_size, e->prefill_chunk) :
++            e->prefill_chunk && e->prefill_chunk < (uint32_t)ctx_size ?
+             e->prefill_chunk : qwen4_prefill_chunk_tokens((uint32_t)ctx_size);
+         /* Every slot of a batched server has the same shape, so one arena of
+          * transients serves them all and each extra session then costs only
+@@ -74351,8 +74704,13 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
+          * when no live session borrows it (a new context size once the
+          * previous sessions closed) and keeps private transients otherwise. */
+         const uint32_t block_cap = (uint32_t)ctx_size / 4u + 1u;
++        /* Mellum never shares a prefill workspace, so it never batches with
++         * other sessions: qwen4_graph_native_session_batch_check refuses only
++         * when no shared workspace exists, and a shared one would let Flash
++         * Next's batched decode run on Mellum. */
+         const bool share = e->share_session_prefill_workspace &&
+-                           e->backend == DS4_BACKEND_METAL;
++                           e->backend == DS4_BACKEND_METAL &&
++                           !ds4_model_is_mellum();
+         const bool arena_fits = e->qwen4_shared_workspace &&
+             e->qwen4_shared_workspace->cap_tokens >= cap_tokens &&
+             e->qwen4_shared_workspace->n_block_cap >= block_cap;
+@@ -76549,6 +76907,7 @@ static int ds4_session_sync_lockstep(ds4_session *s, const ds4_tokens *prompt,
+  * once its matching prefill completes, surfacing worker-side failures
+  * here instead of as a gate timeout mid-decode. */
+ int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t errlen) {
++    if (ds4_session_mellum_forward_refuses("sync", err, errlen)) return 1;
+ #ifndef DS4_NO_GPU
+     if (s) s->dspark_rewind_end = 0;
+ #endif
+@@ -76646,6 +77005,7 @@ int ds4_session_sync_multimodal(
+         size_t image_count,
+         char *err,
+         size_t errlen) {
++    if (ds4_session_mellum_forward_refuses("sync", err, errlen)) return 1;
+     if (!s || !prompt || (image_count != 0 && !images)) {
+         snprintf(err, errlen, "invalid multimodal prompt");
+         return 1;
+@@ -79163,6 +79523,7 @@ static int ds4_session_eval_probe_tp(ds4_session *s, int token, bool probe_mtp,
+ }
+ 
+ int ds4_session_eval(ds4_session *s, int token, char *err, size_t errlen) {
++    if (ds4_session_mellum_forward_refuses("eval", err, errlen)) return 1;
+     bool probe_mtp = true;
+ #ifndef DS4_NO_GPU
+     if (s && s->engine && s->engine->support_kind == DS4_SUPPORT_DSPARK) {
+@@ -81539,6 +81900,7 @@ static bool qwen4_batch_spec_next(const ds4_engine *e) {
+ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count,
+                                                int (*accepted)[2], int *n_accepted,
+                                                char *err, size_t errlen) {
++    if (ds4_session_mellum_forward_refuses("speculative decode", err, errlen)) return 1;
+     if (!items || count <= 0 || !accepted || !n_accepted) {
+         if (err && errlen) snprintf(err, errlen, "empty speculative decode batch");
+         return 1;
+@@ -81726,6 +82088,7 @@ int ds4_sessions_eval_batch_speculative_argmax(ds4_decode_item *items, int count
+ 
+ int ds4_sessions_eval_batch(ds4_decode_item *items, int count,
+                             char *err, size_t errlen) {
++    if (ds4_session_mellum_forward_refuses("batch decode", err, errlen)) return 1;
+     if (!items || count <= 0) {
+         if (err && errlen) snprintf(err, errlen, "empty decode batch");
+         return 1;
+@@ -81805,6 +82168,7 @@ int ds4_sessions_eval_batch_with_prefill(
+         const ds4_tokens *prefill_prompt,
+         char *err,
+         size_t errlen) {
++    if (ds4_session_mellum_forward_refuses("mixed prefill", err, errlen)) return 1;
+     if (!items || count <= 0 || !prefill_session || !prefill_prompt ||
+         !prefill_session->engine) {
+         if (err && errlen) snprintf(err, errlen, "invalid mixed model batch");
+@@ -86215,6 +86579,7 @@ static int ds4_session_eval_speculative_argmax_impl(
+         bool ignore_eos, ds4_think_mode think_mode,
+         int *accepted, int accepted_cap,
+         char *err, size_t errlen) {
++    if (ds4_session_mellum_forward_refuses("speculative decode", err, errlen)) return -1;
+     if (!s || max_tokens <= 0 || accepted_cap <= 0) return 0;
+     if (!s->checkpoint_valid) {
+         payload_set_err(err, errlen, "speculative decode requires a synchronized checkpoint");
+@@ -87090,6 +87455,7 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
+                                  float top_p, float min_p, uint64_t *rng,
+                                  int *accepted, int accepted_cap,
+                                  char *err, size_t errlen) {
++    if (ds4_session_mellum_forward_refuses("speculative decode", err, errlen)) return -1;
+     if (temperature <= 0.0f) {
+         return ds4_session_eval_speculative_argmax(
+             s, first_token, max_tokens, eos_token,
+diff --git a/ds4.h b/ds4.h
+index 04eb3658..0dd82239 100644
+--- a/ds4.h
++++ b/ds4.h
+@@ -308,9 +308,11 @@ int ds4_engine_model_id(ds4_engine *e);
+ bool ds4_engine_is_glm_dsa(ds4_engine *e);
+ bool ds4_engine_is_glm53(ds4_engine *e);
+ bool ds4_engine_is_qwen4(ds4_engine *e);
+-/* The sampler defaults for the loaded model: the generic DS4_DEFAULT_*
+- * values, overridden per family as the CLI does. For hosts that sample
+- * themselves. */
++/* True for Mellum 2.1, which is also a qwen4 engine: check it first. */
++bool ds4_engine_is_mellum(ds4_engine *e);
++/* The loaded model's sampler defaults, for the knobs a caller leaves unset:
++ * DS4_DEFAULT_* with no top_k, except Mellum 2.1 (temperature 1.0, top_p 1.0,
++ * min_p 0, no top_k).  The CLI reads it for the knobs it leaves unset. */
+ void ds4_engine_sampling_defaults(ds4_engine *e, float *temperature,
+                                   int *top_k, float *top_p, float *min_p);
+ /* Qwen3.8 reasoning-effort system instruction for a think mode (NULL when none) */
+diff --git a/ds4_cli.c b/ds4_cli.c
+index af4e2b63..c4529743 100644
+--- a/ds4_cli.c
++++ b/ds4_cli.c
+@@ -529,11 +529,22 @@ static void build_prompt(ds4_engine *engine, const cli_generation_options *gen,
+ static void cli_apply_model_sampling_defaults(
+         ds4_engine             *engine,
+         cli_generation_options *gen) {
+-    if (!engine || !gen || !ds4_engine_is_glm_dsa(engine)) return;
+-
+-    if (!gen->temperature_set) gen->temperature = 1.0f;
+-    if (!gen->top_p_set) gen->top_p = 0.95f;
+-    if (!gen->min_p_set) gen->min_p = 0.0f;
++    if (!engine || !gen) return;
++
++    if (ds4_engine_is_glm_dsa(engine)) {
++        if (!gen->temperature_set) gen->temperature = 1.0f;
++        if (!gen->top_p_set) gen->top_p = 0.95f;
++        if (!gen->min_p_set) gen->min_p = 0.0f;
++        return;
++    }
++    /* The engine's table (Mellum: 1.0, 1.0, min_p 0).  This front end has no
++     * top_k option, so top_k stays unset. */
++    float temperature, top_p, min_p;
++    int top_k;
++    ds4_engine_sampling_defaults(engine, &temperature, &top_k, &top_p, &min_p);
++    if (!gen->temperature_set) gen->temperature = temperature;
++    if (!gen->top_p_set) gen->top_p = top_p;
++    if (!gen->min_p_set) gen->min_p = min_p;
+ }
+ 
+ static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, const ds4_tokens *prompt) {
+diff --git a/ds4_mellum_config.inc b/ds4_mellum_config.inc
+new file mode 100644
+index 00000000..87374393
+--- /dev/null
++++ b/ds4_mellum_config.inc
+@@ -0,0 +1,140 @@
++/* Mellum 2.1, included by ds4.c where this code sits: not a separate translation unit. */
++
++/* Refuse a Mellum key at open, naming it (config_expect_* name theirs too). */
++static void config_refuse_mellum_key(const char *key, const char *why) {
++    fprintf(stderr, "ds4: %s: %s\n", key, why);
++    exit(1);
++}
++
++static void config_mellum_range(const char *key, uint32_t v, uint32_t lo, uint32_t hi) {
++    if (v >= lo && v <= hi) return;
++    fprintf(stderr, "ds4: %s=%u is outside what the Mellum kernels support (%u..%u)\n", key, v, lo, hi);
++    exit(1);
++}
++
++static float config_mellum_positive_f32(const ds4_model *m, const char *key) {
++    const float v = required_f32(m, key);
++    if (!(v > 0.0f) || !isfinite(v)) config_refuse_mellum_key(key, "must be a positive finite number");
++    return v;
++}
++
++/* Mellum 2.1 (arch `mellum`).  Widths come from the GGUF with range checks;
++ * what the Metal kernels need as a constant is pinned to the validated value
++ * (window 1024, 64 experts with 8 used, 32 heads over 4 KV heads of width 128,
++ * YaRN 16 over 8192).
++ * The layer count is read, not pinned.  The dense `feed_forward_length`
++ * (7168) is deliberately not read: every Mellum layer is a routed MoE, so
++ * n_ff_dense stays 0.  Never calls qwen4_rope_configure: its 32-pair table
++ * cannot hold Mellum's 64 rotary pairs, and with DS4_QWEN4_YARN_FACTOR set it
++ * would print a misleading "Qwen3.8 YaRN" line. */
++static void config_validate_mellum_model(const ds4_model *m) {
++    g_ds4_shape = DS4_SHAPE_MELLUM;
++    memset(g_ds4_compress_ratios, 0, sizeof(g_ds4_compress_ratios));
++    memset(&g_ds4_qwen4_ple, 0, sizeof(g_ds4_qwen4_ple));
++    /* the Qwen rope state belongs to qwen4_rope_configure, which Mellum never
++     * calls; a Qwen model opened earlier in this process must not leave it behind */
++    memset(g_qwen4_rope_freq, 0, sizeof(g_qwen4_rope_freq));
++    g_qwen4_rope_mscale = 1.0f;
++    g_qwen4_native_ctx = 0;
++    g_qwen4_rope_yarn = false;
++
++    const uint32_t n_block = required_u32(m, "mellum.block_count");
++    config_mellum_range("mellum.block_count", n_block, 1u, DS4_MAX_LAYER);
++    g_ds4_shape.n_layer = n_block;
++    g_ds4_shape.n_embd = required_u32(m, "mellum.embedding_length");
++    config_mellum_range("mellum.embedding_length", g_ds4_shape.n_embd, 128u, DS4_MAX_EMBD);
++    if (g_ds4_shape.n_embd % 128u) {
++        config_refuse_mellum_key("mellum.embedding_length", "must be a multiple of 128 (the MoE kernels' rows)");
++    }
++    /* the sliding attention kernel is written for 32 query heads over 4 KV heads */
++    config_expect_u32("mellum.attention.head_count", required_u32(m, "mellum.attention.head_count"), 32u);
++    config_expect_u32("mellum.attention.head_count_kv", required_u32(m, "mellum.attention.head_count_kv"), 4u);
++    g_ds4_shape.n_head = 32u;
++    g_ds4_shape.n_head_kv = 4u;
++    config_expect_u32("mellum.attention.key_length", required_u32(m, "mellum.attention.key_length"), 128u);
++    config_expect_u32("mellum.attention.value_length", required_u32(m, "mellum.attention.value_length"), 128u);
++    g_ds4_shape.n_head_dim = 128u;
++    g_ds4_shape.n_value_dim = 128u;
++    g_ds4_shape.n_rot = 128u;               /* rope covers the whole head: no rope.dimension_count key */
++
++    config_expect_u32("mellum.expert_count", required_u32(m, "mellum.expert_count"), 64u);
++    config_expect_u32("mellum.expert_used_count", required_u32(m, "mellum.expert_used_count"), 8u);
++    g_ds4_shape.n_expert = 64u;
++    g_ds4_shape.n_expert_used = 8u;
++    g_ds4_shape.n_ff_exp = required_u32(m, "mellum.expert_feed_forward_length");
++    config_mellum_range("mellum.expert_feed_forward_length", g_ds4_shape.n_ff_exp, 32u, DS4_MAX_FF_EXP);
++    if (g_ds4_shape.n_ff_exp % 32u) {
++        config_refuse_mellum_key("mellum.expert_feed_forward_length", "must be a multiple of 32 (Q8_0 blocks)");
++    }
++
++    config_expect_u32("mellum.attention.sliding_window", required_u32(m, "mellum.attention.sliding_window"), 1024u);
++    g_ds4_shape.n_swa = 1024u;
++    {
++        const char *key = "mellum.attention.sliding_window_pattern";
++        ds4_array_ref arr = {0};
++        if (!model_get_array(m, key, &arr) || arr.type != GGUF_VALUE_BOOL || arr.len != n_block) {
++            config_refuse_mellum_key(key, "must be a bool array with one entry per block");
++        }
++        ds4_cursor c = cursor_at(m, arr.data_pos);
++        for (uint32_t il = 0; il < n_block; il++) {
++            uint8_t v = 0;
++            if (!cursor_read(&c, &v, sizeof(v))) ds4_die(c.error);
++            if ((v != 0) != ds4_mellum_layer_is_sliding(il)) {
++                fprintf(stderr, "ds4: %s: layer %u is %s, but Mellum slides every layer except il %% 4 == 3\n",
++                        key, il, v ? "sliding" : "full");
++                exit(1);
++            }
++        }
++    }
++
++    {
++        const char *key = "mellum.rope.scaling.type";
++        ds4_str type = {0};
++        if (!model_get_string(m, key, &type) || !ds4_streq(type, "yarn")) {
++            config_refuse_mellum_key(key, "must be \"yarn\"");
++        }
++    }
++    config_expect_f32("mellum.rope.scaling.factor", required_f32(m, "mellum.rope.scaling.factor"), 16.0f);
++    config_expect_u64("mellum.rope.scaling.original_context_length",
++                      required_u64_compat(m, "mellum.rope.scaling.original_context_length"), 8192u);
++    /* 1 + 0.1 ln(16): checked here, and not applied, because the RoPE host
++     * computes the same magnitude from the factor (see the shape field) */
++    config_expect_f32("mellum.rope.scaling.yarn_attn_factor",
++                      required_f32(m, "mellum.rope.scaling.yarn_attn_factor"), 1.2772589f);
++    config_expect_f32("mellum.rope.scaling.yarn_beta_fast", required_f32(m, "mellum.rope.scaling.yarn_beta_fast"), 32.0f);
++    config_expect_f32("mellum.rope.scaling.yarn_beta_slow", required_f32(m, "mellum.rope.scaling.yarn_beta_slow"), 1.0f);
++    g_ds4_shape.rope_scale_factor = 16.0f;
++    g_ds4_shape.rope_orig_ctx = 8192u;
++    g_ds4_shape.rope_yarn_attn_factor = 1.2772589f;
++    g_ds4_shape.rope_yarn_beta_fast = 32.0f;
++    g_ds4_shape.rope_yarn_beta_slow = 1.0f;
++    g_ds4_shape.rope_freq_base = config_mellum_positive_f32(m, "mellum.rope.freq_base");
++    g_ds4_shape.rope_freq_base_swa = config_mellum_positive_f32(m, "mellum.rope.freq_base_swa");
++    g_ds4_shape.rms_eps = config_mellum_positive_f32(m, "mellum.attention.layer_norm_rms_epsilon");
++    if (required_u64_compat(m, "mellum.context_length") < DS4_ROPE_ORIG_CTX) {
++        config_refuse_mellum_key("mellum.context_length", "is shorter than the YaRN original context");
++    }
++
++    const ds4_tensor *embd = model_find_tensor(m, "token_embd.weight");
++    if (!embd || embd->ndim != 2 || embd->dim[1] == 0 || embd->dim[1] > DS4_MAX_VOCAB) {
++        ds4_die("Mellum token_embd.weight is missing or its vocabulary exceeds the compiled limit");
++    }
++    g_ds4_shape.n_vocab = (uint32_t)embd->dim[1];
++
++    /* Every Mellum layer is routed-only; a shared-expert tensor means a different model. */
++    static const char *const shexp[] = {
++        "blk.%u.ffn_gate_inp_shexp.weight", "blk.%u.ffn_gate_shexp.weight",
++        "blk.%u.ffn_up_shexp.weight", "blk.%u.ffn_down_shexp.weight",
++    };
++    for (uint32_t il = 0; il < n_block; il++) {
++        for (size_t i = 0; i < sizeof(shexp) / sizeof(shexp[0]); i++) {
++            char name[96];
++            snprintf(name, sizeof(name), shexp[i], il);
++            if (model_find_tensor(m, name)) {
++                fprintf(stderr, "ds4: Mellum has no shared expert, but the GGUF carries tensor %s\n", name);
++                exit(1);
++            }
++        }
++    }
++}
++
+diff --git a/ds4_mellum_plan.inc b/ds4_mellum_plan.inc
+new file mode 100644
+index 00000000..877902b8
+--- /dev/null
++++ b/ds4_mellum_plan.inc
+@@ -0,0 +1,180 @@
++/* Mellum 2.1, included by ds4.c where this code sits: not a separate translation unit. */
++
++/* ---------------------------------------------------------------------
++ * Mellum 2.1 memory plan and session allocation.
++ *
++ * One table is the single source of truth for every GPU tensor a Mellum
++ * session holds: mellum_requests lists them with their sizes, the plan
++ * (mellum_context_memory, behind ds4_context_memory_estimate) sums the table
++ * by class, and mellum_graph_alloc (GPU build) walks the same table to
++ * allocate.  A tensor the session allocates is in the plan because there is
++ * no second list.
++ *
++ * Layout.  Full-attention layers (il % 4 == 3) hold K and V for every
++ * position, [ctx][n_head_kv * head_dim] f16.  Sliding layers hold a ring of
++ * DS4_N_SWA slots, the same row shape: position p lives in slot p % window,
++ * and each ring carries an int32 position tag per slot (one array per ring: a
++ * row's K and V share it) so a stale slot is never read as a live row.
++ * Attention reads the ring before the chunk is committed to it, so a ring of
++ * exactly the window survives a one-token rewind: after a forward ending at
++ * P - 1 the ring holds P - W .. P - 1, and a query at P - 1 needs only
++ * P - W .. P - 2 of it.  The prefill and MoE transients are sized for
++ * cap_tokens rows and allocated at session create, never at the first sync.
++ * The full-attention layers' two scratch buffers (the rows table and the
++ * 64-row partials) are in the table too.
++ *
++ * The chunk.  Mellum's prefill chunk is min(requested, DS4_N_SWA): the ring
++ * commit refuses more rows than the ring holds, and DS4_QWEN4_PREFILL_CHUNK
++ * accepts up to 65,536, so an unclamped value would fail a forward with no
++ * message naming the cause.
++ * --------------------------------------------------------------------- */
++typedef enum {
++    MELLUM_CLASS_KV,        /* K/V caches, rings and ring tags: the session's KV state */
++    MELLUM_CLASS_PREFILL,   /* cap_tokens rows of activations */
++    MELLUM_CLASS_MOE,       /* cap_tokens rows of routing and expert transients */
++    MELLUM_CLASS_LOGITS,    /* the row a caller reads back */
++} mellum_class;
++
++typedef enum {
++    MELLUM_REQ_K,           /* index = layer: full cache [ctx] or ring [window], f16 */
++    MELLUM_REQ_V,
++    MELLUM_REQ_TAG,         /* index = sliding layer: int32 position tag per ring slot (K and V rows share it) */
++    MELLUM_REQ_SCRATCH,     /* index = mellum_scratch_id */
++    MELLUM_REQ_LOGITS,
++} mellum_req_kind;
++
++typedef enum {
++    /* prefill */
++    MELLUM_S_TOKENS,
++    MELLUM_S_HIDDEN, MELLUM_S_ATTN_NORM, MELLUM_S_ATTN_PROJ,
++    MELLUM_S_ATTN_RES, MELLUM_S_FFN_NORM, MELLUM_S_MOE_OUT,
++    MELLUM_S_Q, MELLUM_S_HEADS, MELLUM_S_K, MELLUM_S_V, MELLUM_S_K16, MELLUM_S_V16,
++    /* full attention: one rows-table region per full layer, and the partials of one 64-row slice (shared) */
++    MELLUM_S_ATTN_TABLE, MELLUM_S_ATTN_PART,
++    /* MoE: the router logits, the selection and its weights, the experts' mid and partial outputs */
++    MELLUM_S_ROUTER_LOGITS, MELLUM_S_SELECTED, MELLUM_S_WEIGHTS,
++    MELLUM_S_MID, MELLUM_S_PARTIAL,
++    MELLUM_SCRATCH_COUNT
++} mellum_scratch_id;
++
++typedef struct {
++    mellum_req_kind kind;
++    mellum_class cls;
++    uint32_t index;
++    uint64_t bytes;
++} mellum_req;
++
++#define MELLUM_MAX_REQS (3u * DS4_MAX_LAYER + MELLUM_SCRATCH_COUNT + 1u)
++
++/* Full attention's rows kernels work in slices of 64 rows and split each row's keys
++ * into at most 64 parts (QWEN4_ATTN_MAX_SPLITS, ds4_metal.m; mellum_graph_alloc checks
++ * the product against ds4_gpu_qwen4_attn_part_floats, which this model-free table cannot call). */
++#define MELLUM_ATTN_SLICE_ROWS 64u
++#define MELLUM_ATTN_MAX_SPLITS 64u
++#define MELLUM_ATTN_ROW_BYTES 64u   /* one rows-table entry (DS4_GPU_QWEN4_ATTN_ROW_BYTES, checked at allocation) */
++
++/* Mellum's chunk, one place: min(requested, window).  Says once per engine
++ * that it clamped (ds4_engine_open re-arms the flag, so a /model reopen says it
++ * again), so a DS4_QWEN4_PREFILL_CHUNK=4096 or a host --prefill-chunk=4096
++ * is visible and not a silent change. */
++static bool g_mellum_clamp_said;
++
++static uint32_t mellum_clamp_chunk(uint32_t requested) {
++    const uint32_t window = DS4_N_SWA;
++    if (requested <= window) return requested;
++    if (!g_mellum_clamp_said) {
++        g_mellum_clamp_said = true;
++        fprintf(stderr,
++                "ds4: Mellum prefill chunk %u clamped to %u (the sliding-window ring holds %u rows)\n",
++                requested, window, window);
++    }
++    return window;
++}
++
++/* The rows a Mellum session allocates its transients for, and prefills in:
++ * the host's chunk, else DS4_QWEN4_PREFILL_CHUNK, else the window; never more
++ * than the window or the context. */
++static uint32_t mellum_prefill_cap(uint32_t ctx, uint32_t requested) {
++    uint32_t chunk = requested;
++    if (chunk == 0) {
++        const char *env = getenv("DS4_QWEN4_PREFILL_CHUNK");
++        const unsigned long v = env && env[0] ? strtoul(env, NULL, 10) : 0ul;
++        chunk = v == 0 || v > 65536ul ? DS4_N_SWA : (uint32_t)v;
++    }
++    chunk = mellum_clamp_chunk(chunk);
++    if (chunk > ctx) chunk = ctx;
++    return chunk ? chunk : 1u;
++}
++
++/* Every GPU tensor of a Mellum session, in allocation order.  Returns the
++ * count; out holds MELLUM_MAX_REQS entries. */
++static uint32_t mellum_requests(uint32_t ctx, uint32_t cap_tokens, mellum_req *out) {
++    const uint64_t E = DS4_N_EMBD, T = cap_tokens, window = DS4_N_SWA;
++    const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
++    const uint64_t kv_dim = (uint64_t)DS4_N_HEAD_KV * DS4_N_HEAD_DIM;
++    const uint64_t n_exp = DS4_N_EXPERT, n_used = DS4_N_EXPERT_USED, ff = DS4_N_FF_EXP;
++    uint32_t n = 0;
++#define MELLUM_ADD(kind_, cls_, index_, bytes_) \
++    do { out[n].kind = (kind_); out[n].cls = (cls_); out[n].index = (uint32_t)(index_); \
++         out[n].bytes = (bytes_); n++; } while (0)
++    for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
++        const bool ring = ds4_mellum_layer_is_sliding(il);
++        const uint64_t rows = ring ? window : ctx;
++        MELLUM_ADD(MELLUM_REQ_K, MELLUM_CLASS_KV, il, rows * kv_dim * sizeof(uint16_t));
++        MELLUM_ADD(MELLUM_REQ_V, MELLUM_CLASS_KV, il, rows * kv_dim * sizeof(uint16_t));
++        if (ring) MELLUM_ADD(MELLUM_REQ_TAG, MELLUM_CLASS_KV, il, window * sizeof(int32_t));
++    }
++    uint64_t n_full = 0;
++    for (uint32_t il = 0; il < DS4_N_LAYER; il++) n_full += !ds4_mellum_layer_is_sliding(il);
++    const uint64_t slice = T < MELLUM_ATTN_SLICE_ROWS ? T : MELLUM_ATTN_SLICE_ROWS;
++#define MELLUM_SCRATCH(id_, cls_, bytes_) MELLUM_ADD(MELLUM_REQ_SCRATCH, cls_, id_, bytes_)
++    MELLUM_SCRATCH(MELLUM_S_TOKENS, MELLUM_CLASS_PREFILL, T * sizeof(int32_t));
++    MELLUM_SCRATCH(MELLUM_S_HIDDEN, MELLUM_CLASS_PREFILL, T * E * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_ATTN_NORM, MELLUM_CLASS_PREFILL, T * E * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_ATTN_PROJ, MELLUM_CLASS_PREFILL, T * E * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_ATTN_RES, MELLUM_CLASS_PREFILL, T * E * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_FFN_NORM, MELLUM_CLASS_PREFILL, T * E * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_MOE_OUT, MELLUM_CLASS_PREFILL, T * E * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_Q, MELLUM_CLASS_PREFILL, T * q_dim * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_HEADS, MELLUM_CLASS_PREFILL, T * q_dim * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_K, MELLUM_CLASS_PREFILL, T * kv_dim * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_V, MELLUM_CLASS_PREFILL, T * kv_dim * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_K16, MELLUM_CLASS_PREFILL, T * kv_dim * sizeof(uint16_t));
++    MELLUM_SCRATCH(MELLUM_S_V16, MELLUM_CLASS_PREFILL, T * kv_dim * sizeof(uint16_t));
++    /* region j of the table (j = the j-th full layer) is entries j * T .. j * T + T - 1: each layer of one
++     * command buffer needs its own, because the CPU writes the table when the layer is encoded and the GPU
++     * reads it when the command buffer runs */
++    MELLUM_SCRATCH(MELLUM_S_ATTN_TABLE, MELLUM_CLASS_PREFILL, n_full * T * MELLUM_ATTN_ROW_BYTES);
++    MELLUM_SCRATCH(MELLUM_S_ATTN_PART, MELLUM_CLASS_PREFILL,
++                   slice * DS4_N_HEAD * MELLUM_ATTN_MAX_SPLITS * (2u + DS4_N_HEAD_DIM) * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_ROUTER_LOGITS, MELLUM_CLASS_MOE, T * n_exp * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_SELECTED, MELLUM_CLASS_MOE, T * n_used * sizeof(int32_t));
++    MELLUM_SCRATCH(MELLUM_S_WEIGHTS, MELLUM_CLASS_MOE, T * n_used * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_MID, MELLUM_CLASS_MOE, T * n_used * ff * sizeof(float));
++    MELLUM_SCRATCH(MELLUM_S_PARTIAL, MELLUM_CLASS_MOE, T * n_used * E * sizeof(float));
++#undef MELLUM_SCRATCH
++    MELLUM_ADD(MELLUM_REQ_LOGITS, MELLUM_CLASS_LOGITS, 0, (uint64_t)DS4_N_VOCAB * sizeof(float));
++#undef MELLUM_ADD
++    return n;
++}
++
++/* The plan: the table summed by class.  KV state is raw_bytes (the startup
++ * line's "KV"), everything else scratch_bytes (its "buffers"); the weights are
++ * the caller's.  ctx_size <= 0 plans a one-token context. */
++static ds4_context_memory mellum_context_memory(int ctx_size, uint32_t requested_chunk) {
++    ds4_context_memory m = {0};
++    const uint32_t ctx = ctx_size > 0 ? (uint32_t)ctx_size : 1u;
++    const uint32_t cap = mellum_prefill_cap(ctx, requested_chunk);
++    mellum_req reqs[MELLUM_MAX_REQS];
++    const uint32_t n = mellum_requests(ctx, cap, reqs);
++    for (uint32_t i = 0; i < n; i++) {
++        if (reqs[i].cls == MELLUM_CLASS_KV) m.raw_bytes += reqs[i].bytes;
++        else m.scratch_bytes += reqs[i].bytes;
++    }
++    m.prefill_cap = cap;
++    m.raw_cap = ctx;
++    m.total_bytes = m.raw_bytes + m.scratch_bytes;
++    return m;
++}
++
++
+diff --git a/tests/mellum_fixture.h b/tests/mellum_fixture.h
+new file mode 100644
+index 00000000..a4877ec6
+--- /dev/null
++++ b/tests/mellum_fixture.h
+@@ -0,0 +1,256 @@
++/* A sparse Mellum 2.1 GGUF for model-free tests: the real key set and the real
++ * tensor directory (every tensor at offset 0, so the file is a few hundred
++ * megabytes of holes), and a tiny vocabulary with 2.1's special tokens at their
++ * real ids followed by the 256 GPT-2 byte pieces and no merges, so text
++ * tokenizes to one id per byte (byte c is id 35 + c).  A mutation changes one
++ * thing, for a refusal test.  Self-contained: it does not include ds4.c, so the
++ * GGUF constants are restated here. */
++#ifndef DS4_TESTS_MELLUM_FIXTURE_H
++#define DS4_TESTS_MELLUM_FIXTURE_H
++
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++enum {
++    MF_GGUF_MAGIC = 0x46554747,   /* "GGUF" */
++    MF_UINT32 = 4, MF_INT32 = 5, MF_FLOAT32 = 6, MF_BOOL = 7, MF_STRING = 8, MF_ARRAY = 9,
++    MF_F32 = 0, MF_Q8_0 = 8, MF_Q4_K = 12, MF_MXFP4 = 39,
++};
++
++typedef enum {
++    MF_NONE = 0,
++    MF_PATTERN_FLIP,      /* one entry of sliding_window_pattern flipped */
++    MF_PATTERN_LEN27,     /* 27 entries for 28 blocks */
++    MF_PATTERN_LEN29,     /* 29 entries: the first 28 are right, only the length is wrong */
++    MF_PATTERN_ABSENT,
++    MF_ROPE_NOT_YARN,
++    MF_NO_FREQ_BASE_SWA,
++    MF_EXPERTS_128,
++    MF_USED_10,
++    MF_KEY_LENGTH_256,
++    MF_WINDOW_512,
++    MF_YARN_FACTOR_8,
++    MF_ATTN_FACTOR_1,
++    MF_ORIG_CTX_4096,
++    MF_SHEXP_TENSOR,      /* a shared-expert router in layer 0 */
++    MF_DOWN_Q4K,          /* layer 2's ffn_down_exps is Q4_K */
++    MF_UP_Q4K,            /* layer 2's ffn_up_exps is Q4_K */
++    MF_EXPERTS_MXFP4,     /* all 84 routed-expert tensors are MXFP4 */
++    MF_LAYER2_MXFP4,      /* only layer 2's three routed-expert tensors are MXFP4 */
++    MF_DOWN2_MXFP4,       /* only layer 2's ffn_down_exps is MXFP4 */
++    MF_NO_OUTPUT_NORM,
++    MF_NO_ATTN_Q_NORM,    /* layer 5 has no attn_q_norm */
++    MF_BAD_ATTN_Q_DIM,    /* layer 5's attn_q is twice as wide */
++    MF_NO_TOKEN_TYPE,     /* tokenizer.ggml.token_type absent */
++    MF_TOKEN_TYPE_SHORT,  /* one entry fewer than tokens */
++    MF_TOKEN_TYPE_U32,    /* the right values, stored as uint32 */
++    MF_NO_IM_START,       /* id 27 spelled something else: <|im_start|> absent */
++    MF_NO_IM_END,         /* id 28 spelled something else: <|im_end|> absent */
++    MF_EXTRA_CONTROL,     /* one more CONTROL token, spelled <zzz>, after the byte pieces */
++    MF_HEADS_16,          /* attention.head_count 16: a group of 4 still, which the old range check accepted */
++    MF_HEADS_KV_8,        /* attention.head_count_kv 8: a group of 4 still */
++    MF_EMBD_2336,         /* embedding_length 2336: a multiple of 32, not of 128 */
++} mf_mutation;
++
++typedef struct { char *p; size_t n, cap; } mf_buf;
++
++static void mf_put(mf_buf *b, const void *d, size_t n) {
++    if (b->n + n > b->cap) {
++        b->cap = (b->n + n) * 2 + 64;
++        b->p = realloc(b->p, b->cap);
++        assert(b->p);
++    }
++    memcpy(b->p + b->n, d, n);
++    b->n += n;
++}
++static void mf_u32(mf_buf *b, uint32_t v) { mf_put(b, &v, 4); }
++static void mf_u64(mf_buf *b, uint64_t v) { mf_put(b, &v, 8); }
++static void mf_str(mf_buf *b, const char *s) { mf_u64(b, strlen(s)); mf_put(b, s, strlen(s)); }
++
++typedef struct { mf_buf kv, tn; uint64_t n_kv, n_tensor; } mf_gguf;
++
++static void mf_kv_u32(mf_gguf *g, const char *k, uint32_t v) {
++    mf_str(&g->kv, k); mf_u32(&g->kv, MF_UINT32); mf_u32(&g->kv, v); g->n_kv++;
++}
++static void mf_kv_f32(mf_gguf *g, const char *k, float v) {
++    mf_str(&g->kv, k); mf_u32(&g->kv, MF_FLOAT32); mf_put(&g->kv, &v, 4); g->n_kv++;
++}
++static void mf_kv_str(mf_gguf *g, const char *k, const char *v) {
++    mf_str(&g->kv, k); mf_u32(&g->kv, MF_STRING); mf_str(&g->kv, v); g->n_kv++;
++}
++static void mf_kv_strs(mf_gguf *g, const char *k, const char *const *v, uint64_t n) {
++    mf_str(&g->kv, k); mf_u32(&g->kv, MF_ARRAY); mf_u32(&g->kv, MF_STRING); mf_u64(&g->kv, n);
++    for (uint64_t i = 0; i < n; i++) mf_str(&g->kv, v[i]);
++    g->n_kv++;
++}
++static void mf_kv_i32s(mf_gguf *g, const char *k, uint32_t etype, const int32_t *v, uint64_t n) {
++    mf_str(&g->kv, k); mf_u32(&g->kv, MF_ARRAY); mf_u32(&g->kv, etype); mf_u64(&g->kv, n);
++    for (uint64_t i = 0; i < n; i++) mf_put(&g->kv, &v[i], 4);
++    g->n_kv++;
++}
++static void mf_kv_bools(mf_gguf *g, const char *k, const bool *v, uint64_t n) {
++    mf_str(&g->kv, k); mf_u32(&g->kv, MF_ARRAY); mf_u32(&g->kv, MF_BOOL); mf_u64(&g->kv, n);
++    for (uint64_t i = 0; i < n; i++) { uint8_t x = v[i]; mf_put(&g->kv, &x, 1); }
++    g->n_kv++;
++}
++
++static void mf_tensor(mf_gguf *g, const char *name, uint32_t type, uint32_t ndim,
++                      uint64_t d0, uint64_t d1, uint64_t d2) {
++    mf_str(&g->tn, name); mf_u32(&g->tn, ndim);
++    mf_u64(&g->tn, d0);
++    if (ndim > 1) mf_u64(&g->tn, d1);
++    if (ndim > 2) mf_u64(&g->tn, d2);
++    mf_u32(&g->tn, type); mf_u64(&g->tn, 0);
++    g->n_tensor++;
++}
++
++static void mf_layer_tensor(mf_gguf *g, uint32_t il, const char *suffix, uint32_t type, uint32_t ndim,
++                            uint64_t d0, uint64_t d1, uint64_t d2) {
++    char name[128];
++    snprintf(name, sizeof(name), "blk.%u.%s", il, suffix);
++    mf_tensor(g, name, type, ndim, d0, d1, d2);
++}
++
++/* 2.1's hyperparameters, as its GGUF carries them. */
++static void mf_keys(mf_gguf *g, mf_mutation mu) {
++    bool pattern[29];
++    for (int i = 0; i < 29; i++) pattern[i] = (i % 4) != 3;
++    if (mu == MF_PATTERN_FLIP) pattern[3] = true;
++    mf_kv_str(g, "general.architecture", "mellum");
++    mf_kv_u32(g, "mellum.block_count", 28);
++    mf_kv_u32(g, "mellum.context_length", 131072);
++    mf_kv_u32(g, "mellum.embedding_length", mu == MF_EMBD_2336 ? 2336 : 2304);
++    mf_kv_u32(g, "mellum.feed_forward_length", 7168);
++    mf_kv_u32(g, "mellum.attention.head_count", mu == MF_HEADS_16 ? 16 : 32);
++    mf_kv_u32(g, "mellum.attention.head_count_kv", mu == MF_HEADS_KV_8 ? 8 : 4);
++    mf_kv_str(g, "mellum.rope.scaling.type", mu == MF_ROPE_NOT_YARN ? "linear" : "yarn");
++    mf_kv_f32(g, "mellum.rope.scaling.factor", mu == MF_YARN_FACTOR_8 ? 8.0f : 16.0f);
++    mf_kv_u32(g, "mellum.rope.scaling.original_context_length", mu == MF_ORIG_CTX_4096 ? 4096 : 8192);
++    mf_kv_f32(g, "mellum.rope.scaling.yarn_attn_factor", mu == MF_ATTN_FACTOR_1 ? 1.0f : 1.2772588729858398f);
++    mf_kv_f32(g, "mellum.rope.scaling.yarn_beta_fast", 32.0f);
++    mf_kv_f32(g, "mellum.rope.scaling.yarn_beta_slow", 1.0f);
++    mf_kv_f32(g, "mellum.rope.freq_base", 500000.0f);
++    if (mu != MF_NO_FREQ_BASE_SWA) mf_kv_f32(g, "mellum.rope.freq_base_swa", 500000.0f);
++    mf_kv_f32(g, "mellum.attention.layer_norm_rms_epsilon", 1.0e-6f);
++    mf_kv_u32(g, "mellum.expert_count", mu == MF_EXPERTS_128 ? 128 : 64);
++    mf_kv_u32(g, "mellum.expert_used_count", mu == MF_USED_10 ? 10 : 8);
++    mf_kv_u32(g, "mellum.attention.key_length", mu == MF_KEY_LENGTH_256 ? 256 : 128);
++    mf_kv_u32(g, "mellum.attention.value_length", 128);
++    mf_kv_u32(g, "mellum.expert_feed_forward_length", 896);
++    mf_kv_u32(g, "mellum.attention.sliding_window", mu == MF_WINDOW_512 ? 512 : 1024);
++    if (mu != MF_PATTERN_ABSENT) {
++        mf_kv_bools(g, "mellum.attention.sliding_window_pattern", pattern,
++                    mu == MF_PATTERN_LEN27 ? 27 : mu == MF_PATTERN_LEN29 ? 29 : 28);
++    }
++}
++
++/* The special ids at their real places and spellings (2.1's tokenizer_config.json),
++ * then the 256 byte-level pieces. */
++static void mf_vocab(mf_gguf *g, mf_mutation mu) {
++    static char fill[35][24], bytes[256][8];
++    const char *tok[35 + 256 + 1];
++    const int ntok = 35 + 256 + (mu == MF_EXTRA_CONTROL ? 1 : 0);
++    for (int i = 0; i < 35; i++) { snprintf(fill[i], sizeof(fill[i]), "<fill_%d>", i); tok[i] = fill[i]; }
++    tok[0] = "<|endoftext|>"; tok[1] = "<assistant>"; tok[2] = "</assistant>";
++    tok[3] = "<commit_before>"; tok[4] = "<commit_after>"; tok[5] = "<commit_msg>";
++    tok[6] = "<empty_output>"; tok[7] = "<filename>"; tok[8] = "<fim_prefix>";
++    tok[9] = "<fim_middle>"; tok[10] = "<fim_suffix>"; tok[11] = "<fim_pad>";
++    tok[12] = "<gh_stars>"; tok[13] = "<issue_start>"; tok[14] = "<issue_comment>";
++    tok[15] = "<issue_closed>"; tok[16] = "<jupyter_text>"; tok[17] = "<jupyter_code>";
++    tok[18] = "<jupyter_start>"; tok[19] = "<jupyter_output>"; tok[20] = "<reponame>";
++    tok[21] = "<system>"; tok[22] = "</system>"; tok[23] = "<think>"; tok[24] = "</think>";
++    tok[25] = "<user>"; tok[26] = "</user>";
++    tok[27] = mu == MF_NO_IM_START ? "<|im_begin|>" : "<|im_start|>";
++    tok[28] = mu == MF_NO_IM_END ? "<|im_finish|>" : "<|im_end|>";
++    tok[29] = "<tool_call>"; tok[30] = "</tool_call>";
++    tok[31] = "<tool_response>"; tok[32] = "</tool_response>";
++    tok[33] = "<|extra_token_7|>"; tok[34] = "<|extra_token_8|>";
++    int extra = 0;
++    for (int c = 0; c < 256; c++) {
++        const bool direct = (c >= 33 && c <= 126) || (c >= 161 && c <= 172) || (c >= 174);
++        const int cp = direct ? c : 256 + extra++;
++        if (cp < 0x80) { bytes[c][0] = (char)cp; bytes[c][1] = 0; }
++        else { bytes[c][0] = (char)(0xC0 | (cp >> 6)); bytes[c][1] = (char)(0x80 | (cp & 0x3F)); bytes[c][2] = 0; }
++        tok[35 + c] = bytes[c];
++    }
++    if (mu == MF_EXTRA_CONTROL) tok[35 + 256] = "<zzz>";
++    mf_kv_str(g, "tokenizer.ggml.model", "gpt2");
++    mf_kv_str(g, "tokenizer.ggml.pre", "mellum2");
++    mf_kv_strs(g, "tokenizer.ggml.tokens", tok, (uint64_t)ntok);
++    mf_kv_strs(g, "tokenizer.ggml.merges", NULL, 0);
++    /* as 2.1's file has them: 0-22, 25-28, 33, 34 CONTROL (3); 23, 24, 29-32
++     * USER_DEFINED (4); the byte pieces NORMAL (1) */
++    static int32_t types[35 + 256 + 1];
++    for (int i = 0; i < 35 + 256; i++) types[i] = i >= 35 ? 1 : 3;
++    types[35 + 256] = 3;
++    types[23] = types[24] = types[29] = types[30] = types[31] = types[32] = 4;
++    if (mu != MF_NO_TOKEN_TYPE) {
++        mf_kv_i32s(g, "tokenizer.ggml.token_type", mu == MF_TOKEN_TYPE_U32 ? MF_UINT32 : MF_INT32, types,
++                   mu == MF_TOKEN_TYPE_SHORT ? (uint64_t)ntok - 1 : (uint64_t)ntok);
++    }
++    mf_kv_u32(g, "tokenizer.ggml.bos_token_id", 0);
++    mf_kv_u32(g, "tokenizer.ggml.eos_token_id", 28);
++    mf_kv_u32(g, "tokenizer.ggml.unknown_token_id", 0);
++    mf_kv_u32(g, "tokenizer.ggml.padding_token_id", 0);
++}
++
++/* 2.1's tensor directory (Q8_0 projections and experts, F32 norms and router). */
++static void mf_tensors(mf_gguf *g, mf_mutation mu) {
++    const uint32_t Q8 = MF_Q8_0, F32 = MF_F32;
++    mf_tensor(g, "output.weight", Q8, 2, 2304, 98304, 0);
++    if (mu != MF_NO_OUTPUT_NORM) mf_tensor(g, "output_norm.weight", F32, 1, 2304, 0, 0);
++    mf_tensor(g, "token_embd.weight", Q8, 2, 2304, 98304, 0);
++    for (uint32_t il = 0; il < 28; il++) {
++        const uint32_t X = mu == MF_EXPERTS_MXFP4 || (mu == MF_LAYER2_MXFP4 && il == 2) ? MF_MXFP4 : Q8;
++        mf_layer_tensor(g, il, "attn_k.weight", Q8, 2, 2304, 512, 0);
++        mf_layer_tensor(g, il, "attn_k_norm.weight", F32, 1, 128, 0, 0);
++        mf_layer_tensor(g, il, "attn_norm.weight", F32, 1, 2304, 0, 0);
++        mf_layer_tensor(g, il, "attn_output.weight", Q8, 2, 4096, 2304, 0);
++        mf_layer_tensor(g, il, "attn_q.weight", Q8, 2, 2304, mu == MF_BAD_ATTN_Q_DIM && il == 5 ? 8192 : 4096, 0);
++        if (!(mu == MF_NO_ATTN_Q_NORM && il == 5)) mf_layer_tensor(g, il, "attn_q_norm.weight", F32, 1, 128, 0, 0);
++        mf_layer_tensor(g, il, "attn_v.weight", Q8, 2, 2304, 512, 0);
++        mf_layer_tensor(g, il, "ffn_down_exps.weight",
++                        mu == MF_DOWN_Q4K && il == 2 ? MF_Q4_K : mu == MF_DOWN2_MXFP4 && il == 2 ? MF_MXFP4 : X,
++                        3, 896, 2304, 64);
++        mf_layer_tensor(g, il, "ffn_gate_exps.weight", X, 3, 2304, 896, 64);
++        mf_layer_tensor(g, il, "ffn_gate_inp.weight", F32, 2, 2304, 64, 0);
++        mf_layer_tensor(g, il, "ffn_norm.weight", F32, 1, 2304, 0, 0);
++        mf_layer_tensor(g, il, "ffn_up_exps.weight", mu == MF_UP_Q4K && il == 2 ? MF_Q4_K : X, 3, 2304, 896, 64);
++        if (mu == MF_SHEXP_TENSOR && il == 0) mf_layer_tensor(g, il, "ffn_gate_inp_shexp.weight", F32, 1, 2304, 0, 0);
++    }
++}
++
++/* Write the fixture to a fresh temporary file; path receives its name (the caller unlinks). */
++static void mellum_fixture_write(mf_mutation mu, char *path, size_t path_cap) {
++    mf_gguf g;
++    memset(&g, 0, sizeof(g));
++    mf_keys(&g, mu);
++    mf_vocab(&g, mu);
++    mf_tensors(&g, mu);
++
++    mf_buf head = {0};
++    mf_u32(&head, MF_GGUF_MAGIC);
++    mf_u32(&head, 3);
++    mf_u64(&head, g.n_tensor);
++    mf_u64(&head, g.n_kv);
++    mf_put(&head, g.kv.p, g.kv.n);
++    mf_put(&head, g.tn.p, g.tn.n);
++    const uint64_t data_pos = (head.n + 31u) & ~(uint64_t)31u;
++    const uint64_t file_size = data_pos + 260ull * 1000 * 1000;   /* > output.weight, 240 MB */
++
++    const char *tmp = getenv("TMPDIR");
++    snprintf(path, path_cap, "%s/mellum-fixture.XXXXXX", tmp && tmp[0] ? tmp : "/tmp");
++    const int fd = mkstemp(path);
++    assert(fd >= 0);
++    assert(write(fd, head.p, head.n) == (ssize_t)head.n);
++    assert(ftruncate(fd, (off_t)file_size) == 0);
++    assert(close(fd) == 0);
++    free(g.kv.p); free(g.tn.p); free(head.p);
++}
++
++#endif
+diff --git a/tests/test_mellum_config.c b/tests/test_mellum_config.c
+new file mode 100644
+index 00000000..6a016fb2
+--- /dev/null
++++ b/tests/test_mellum_config.c
+@@ -0,0 +1,713 @@
++/* Mellum 2.1 recognition, validation, binding and memory plan, model-free.  Each
++ * case writes the sparse GGUF of tests/mellum_fixture.h and opens it through
++ * model_open / config_validate_model / weights_bind, or ds4_engine_open.  The
++ * validators exit(1) with a message, so a refusal is checked in a forked child
++ * whose stderr is read back and must name what it refuses. */
++#include "../ds4.c"
++#include "mellum_fixture.h"
++#include <sys/wait.h>
++
++#define CHECK(c) do { if (!(c)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
++
++/* Run fn in a child; return its exit status and what it wrote to stderr. */
++typedef void (*child_fn)(const char *path);
++
++static int run_child(child_fn fn, const char *path, char *err, size_t cap) {
++    int pipefd[2];
++    CHECK(pipe(pipefd) == 0);
++    fflush(stdout);   /* a child's exit(1) would otherwise flush a copy of our pending output */
++    fflush(stderr);
++    const pid_t pid = fork();
++    CHECK(pid >= 0);
++    if (pid == 0) {
++        close(pipefd[0]);
++        dup2(pipefd[1], 2);
++        close(pipefd[1]);
++        fn(path);
++        _exit(0);
++    }
++    close(pipefd[1]);
++    size_t n = 0;
++    ssize_t r;
++    while (n + 1 < cap && (r = read(pipefd[0], err + n, cap - 1 - n)) > 0) n += (size_t)r;
++    err[n] = '\0';
++    close(pipefd[0]);
++    int status = 0;
++    CHECK(waitpid(pid, &status, 0) == pid);
++    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
++}
++/* general.architecture = mellum names the variant, inside the QWEN4_EXP family. */
++static void check_variant(void) {
++    char path[512];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    CHECK(ds4_model_is_mellum());
++    CHECK(ds4_model_is_qwen4());
++    CHECK(DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_QWEN4_EXP);
++    CHECK(DS4_MODEL_VARIANT == DS4_VARIANT_MELLUM);
++    model_close(&m);
++    unlink(path);
++
++    /* sibling: the Qwen3.8 shapes are not Mellum */
++    g_ds4_shape = DS4_SHAPE_QWEN4_EXP;
++    CHECK(!ds4_model_is_mellum() && ds4_model_is_qwen4());
++    g_ds4_shape = DS4_SHAPE_QWEN4_MINI;
++    CHECK(!ds4_model_is_mellum() && ds4_model_is_qwen4());
++    printf("ok   variant: mellum is its own variant in the QWEN4_EXP family\n");
++}
++/* What an open does with the file before the forward pass: validate the
++ * keys, then bind and check every tensor of the full model. */
++static void child_validate(const char *path) {
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    ds4_weights w;
++    weights_bind(&w, &m, false, 0, UINT32_MAX, true, false);
++    model_close(&m);
++}
++
++/* Refused: exits 1 and the message names `needle`. */
++static void expect_refused(mf_mutation mu, const char *needle, const char *label) {
++    char path[512], err[4096];
++    mellum_fixture_write(mu, path, sizeof(path));
++    const int rc = run_child(child_validate, path, err, sizeof(err));
++    unlink(path);
++    if (rc != 1 || !strstr(err, needle)) {
++        fprintf(stderr, "FAIL %s: exit %d, stderr [%s], wanted exit 1 naming '%s'\n", label, rc, err, needle);
++        exit(1);
++    }
++    printf("ok   refused: %-34s names %s\n", label, needle);
++}
++
++static void expect_accepted(mf_mutation mu, const char *label) {
++    char path[512], err[4096];
++    mellum_fixture_write(mu, path, sizeof(path));
++    const int rc = run_child(child_validate, path, err, sizeof(err));
++    unlink(path);
++    if (rc != 0) {
++        fprintf(stderr, "FAIL %s: exit %d, stderr [%s]\n", label, rc, err);
++        exit(1);
++    }
++    printf("ok   accepted: %s\n", label);
++}
++/* The real key set gives the shape the kernels are written for, the 3:1
++ * sliding pattern, and resets what a model opened earlier left behind. */
++static void check_good_set_in_process(void) {
++    char path[512];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    g_ds4_qwen4_ple.n_heads = 7;                     /* stale PLE state from another model */
++    g_ds4_compress_ratios[3] = 4;
++    g_qwen4_native_ctx = 262144;                     /* stale rope state from a Qwen model */
++    g_qwen4_rope_yarn = true;
++    g_qwen4_rope_freq[0] = 7.0f;
++    g_qwen4_rope_mscale = 2.0f;
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++
++    CHECK(DS4_N_LAYER == 28 && DS4_N_EMBD == 2304 && DS4_N_VOCAB == 98304);
++    CHECK(DS4_N_HEAD == 32 && DS4_N_HEAD_KV == 4 && DS4_N_HEAD_DIM == 128 && DS4_N_VALUE_DIM == 128);
++    CHECK(DS4_N_ROT == 128 && DS4_N_SWA == 1024);
++    CHECK(DS4_N_EXPERT == 64 && DS4_N_EXPERT_USED == 8 && DS4_N_FF_EXP == 896);
++    CHECK(DS4_N_FF_DENSE == 0);                      /* feed_forward_length (7168) is not a dense FFN */
++    CHECK(DS4_N_EXPERT_SHARED == 0 && DS4_N_NEXTN_PREDICT == 0 && DS4_N_HC == 1);
++    CHECK(DS4_ROPE_FREQ_BASE == 500000.0f && DS4_ROPE_FREQ_BASE_SWA == 500000.0f);
++    CHECK(DS4_ROPE_SCALE_FACTOR == 16.0f && DS4_ROPE_ORIG_CTX == 8192);
++    CHECK(DS4_ROPE_YARN_BETA_FAST == 32.0f && DS4_ROPE_YARN_BETA_SLOW == 1.0f);
++    CHECK(fabsf(DS4_ROPE_YARN_ATTN_FACTOR - 1.2772589f) < 1.0e-6f);
++    CHECK(g_ds4_qwen4_ple.n_heads == 0 && g_ds4_compress_ratios[3] == 0);
++    CHECK(g_qwen4_native_ctx == 0 && !g_qwen4_rope_yarn && g_qwen4_rope_freq[0] == 0.0f &&
++          g_qwen4_rope_mscale == 1.0f);
++
++    /* layers 0, 1, 2 slide; 3 and 27 are full; 21 of 28 slide */
++    CHECK(ds4_mellum_layer_is_sliding(0) && ds4_mellum_layer_is_sliding(1) && ds4_mellum_layer_is_sliding(2));
++    CHECK(!ds4_mellum_layer_is_sliding(3) && !ds4_mellum_layer_is_sliding(27));
++    uint32_t n_sliding = 0;
++    for (uint32_t il = 0; il < DS4_N_LAYER; il++) n_sliding += ds4_mellum_layer_is_sliding(il);
++    CHECK(n_sliding == 21);
++    /* without its guard the GDN predicate is silently true here (interval 0, and
++     * arm64 udiv makes x % 0 == x) */
++    CHECK(DS4_N_FULL_ATTN_INTERVAL == 0);
++    for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
++        CHECK(!ds4_qwen4_layer_is_linear(il));
++        CHECK(!ds4_qwen4_layer_is_ple(il));
++        CHECK(!ds4_qwen4_layer_is_nextn(il));
++    }
++    /* the guards hold even if a shape field the Qwen rules read were set */
++    {
++        const ds4_shape saved = g_ds4_shape;
++        g_ds4_shape.n_full_attn_interval = 4;
++        g_ds4_shape.n_ple_layer = 0;
++        g_ds4_shape.n_nextn_predict = 1;
++        for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
++            CHECK(!ds4_qwen4_layer_is_linear(il));
++            CHECK(!ds4_qwen4_layer_is_ple(il));
++            CHECK(!ds4_qwen4_layer_is_nextn(il));
++        }
++        g_ds4_shape = saved;
++    }
++
++    ds4_weights w;
++    weights_bind(&w, &m, false, 0, UINT32_MAX, true, false);
++    CHECK(w.token_embd && w.output && w.output_norm);
++    CHECK(w.output != w.token_embd);                 /* untied head */
++    CHECK(!w.output_hc_down && !w.output_hc_up && !w.output_hc_norm && !w.ple_embd);
++    CHECK(weights_have_output_head(&w));
++    for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
++        const ds4_layer_weights *l = &w.layer[il];
++        CHECK(l->attn_norm && l->ffn_norm && l->attn_q && l->attn_k && l->attn_v && l->attn_output);
++        CHECK(l->attn_q_norm && l->attn_k_norm && l->ffn_gate_inp);
++        CHECK(l->ffn_gate_exps && l->ffn_up_exps && l->ffn_down_exps);
++        CHECK(!l->ffn_gate_inp_shexp && !l->ffn_gate_shexp && !l->ffn_up_shexp && !l->ffn_down_shexp);
++        CHECK(!l->hc_attn_norm && !l->lin_qkv && !l->indexer_q_proj && !l->ple_key);
++        CHECK(weights_layer_has_required(l, il));
++    }
++    model_close(&m);
++    unlink(path);
++    printf("ok   good key set: shape, sliding pattern, predicates, stale state reset, binding\n");
++}
++
++/* The qwen predicates keep their meaning for the models that already use them. */
++static void check_qwen_predicates_unchanged(void) {
++    g_ds4_shape = DS4_SHAPE_QWEN4_MINI;
++    CHECK(!ds4_model_is_mellum());
++    CHECK(ds4_qwen4_layer_is_linear(0) && ds4_qwen4_layer_is_linear(1) && ds4_qwen4_layer_is_linear(2));
++    CHECK(!ds4_qwen4_layer_is_linear(3) && ds4_qwen4_layer_is_linear(4));
++    CHECK(!ds4_qwen4_layer_is_linear(8));            /* the MTP block is attention */
++    CHECK(ds4_qwen4_layer_is_nextn(8) && !ds4_qwen4_layer_is_nextn(7));
++    CHECK(ds4_qwen4_layer_is_ple(DS4_N_PLE_LAYER));
++    CHECK(!ds4_mellum_layer_is_sliding(0) && !ds4_mellum_layer_is_sliding(1));   /* not a Mellum model */
++    printf("ok   qwen4exp predicates unchanged\n");
++}
++/* The open gate: CPU and CUDA are refused for Mellum by name, inspect_only is not. */
++static ds4_backend g_open_backend;
++static const char *g_open_mtp;
++static int g_open_option;   /* 1 tensor parallelism, 2 distributed, 3 power throttling */
++static bool g_open_inspect;
++static const char *g_open_steer_file;
++static float g_open_steer_attn;
++
++static void child_engine_open(const char *path) {
++    ds4_engine *e = NULL;
++    ds4_engine_options opt;
++    memset(&opt, 0, sizeof(opt));
++    opt.model_path = path;
++    opt.backend = g_open_backend;
++    opt.context_size = 4096;
++    opt.inspect_only = g_open_inspect;
++    opt.directional_steering_file = (char *)g_open_steer_file;
++    opt.directional_steering_attn = g_open_steer_attn;
++    opt.mtp_path = (char *)g_open_mtp;
++    if (g_open_option == 1) opt.tp.role = DS4_TP_LEADER;
++    if (g_open_option == 2) opt.distributed.role = DS4_DISTRIBUTED_COORDINATOR;
++    if (g_open_option == 3) opt.power_percent = 50;
++    if (g_open_option == 4) opt.ssd_streaming = true;   /* streaming arrives in 0006; until then it is refused */
++    const int rc = ds4_engine_open(&e, &opt);
++    _exit(rc == 0 && e && ds4_engine_is_mellum(e) ? 0 : 7);
++}
++
++/* A drafter path with a Mellum model: Mellum reports as qwen4, so the shared check used to answer with the
++ * wrong model and the wrong reason (Mellum has no DFlash drafter but does stream). */
++static void expect_open_mtp_refused(const char *label) {
++    char path[512], err[4096];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    g_open_backend = DS4_BACKEND_METAL;
++    g_open_inspect = false;
++    g_open_mtp = path;
++    const int rc = run_child(child_engine_open, path, err, sizeof(err));
++    g_open_mtp = NULL;
++    unlink(path);
++    if (rc != 7 || !strstr(err, "Mellum 2.1 has no DFlash drafter")) {
++        fprintf(stderr, "FAIL %s: exit %d, stderr [%s]\n", label, rc, err);
++        exit(1);
++    }
++    printf("ok   open: %s\n", label);
++}
++
++/* Options the shared qwen4 open check refuses for Mellum too: tensor parallelism, a distributed slice, and
++ * power throttling.  Mellum is a qwen4 engine, so that check must not be skipped for it. */
++static void expect_open_option_refused(int which, const char *label) {
++    char path[512], err[4096];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    g_open_backend = DS4_BACKEND_METAL;
++    g_open_inspect = false;
++    g_open_option = which;
++    const int rc = run_child(child_engine_open, path, err, sizeof(err));
++    g_open_option = 0;
++    unlink(path);
++    if (rc != 7 || !strstr(err, "Mellum")) {
++        fprintf(stderr, "FAIL %s: exit %d, stderr [%s]\n", label, rc, err);
++        exit(1);
++    }
++    printf("ok   open: %s\n", label);
++}
++
++static void expect_open(ds4_backend be, bool inspect, bool refused, const char *label) {
++    char path[512], err[4096];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    g_open_backend = be;
++    g_open_inspect = inspect;
++    const int rc = run_child(child_engine_open, path, err, sizeof(err));
++    unlink(path);
++    if (refused ? rc != 7 || !strstr(err, "Mellum 2.1") || !strstr(err, "Metal graph only") : rc != 0) {
++        fprintf(stderr, "FAIL %s: exit %d, stderr [%s]\n", label, rc, err);
++        exit(1);
++    }
++    printf("ok   open: %s\n", label);
++}
++/* Steering allocates a tensor outside mellum_requests, so a Mellum open that asks for it is
++ * refused by name.  The CPU backend would also be refused, by a different message, so the
++ * message text tells the two gates apart; the siblings are the same open without steering
++ * (refused by the backend gate, not the steering one) and an inspect-only open with it. */
++static void check_mellum_steering_refused(void) {
++    char path[512], err[4096];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    g_open_backend = DS4_BACKEND_CPU;
++    g_open_inspect = false;
++    g_open_steer_file = "/nonexistent/steer.f32";
++    g_open_steer_attn = 1.0f;
++    int rc = run_child(child_engine_open, path, err, sizeof(err));
++    CHECK(rc == 7 && strstr(err, "directional steering is not supported for Mellum 2.1"));
++    g_open_steer_file = NULL;
++    g_open_steer_attn = 0.0f;
++    rc = run_child(child_engine_open, path, err, sizeof(err));
++    CHECK(rc == 7 && strstr(err, "Metal graph only") && !strstr(err, "directional steering"));
++    g_open_inspect = true;
++    g_open_steer_file = "/nonexistent/steer.f32";
++    g_open_steer_attn = 1.0f;
++    rc = run_child(child_engine_open, path, err, sizeof(err));
++    CHECK(rc == 0);
++    g_open_inspect = false;
++    g_open_steer_file = NULL;
++    g_open_steer_attn = 0.0f;
++    unlink(path);
++    printf("ok   open: steering refused for Mellum by name; the same open without it reaches the backend gate\n");
++}
++
++/* The startup line: Mellum prints the same "GiB planned" line the other models do. */
++static void child_print_memory(const char *path) {
++    (void)path;
++    static ds4_engine e;
++    memset(&e, 0, sizeof(e));
++    e.backend = DS4_BACKEND_METAL;
++    ds4_engine_print_startup_memory(&e, 4096);
++}
++
++static void check_memory_plan(void) {
++    char path[512], err[4096];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    const ds4_context_memory est = ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, 4096, 0, false);
++    CHECK(est.total_bytes > 0 && est.raw_bytes > 0 && est.scratch_bytes > 0);
++    CHECK(run_child(child_print_memory, "", err, sizeof(err)) == 0);
++    CHECK(strstr(err, "GiB planned") != NULL);
++    CHECK(strstr(err, "prefill_cap=1024 raw_kv_rows=4096") != NULL);
++    model_close(&m);
++    unlink(path);
++
++    /* sibling: a model that always had a plan still prints one */
++    g_ds4_shape = DS4_SHAPE_QWEN4_EXP;
++    const ds4_context_memory q = ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, 4096, 0, false);
++    CHECK(q.total_bytes > 0);
++    CHECK(run_child(child_print_memory, "", err, sizeof(err)) == 0);
++    CHECK(strstr(err, "GiB planned") != NULL);
++    printf("ok   memory plan: Mellum and qwen4exp both print a plan line\n");
++}
++
++/* ---- Mellum memory plan ---------------------------------------------------------------
++ * Expectations are written out here from the model's dims, not read from the shape the
++ * plan reads: E 2304, 32 q heads x 128, 4 kv heads x 128, 64 experts / 8 used, expert
++ * width 896, a 1024-slot ring on 21 of 28 layers (full attention on the 7 others), one int32 tag
++ * array per ring (K and V rows share it), and for the full layers' attention a rows table of 64 B per
++ * row per full layer plus the partials of one slice of at most 64 rows (64 splits of 2 + 128 floats
++ * per head: the kernels' own constants, ds4_gpu_qwen4_attn_part_floats, which the live group checks). */
++enum { T_E = 2304, T_QDIM = 4096, T_KVDIM = 512, T_EXPERTS = 64, T_USED = 8, T_FF = 896, T_RING = 1024 };
++
++/* the full layers' caches and the 21 rings */
++static uint64_t expect_kv(uint64_t ctx) {
++    return 7ull * ctx * (2ull * T_KVDIM * 2u) +
++           21ull * T_RING * (2ull * T_KVDIM * 2u + sizeof(int32_t));
++}
++
++/* bytes per prefill row (activations and MoE transients) */
++static uint64_t expect_per_row(void) {
++    return 4ull                                        /* the token id */
++         + 6ull * T_E * 4u                             /* the six residual-width activations */
++         + 2ull * T_QDIM * 4u                          /* q, heads */
++         + 2ull * T_KVDIM * 4u + 2ull * T_KVDIM * 2u   /* k, v f32; staged k, v f16 */
++         + (uint64_t)T_EXPERTS * 4u                    /* router logits */
++         + 2ull * T_USED * 4u                          /* selected, weights */
++         + (uint64_t)T_USED * T_FF * 4u                /* mid */
++         + (uint64_t)T_USED * T_E * 4u                 /* per-expert partial outputs */
++         + 7ull * 64u;                                 /* full attention's rows table: 64 B a row, 7 full layers */
++}
++
++/* the partials of one slice of min(cap, 64) rows of 32 heads: 64 splits, 2 + 128 floats each */
++static uint64_t expect_attn_part(uint64_t cap) {
++    return (cap < 64u ? cap : 64u) * 32ull * 64u * (2u + 128u) * 4u;
++}
++
++static uint64_t expect_fixed(uint64_t cap) {
++    /* the logits row; the shared attention partials */
++    return 98304ull * 4u + expect_attn_part(cap);
++}
++
++static uint64_t sum_requests(uint32_t ctx, uint32_t cap, uint32_t *n_out) {
++    mellum_req reqs[MELLUM_MAX_REQS];
++    const uint32_t n = mellum_requests(ctx, cap, reqs);
++    uint64_t total = 0;
++    for (uint32_t i = 0; i < n; i++) total += reqs[i].bytes;
++    if (n_out) *n_out = n;
++    return total;
++}
++
++static void check_mellum_plan_sums(void) {
++    static const uint32_t ctxs[] = {4096, 20000, 65536, 131072};
++    for (size_t c = 0; c < sizeof(ctxs) / sizeof(ctxs[0]); c++) {
++        for (int chunk_one = 0; chunk_one < 2; chunk_one++) {
++            const uint32_t ctx = ctxs[c], cap = chunk_one ? 1u : 1024u;
++            const ds4_context_memory m =
++                ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, (int)ctx, chunk_one ? 1u : 0u, false);
++            /* the plan is exactly what the allocator will request */
++            CHECK(m.total_bytes == sum_requests(ctx, cap, NULL));
++            CHECK(m.prefill_cap == cap && m.raw_cap == ctx && m.compressed_bytes == 0);
++            /* and exactly what the dims say */
++            CHECK(m.raw_bytes == expect_kv(ctx));
++            CHECK(m.scratch_bytes == cap * expect_per_row() + expect_fixed(cap));
++            CHECK(m.total_bytes == m.raw_bytes + m.scratch_bytes);
++        }
++    }
++    /* KV at 20,000: 7 full layers x 20,000 rows x 2,048 B, plus 21 rings of 1,024 rows x 2,048 B and a 4 B tag,
++     * twice: the live rings and their copy at the rewind frontier */
++    const ds4_context_memory m20 = ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, 20000, 0, false);
++    CHECK(m20.raw_bytes == 7ull * 20000 * 2048 + 21ull * 1024 * (2048 + 4));
++    CHECK(m20.raw_bytes == 330846208ull);
++    printf("ok   plan == sum of the allocator's requests == the dims, at 4 contexts x chunk {1024, 1}\n");
++}
++
++/* The prefill scratch scales with cap_tokens and is part of the create-time table: the
++ * allocator walks the same table when the session is created; nothing is allocated at a sync. */
++static void check_mellum_plan_scales_with_chunk(void) {
++    const ds4_context_memory a = ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, 20000, 1, false);
++    const ds4_context_memory b = ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, 20000, 512, false);
++    const ds4_context_memory c = ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, 20000, 1024, false);
++    CHECK(a.raw_bytes == b.raw_bytes && b.raw_bytes == c.raw_bytes);      /* KV does not depend on the chunk */
++    CHECK(b.scratch_bytes - a.scratch_bytes == 511ull * expect_per_row() + expect_attn_part(512) - expect_attn_part(1));
++    CHECK(c.scratch_bytes - b.scratch_bytes == 512ull * expect_per_row());   /* both past 64 rows: the same partials */
++    /* a context shorter than the chunk plans for the context */
++    const ds4_context_memory s = ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, 300, 0, false);
++    CHECK(s.prefill_cap == 300 && s.scratch_bytes == 300 * expect_per_row() + expect_fixed(300));
++
++    mellum_req reqs[MELLUM_MAX_REQS];
++    const uint32_t n = mellum_requests(20000, 1024, reqs);
++    uint32_t k = 0, v = 0, tags = 0, scratch = 0, logits = 0;
++    for (uint32_t i = 0; i < n; i++) {
++        switch (reqs[i].kind) {
++        case MELLUM_REQ_K: k++; break;
++        case MELLUM_REQ_V: v++; break;
++        case MELLUM_REQ_TAG: tags++; CHECK(reqs[i].bytes == T_RING * 4u); break;
++        case MELLUM_REQ_SCRATCH: scratch++; break;
++        case MELLUM_REQ_LOGITS: logits++; break;
++        default: break;
++        }
++    }
++    CHECK(k == 28 && v == 28 && tags == 21 && scratch == MELLUM_SCRATCH_COUNT && logits == 1);
++    for (uint32_t i = 0; i < n; i++) {
++        if (reqs[i].kind == MELLUM_REQ_K && ds4_mellum_layer_is_sliding(reqs[i].index)) {
++            CHECK(reqs[i].bytes == (uint64_t)T_RING * T_KVDIM * 2u);       /* a ring */
++        } else if (reqs[i].kind == MELLUM_REQ_K) {
++            CHECK(reqs[i].index % 4 == 3 && reqs[i].bytes == 20000ull * T_KVDIM * 2u);   /* full */
++        }
++    }
++    printf("ok   plan scales with cap_tokens; 28 K + 28 V + 21 tags + %u scratch + logits\n",
++           (unsigned)MELLUM_SCRATCH_COUNT);
++}
++
++/* The chunk clamp.  DS4_QWEN4_PREFILL_CHUNK reaches the plan through qwen4_prefill_chunk_tokens
++ * in a GPU build and through mellum_prefill_cap here; the host's chunk reaches the estimate as
++ * its argument and the engine as e->prefill_chunk. */
++static const char *g_chunk_env;
++static uint32_t g_chunk_arg;
++
++static int count_str(const char *hay, const char *needle) {
++    int n = 0;
++    for (const char *p = hay; (p = strstr(p, needle)) != NULL; p += strlen(needle)) n++;
++    return n;
++}
++
++static void child_plan_chunk(const char *path) {
++    (void)path;
++    if (g_chunk_env) setenv("DS4_QWEN4_PREFILL_CHUNK", g_chunk_env, 1);
++    const ds4_context_memory m = ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, 20000, g_chunk_arg, false);
++    /* a second and a third reader: the clamp message must still be one line */
++    (void)ds4_context_memory_estimate_with_prefill_mode(DS4_BACKEND_METAL, 20000, g_chunk_arg, false);
++    (void)mellum_prefill_cap(20000, g_chunk_arg);
++    _exit(m.prefill_cap == 1024 ? 40 : (m.prefill_cap == 512 ? 41 : 42));
++}
++
++static int run_plan_chunk(const char *env, uint32_t arg, char *err, size_t cap) {
++    g_chunk_env = env;
++    g_chunk_arg = arg;
++    return run_child(child_plan_chunk, "", err, cap);
++}
++
++static void child_open_chunk(const char *path) {
++    ds4_engine *e = NULL;
++    ds4_engine_options opt;
++    memset(&opt, 0, sizeof(opt));
++    opt.model_path = path;
++    opt.backend = DS4_BACKEND_CPU;
++    opt.context_size = 4096;
++    opt.inspect_only = true;
++    opt.prefill_chunk = g_chunk_arg;
++    if (ds4_engine_open(&e, &opt) != 0) _exit(7);
++    _exit(ds4_engine_prefill_chunk(e) == 1024 ? 40 : (ds4_engine_prefill_chunk(e) == 512 ? 41 : 42));
++}
++
++static void check_mellum_chunk_clamp(void) {
++    char err[4096];
++    const char *say = "Mellum prefill chunk 4096 clamped to 1024";
++
++    /* the env value: 4096 is used as 1024, and one line says so */
++    CHECK(run_plan_chunk("4096", 0, err, sizeof(err)) == 40);
++    CHECK(count_str(err, say) == 1);
++    /* the host-passed value, which the estimate and session create read directly */
++    CHECK(run_plan_chunk(NULL, 4096, err, sizeof(err)) == 40);
++    CHECK(count_str(err, say) == 1);
++    /* the largest value the env accepts */
++    CHECK(run_plan_chunk("65536", 0, err, sizeof(err)) == 40);
++    CHECK(count_str(err, "clamped to 1024") == 1);
++    /* sibling success: a chunk at or under the window is used as asked and says nothing */
++    CHECK(run_plan_chunk("512", 0, err, sizeof(err)) == 41);
++    CHECK(strstr(err, "clamped") == NULL);
++    CHECK(run_plan_chunk(NULL, 512, err, sizeof(err)) == 41);
++    CHECK(strstr(err, "clamped") == NULL);
++    CHECK(run_plan_chunk("1024", 0, err, sizeof(err)) == 40);
++    CHECK(strstr(err, "clamped") == NULL);
++    CHECK(run_plan_chunk(NULL, 0, err, sizeof(err)) == 40);        /* the default */
++    CHECK(strstr(err, "clamped") == NULL);
++
++    /* engine open: the chunk the host passes is clamped where it is stored */
++    char path[512];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    g_chunk_arg = 4096;
++    CHECK(run_child(child_open_chunk, path, err, sizeof(err)) == 40);
++    CHECK(count_str(err, say) == 1);
++    g_chunk_arg = 512;
++    CHECK(run_child(child_open_chunk, path, err, sizeof(err)) == 41);
++    CHECK(strstr(err, "clamped") == NULL);
++    unlink(path);
++    printf("ok   chunk 4096 (env, host argument, engine open) used as 1024 with one line; 512 and 1024 untouched\n");
++}
++
++/* The clamp line is per engine: a /model reopen in the same process says it again. */
++static void child_open_twice(const char *path) {
++    for (int i = 0; i < 2; i++) {
++        ds4_engine *e = NULL;
++        ds4_engine_options opt;
++        memset(&opt, 0, sizeof(opt));
++        opt.model_path = path;
++        opt.backend = DS4_BACKEND_CPU;
++        opt.context_size = 4096;
++        opt.inspect_only = true;
++        opt.prefill_chunk = 4096;
++        if (ds4_engine_open(&e, &opt) != 0) _exit(7);
++        ds4_engine_close(e);
++    }
++    _exit(40);
++}
++
++static void check_mellum_clamp_per_engine(void) {
++    char path[512], err[8192];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    CHECK(run_child(child_open_twice, path, err, sizeof(err)) == 40);
++    CHECK(count_str(err, "Mellum prefill chunk 4096 clamped to 1024") == 2);
++    unlink(path);
++    printf("ok   the clamp line is per engine (two opens, two lines)\n");
++}
++
++/* Full attention's two scratch buffers, from the dims and not from the table's own formula.
++ * The rows table has one region per full layer, because the CPU writes
++ * the table when a layer is encoded and the GPU reads it when the command buffer runs, so two full layers of
++ * one command buffer cannot share entries; the partials are shared (each layer's kernels finish with them). */
++static void check_mellum_attention_scratch(void) {
++    static const uint32_t caps[] = {1, 63, 64, 100, 1024};
++    uint32_t n_full = 0;
++    for (uint32_t il = 0; il < 28; il++) n_full += il % 4 == 3;
++    CHECK(n_full == 7);
++    for (size_t c = 0; c < sizeof(caps) / sizeof(caps[0]); c++) {
++        mellum_req reqs[MELLUM_MAX_REQS];
++        const uint32_t n = mellum_requests(20000, caps[c], reqs);
++        int tables = 0, parts = 0;
++        for (uint32_t i = 0; i < n; i++) {
++            if (reqs[i].kind != MELLUM_REQ_SCRATCH) continue;
++            if (reqs[i].index == MELLUM_S_ATTN_TABLE) {
++                tables++;
++                CHECK(reqs[i].bytes == (uint64_t)n_full * caps[c] * 64u && reqs[i].cls == MELLUM_CLASS_PREFILL);
++            }
++            if (reqs[i].index == MELLUM_S_ATTN_PART) {
++                parts++;
++                CHECK(reqs[i].bytes == expect_attn_part(caps[c]) && reqs[i].cls == MELLUM_CLASS_PREFILL);
++            }
++        }
++        CHECK(tables == 1 && parts == 1);
++    }
++    /* at the default chunk: 7 x 1,024 x 64 B = 448 KiB, and 65.0 MiB of partials */
++    mellum_req reqs[MELLUM_MAX_REQS];
++    const uint32_t n = mellum_requests(20000, 1024, reqs);
++    for (uint32_t i = 0; i < n; i++) {
++        if (reqs[i].kind == MELLUM_REQ_SCRATCH && reqs[i].index == MELLUM_S_ATTN_TABLE) CHECK(reqs[i].bytes == 458752ull);
++        if (reqs[i].kind == MELLUM_REQ_SCRATCH && reqs[i].index == MELLUM_S_ATTN_PART) CHECK(reqs[i].bytes == 68157440ull);
++    }
++    printf("ok   full attention scratch: rows table 7 x cap x 64 B, partials min(cap, 64) rows (448 KiB and 65.0 MiB at 1,024)\n");
++}
++
++static void check_mellum_plan(void) {
++    char path[512];
++    mellum_fixture_write(MF_NONE, path, sizeof(path));
++    ds4_model m;
++    model_open(&m, path, false, false);
++    config_validate_model(&m);
++    CHECK(ds4_model_is_mellum() && DS4_N_VOCAB == 98304 && DS4_N_SWA == T_RING);
++    check_mellum_plan_sums();
++    check_mellum_plan_scales_with_chunk();
++    model_close(&m);
++    unlink(path);
++    check_mellum_chunk_clamp();
++    check_mellum_clamp_per_engine();
++    check_mellum_attention_scratch();
++}
++
++static void check_sampling_defaults(void) {
++    static ds4_engine e;
++    float t = -1, p = -1, m = -1;
++    int k = -1;
++    g_ds4_shape = DS4_SHAPE_MELLUM;
++    ds4_engine_sampling_defaults(&e, &t, &k, &p, &m);
++    CHECK(t == 1.0f && k == 0 && p == 1.0f && m == 0.0f);
++    static const ds4_shape *const generic[] = { &DS4_SHAPE_QWEN4_EXP, &DS4_SHAPE_QWEN4_MINI };
++    for (size_t i = 0; i < sizeof(generic) / sizeof(generic[0]); i++) {
++        g_ds4_shape = *generic[i];
++        t = p = m = -1; k = -1;
++        ds4_engine_sampling_defaults(&e, &t, &k, &p, &m);
++        CHECK(t == DS4_DEFAULT_TEMPERATURE && k == 0 && p == DS4_DEFAULT_TOP_P && m == DS4_DEFAULT_MIN_P);
++    }
++    /* the GLM override the base already had is unchanged */
++    g_ds4_shape = DS4_SHAPE_GLM52;
++    t = p = m = -1; k = -1;
++    ds4_engine_sampling_defaults(&e, &t, &k, &p, &m);
++    CHECK(t == DS4_DEFAULT_TEMPERATURE && k == 0 && p == 0.95f && m == 0.0f);
++    printf("ok   sampling: Mellum (1.0, top_k 0, 1.0, 0.0); Qwen generic; GLM keeps top_p 0.95\n");
++}
++
++/* Session save and load refuse Mellum by name at every entry point (the payload layout of its
++ * rings is not written yet); a Flash Next session reaches its own checks instead. */
++static void check_payload_refused(void) {
++    static ds4_engine e;
++    static ds4_session s;
++    memset(&s, 0, sizeof(s));
++    s.engine = &e;
++    char err[256];
++    FILE *fp = tmpfile();
++    CHECK(fp != NULL);
++    const char *msg = "Mellum 2.1 session save and load are not supported yet";
++    ds4_session_payload_file pf;
++    ds4_session_snapshot snap;
++    uint8_t byte = 0;
++    const int toks[1] = {0};
++
++    g_ds4_shape = DS4_SHAPE_MELLUM;
++    CHECK(ds4_session_payload_bytes(&s) == 0);
++    CHECK(ds4_session_layer_payload_bytes(&s, 0, 1) == 0);
++    err[0] = '\0'; CHECK(ds4_session_save_payload(&s, fp, err, sizeof(err)) == 1 && !strcmp(err, msg));
++    err[0] = '\0'; CHECK(ds4_session_load_payload(&s, fp, 64, err, sizeof(err)) == 1 && !strcmp(err, msg));
++    err[0] = '\0'; CHECK(ds4_session_stage_payload(&s, &pf, err, sizeof(err)) == 1 && !strcmp(err, msg));
++    memset(&snap, 0, sizeof(snap));
++    err[0] = '\0'; CHECK(ds4_session_save_snapshot(&s, &snap, err, sizeof(err)) == 1 && !strcmp(err, msg));
++    snap.ptr = &byte; snap.len = 1;
++    err[0] = '\0'; CHECK(ds4_session_load_snapshot(&s, &snap, err, sizeof(err)) == 1 && !strcmp(err, msg));
++    err[0] = '\0'; CHECK(ds4_session_save_layer_payload(&s, fp, 0, 1, err, sizeof(err)) == 1 && !strcmp(err, msg));
++    err[0] = '\0';
++    CHECK(ds4_session_load_layer_payload(&s, fp, 64, toks, 1, 0, 1, err, sizeof(err)) == 1 && !strcmp(err, msg));
++
++    /* siblings: the same calls on a Flash Next session fail on their own checks, not on Mellum's */
++    g_ds4_shape = DS4_SHAPE_QWEN4_EXP;
++    err[0] = '\0'; CHECK(ds4_session_save_payload(&s, fp, err, sizeof(err)) == 1 && strcmp(err, msg) != 0);
++    err[0] = '\0'; CHECK(ds4_session_load_payload(&s, fp, 64, err, sizeof(err)) == 1 && strcmp(err, msg) != 0);
++    err[0] = '\0'; CHECK(ds4_session_stage_payload(&s, &pf, err, sizeof(err)) == 1 && strcmp(err, msg) != 0);
++    snap.ptr = NULL; snap.len = 0;
++    err[0] = '\0'; CHECK(ds4_session_save_snapshot(&s, &snap, err, sizeof(err)) == 1 && strcmp(err, msg) != 0);
++    err[0] = '\0'; CHECK(ds4_session_load_snapshot(&s, &snap, err, sizeof(err)) == 1 && strcmp(err, msg) != 0);
++    err[0] = '\0'; CHECK(ds4_session_save_layer_payload(&s, fp, 0, 1, err, sizeof(err)) == 1 && strcmp(err, msg) != 0);
++    err[0] = '\0';
++    CHECK(ds4_session_load_layer_payload(&s, fp, 64, toks, 1, 0, 1, err, sizeof(err)) == 1 && strcmp(err, msg) != 0);
++    fclose(fp);
++    printf("ok   session payload and snapshot: Mellum refused by name at every entry; Flash Next unchanged\n");
++}
++/* With DS4_TEST_MELLUM_MODEL, the real GGUF passes the same validation and
++ * binding (mapped, not read). */
++static void check_real_model(void) {
++    const char *path = getenv("DS4_TEST_MELLUM_MODEL");
++    if (!path || !path[0]) {
++        printf("skip real model: DS4_TEST_MELLUM_MODEL unset\n");
++        return;
++    }
++    char err[4096];
++    const int rc = run_child(child_validate, path, err, sizeof(err));
++    if (rc != 0) {
++        fprintf(stderr, "FAIL real model: exit %d, stderr [%s]\n", rc, err);
++        exit(1);
++    }
++    printf("ok   real model: keys validated, every tensor bound and checked\n");
++}
++
++int main(void) {
++    check_variant();
++    check_good_set_in_process();
++    check_qwen_predicates_unchanged();
++    expect_accepted(MF_NONE, "the real key set");
++    expect_refused(MF_PATTERN_FLIP, "mellum.attention.sliding_window_pattern", "pattern with one entry flipped");
++    expect_refused(MF_PATTERN_LEN27, "mellum.attention.sliding_window_pattern", "pattern of length 27");
++    expect_refused(MF_PATTERN_LEN29, "mellum.attention.sliding_window_pattern", "pattern of length 29");
++    expect_refused(MF_PATTERN_ABSENT, "mellum.attention.sliding_window_pattern", "no pattern");
++    expect_refused(MF_ROPE_NOT_YARN, "mellum.rope.scaling.type", "rope.scaling.type not yarn");
++    expect_refused(MF_NO_FREQ_BASE_SWA, "mellum.rope.freq_base_swa", "no rope.freq_base_swa");
++    expect_refused(MF_EXPERTS_128, "mellum.expert_count", "expert_count 128");
++    expect_refused(MF_USED_10, "mellum.expert_used_count", "expert_used_count 10");
++    expect_refused(MF_KEY_LENGTH_256, "mellum.attention.key_length", "key_length 256");
++    /* shapes the sliding attention (32 and 4 heads) and the MoE (a width in 128s) would refuse later */
++    expect_refused(MF_HEADS_16, "mellum.attention.head_count=32", "head_count 16");
++    expect_refused(MF_HEADS_KV_8, "mellum.attention.head_count_kv=4", "head_count_kv 8");
++    expect_refused(MF_EMBD_2336, "mellum.embedding_length: must be a multiple of 128", "embedding_length 2336");
++    /* the '=' keeps the needle from matching ...sliding_window_pattern */
++    expect_refused(MF_WINDOW_512, "mellum.attention.sliding_window=1024", "sliding_window 512");
++    expect_refused(MF_YARN_FACTOR_8, "mellum.rope.scaling.factor", "yarn factor 8");
++    expect_refused(MF_ATTN_FACTOR_1, "mellum.rope.scaling.yarn_attn_factor", "yarn_attn_factor 1.0");
++    expect_refused(MF_ORIG_CTX_4096, "mellum.rope.scaling.original_context_length", "original context 4096");
++    expect_refused(MF_SHEXP_TENSOR, "ffn_gate_inp_shexp", "a shared-expert tensor present");
++    expect_refused(MF_DOWN_Q4K, "ffn_down_exps", "ffn_down_exps not Q8_0");
++    expect_refused(MF_UP_Q4K, "ffn_up_exps", "ffn_up_exps not Q8_0");
++    expect_refused(MF_NO_OUTPUT_NORM, "output_norm.weight", "no output_norm");
++    expect_refused(MF_NO_ATTN_Q_NORM, "blk.5.attn_q_norm.weight", "no attn_q_norm in layer 5");
++    expect_refused(MF_BAD_ATTN_Q_DIM, "blk.5.attn_q.weight", "attn_q of the wrong width");
++    expect_open_mtp_refused("a drafter path is refused by name, not as a Qwen error");
++    expect_open_option_refused(1, "tensor parallelism is refused, naming Mellum");
++    expect_open_option_refused(2, "a distributed slice is refused, naming Mellum");
++    expect_open_option_refused(3, "power throttling is refused, naming Mellum");
++    expect_open_option_refused(4, "SSD streaming is refused before the streaming patch");
++    expect_open(DS4_BACKEND_CPU, false, true, "CPU backend refused, naming Mellum");
++    expect_open(DS4_BACKEND_CUDA, false, true, "CUDA backend refused, naming Mellum");
++    expect_open(DS4_BACKEND_CPU, true, false, "inspect-only open succeeds");
++    check_mellum_steering_refused();
++    check_mellum_plan();
++    check_memory_plan();
++    check_sampling_defaults();
++    check_payload_refused();
++    check_real_model();
++    printf("test-mellum-config: ok\n");
++    return 0;
++}

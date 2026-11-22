@@ -1,4 +1,4 @@
-From 04c11419bdd33faf6d67f9e88fd99f8109e20223 Mon Sep 17 00:00:00 2001
+From f03005ef3bb6d0f15062b5a72be6c995462e54d2 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Roch=C3=A9=20Compaan?= <roche@upfrontsoftware.co.za>
 Date: Thu, 12 Nov 2026 13:24:07 +0200
 Subject: [PATCH 14/18] cuda: keep the model resident on a single device
