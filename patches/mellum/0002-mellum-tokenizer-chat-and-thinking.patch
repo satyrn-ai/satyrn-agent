@@ -1,4 +1,4 @@
-From 07e27436ad57d3985b591a9464e156be4abc9ebe Mon Sep 17 00:00:00 2001
+From 02b9a068e3f016daa07084206766f2b01847fe4b Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:23 -0500
 Subject: [PATCH 2/6] mellum: tokenizer, chat and thinking
@@ -40,18 +40,18 @@ Carried-commits: 70fb4d5bb365222d9dcaa426c2580fc338b3e8c3 fd467521cd297cb79a67c7
  create mode 100644 tests/test_mellum_tokenizer.c
 
 diff --git a/Makefile b/Makefile
-index 7be6a8db..5df88979 100644
+index d82b80bf..71bc95c9 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -81,6 +81,7 @@ all: ds4 ds4-server ds4-bench ds4-eval ds4-agent
- # ds4.c or includes it from a test must list them, or an incremental build
- # reports "up to date" after one changes (tests/ds4_series_deps_test.sh).
+@@ -75,6 +75,7 @@ endif
+ # The definition is platform-independent and must precede the rules that use
+ # it; the rules themselves sit at the end of the file.
  MELLUM_DS4_INCS = ds4_mellum_config.inc ds4_mellum_plan.inc
 +MELLUM_DS4_INCS += ds4_mellum_tokenizer.inc ds4_mellum_unicode.inc
- ds4.o ds4_cpu.o ds4_cpu_test_hooks.o ds4_cuda_test_hooks.o ds4_verify_test_hooks.o \
- 	tests/test_deepseek41_dspark.o tests/test_deepseek41_gguf.o \
- 	tests/test_deepseek41_graph.o tests/test_deepseek41_prefill.o \
-@@ -1026,15 +1027,23 @@ test-qwen4-ngrams: tests/test_qwen4_ngrams
+ 
+ .PHONY: all help clean test test-rocm test-glm53-kda-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+ 
+@@ -1023,15 +1024,23 @@ test-qwen4-ngrams: tests/test_qwen4_ngrams
  
  # Mellum 2.1, model-free: recognition, validation and binding on a sparse GGUF
  # (tests/mellum_fixture.h), and how the front ends treat a Mellum engine.
@@ -77,7 +77,7 @@ index 7be6a8db..5df88979 100644
  
  tests/test_qwen4_ngram_state.o: tests/test_qwen4_ngram_state.c ds4.c ds4.h
  	$(CC) $(filter-out -ffast-math,$(CFLAGS)) -Wno-unused-function -I. -c -o $@ $<
-@@ -1373,7 +1382,7 @@ tests/test_session_state_gpu.o: ds4_tool_text.h
+@@ -1370,7 +1379,7 @@ tests/test_session_state_gpu.o: ds4_tool_text.h
  clean:
  	rm -f tests/test_mmvq_cuda tests/test_mmvq_rocm
  	rm -f tests/test_qwen4_ngrams

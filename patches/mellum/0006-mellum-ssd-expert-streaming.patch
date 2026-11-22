@@ -1,4 +1,4 @@
-From d7b366197842edb201da9a98d19e400ce3a08626 Mon Sep 17 00:00:00 2001
+From 86f044c176392fbf8f726bd7d85218f37cf4e2c0 Mon Sep 17 00:00:00 2001
 From: pauleveritt <pauleveritt@me.com>
 Date: Thu, 19 Nov 2026 07:29:32 -0500
 Subject: [PATCH 6/6] mellum: ssd expert streaming
@@ -61,7 +61,7 @@ index b3a706e7..7338c8a5 100644
 +/tests/test_metal_tensor_lifetime
 +/tests/mellum_trace
 diff --git a/Makefile b/Makefile
-index 920de925..6b851691 100644
+index af2549fb..c3fe6165 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -27,8 +27,8 @@ DS4_DSPARK_SUPPORT ?= gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf
@@ -86,7 +86,7 @@ index 920de925..6b851691 100644
  CUDA_LDLIBS ?= -lm -Xcompiler -pthread -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart -lcublas
  HIPCC ?= $(shell command -v hipcc 2>/dev/null || echo /opt/rocm/bin/hipcc)
  ROCM_ARCH ?= gfx1151
-@@ -334,7 +334,7 @@ cuda:
+@@ -331,7 +331,7 @@ cuda:
  
  strix-halo:
  	$(MAKE) -B ds4 ds4-server ds4-bench ds4-eval ds4-agent \
@@ -95,7 +95,7 @@ index 920de925..6b851691 100644
  		CFLAGS="$(CFLAGS) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD" \
  		DS4_LINK="$(HIPCC) $(ROCM_CFLAGS)" \
  		DS4_LINK_LIBS="$(ROCM_LDLIBS)"
-@@ -350,7 +350,7 @@ test-rocm:
+@@ -347,7 +347,7 @@ test-rocm:
  		test-session-state \
  		tests/test_layer_pack tests/test_engine_mgpu_placement tests/test_gpu_args tests/test_prompt_prefix \
  		ds4 ds4-server ds4-bench ds4-agent \
@@ -104,7 +104,7 @@ index 920de925..6b851691 100644
  		CFLAGS="$(CFLAGS) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD" \
  		DS4_LINK="$(HIPCC) $(ROCM_CFLAGS)" \
  		DS4_LINK_LIBS="$(ROCM_LDLIBS)"
-@@ -1195,13 +1195,13 @@ ds4_cpu_test_hooks.o: ds4.c ds4.h ds4_image.h ds4_gpu.h ds4_gpu_mgpu.h ds4_layer
+@@ -1192,13 +1192,13 @@ ds4_cpu_test_hooks.o: ds4.c ds4.h ds4_image.h ds4_gpu.h ds4_gpu_mgpu.h ds4_layer
  tests/test_engine_mgpu_placement.o: tests/test_engine_mgpu_placement.c ds4.h ds4_gpu_mgpu.h ds4_layer_pack.h
  	$(CC) $(CFLAGS) -I. -c -o $@ $<
  
@@ -120,10 +120,10 @@ index 920de925..6b851691 100644
  	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
  
  tests/test_session_state.o: tests/test_session_state.c ds4.c ds4.h ds4_gpu.h ds4_image.h ds4_tp.h
-@@ -1500,3 +1500,48 @@ tests/test_metal_math_options: tests/test_metal_math_options.c ds4_gpu.h $(CORE_
- test-metal-math-options: tests/test_metal_math_options
- 	./tests/test_metal_math_options
- 	DS4_METAL_MATH_SAFE=1 ./tests/test_metal_math_options --safe
+@@ -1506,3 +1506,48 @@ ds4.o ds4_cpu.o ds4_cpu_test_hooks.o ds4_cuda_test_hooks.o ds4_verify_test_hooks
+ 	tests/test_deepseek_indexer.o tests/test_qwen4_ngram_state.o \
+ 	tests/test_qwen4_ngrams.o tests/test_session_state.o \
+ 	tests/test_session_state_gpu.o: $(MELLUM_DS4_INCS)
 +
 +# Mellum's bounded SSD cache and host-pure stop/resume scheduler.
 +tests/test_mellum_stream: tests/test_mellum_stream.c ds4_mellum_stream.c ds4_mellum_stream.h
