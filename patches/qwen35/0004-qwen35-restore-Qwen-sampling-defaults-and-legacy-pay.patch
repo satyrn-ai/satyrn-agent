@@ -1,4 +1,4 @@
-From 8dcdb56688f7a62d75ebef5da84beee8b2f61317 Mon Sep 17 00:00:00 2001
+From 86961e87c29a87aebef59f165f68ef5ab8f7b6a7 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Tue, 6 Oct 2026 15:10:05 +0900
 Subject: [PATCH 04/18] qwen35: restore Qwen sampling defaults and legacy

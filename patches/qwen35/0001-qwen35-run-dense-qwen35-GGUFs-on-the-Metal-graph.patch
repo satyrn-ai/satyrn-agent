@@ -1,4 +1,4 @@
-From 0404c20ed6c37f198ac42964168b04bb2f1b0e90 Mon Sep 17 00:00:00 2001
+From 3ed38193f5f2a2af34377ef496373b7d9cedde86 Mon Sep 17 00:00:00 2001
 From: Koudai Aono <koxudaxi@gmail.com>
 Date: Wed, 30 Sep 2026 12:59:41 +0900
 Subject: [PATCH 01/18] qwen35: run dense qwen35 GGUFs on the Metal graph
