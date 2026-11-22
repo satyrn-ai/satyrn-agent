@@ -109,6 +109,7 @@ def test_real_metal_satyrn_harness_tui(
     ) as runtime:
         notes = runtime._notes
         assert notes is not None
+        # Pin a known-passing date note; wall-clock dates made /switch nondeterministic (issue #34).
         monkeypatch.setattr(notes, "clock", lambda: "2026-11-23 00:01:01 JST")
         tui = TUI(runtime, output=DummyOutput(), configure_commands=extension.configure_commands)
         assert len(wrappers) == 1
