@@ -18,11 +18,13 @@ in
 {
   languages.c.enable = true;
 
-  # The pinned ds4 source uses macOS 15 Metal APIs; the Metal build needs the
-  # matching SDK (the default clang SDK is older and lacks them).
+  # The pinned ds4 source uses macOS 15 Metal APIs and a macOS 26 Metal 4 path.
+  # apple-sdk_15 hides the Metal 4 tensor API, which costs about 43% of prefill
+  # on M5-class hosts; apple-sdk_26 carries both, and @available still guards
+  # the runtime use of the 26-only paths on older systems.
   apple.sdk =
     if pkgs.stdenv.hostPlatform.isDarwin
-    then pkgs.apple-sdk_15
+    then pkgs.apple-sdk_26
     else null;
 
   languages.python = {
