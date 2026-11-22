@@ -12,7 +12,7 @@ blob already in the Hugging Face cache. The existing file in `~/models` was not 
 
 ## Patch discipline checkpoint
 
-Six patches export from commits `eb8d34b2`..`f2c40f41` (the current `From` headers), each exactly its own
+Six patches export from commits `0e61bdb8`..`d7b36619` (the current `From` headers), each exactly its own
 delta, authored `pauleveritt <pauleveritt@me.com>`, with the three required trailers. Applying them in order
 reconstructs tree `ca243153` from a pristine clone, and `ds4-check --model mellum --build` passes. The
 per-prefix table below is authoritative for the current export; older ledger entries that name `cd3911c3`,
@@ -118,17 +118,20 @@ then built and tested. Model: the SHA-verified Q8_0 file (`69e0ac02…6841f`, 12
 
 | Prefix | Tree | config | kernels | model-backed gates |
 |---|---|---:|---:|---|
-| 0001 | `d607f0f0` | ok | target absent | real-model config: keys validated, every tensor bound; a drafter path refused by name |
-| 0002 | `9974c264` | ok | target absent | tokenizer with the real model: 30/30 ids equal the reference encode |
-| 0003 | `dc4d8de4` | ok | 509 | `ds4_test --mellum-rewind`: OK |
-| 0004 | `e7b75728` | ok | 662 | `make test-mellum-fastpath`: 45/45 |
-| 0005 | `4fb50372` | ok | 662 | MXFP4 config accepted; mixtures refused by name |
-| 0006 | `ca243153` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
+| 0001 | `89f3c557` | ok | target absent | real-model config: keys validated, every tensor bound; a drafter path refused by name |
+| 0002 | `70eea3b1` | ok | target absent | tokenizer with the real model: 30/30 ids equal the reference encode |
+| 0003 | `cec4127d` | ok | 509 | `ds4_test --mellum-rewind`: OK |
+| 0004 | `35f966a3` | ok | 662 | `make test-mellum-fastpath`: 45/45 |
+| 0005 | `cce6d946` | ok | 662 | MXFP4 config accepted; mixtures refused by name |
+| 0006 | `fff1d8f9` | ok | 992 | `make test-mellum-stream`: 56 checks; S4 driver smoke OK on Q8 and MXFP4; rewind OK; fast paths 45/45 |
 
 The check counts belong to their prefix: 0003 is 509, 0004 and 0005 are 662, 0006 is 992. `ds4-check --build`
 links `libds4` only and never compiles the test sources, which is why each prefix above was also built and run
-as a suite. The table was re-run after the `.inc` relocation, not carried over from the inline export. The six
-patches applied in order reconstruct to tree `ca243153` from a pristine clone (`ds4-check --model mellum --build`).
+as a suite. The table was re-run on the absorbed export — after the common fast-math patch, the Mellum
+include-dependency fix and the macOS 26 SDK bump — under the Nix toolchain; the 509 and 662 counts for
+0003/0004 were re-verified on that export, the 0006/combined 992, config, tokenizer, oracle and parity on the
+combined tip. The six patches applied in order reconstruct to tree `fff1d8f9` from a pristine clone
+(`ds4-check --model mellum --build`).
 
 ## Oracle against an immutable `d2d9338` build
 
@@ -146,7 +149,30 @@ near-tie rule at 1,100 and 2,200 only because both engines tile their attention 
 32 rows it is byte-equal too. In-engine, this port's exact prefill is compared to its own decode byte for byte and
 passes at every length.
 
-## Performance, corrected harness
+## Performance on the absorbed export (Nix SDK 26.5, canonical)
+
+Each engine from its own tree, `ARMS=AA`, context 3,072, 2,056-token prompt (`68132d36…65c1`),
+`PER=4` with each block's first process dropped (n=6), fresh output directories. Every arm reported
+`language=4.0 mathMode=fast mathFloatingPointFunctions=fast` and `tensor_matmul=on`.
+
+| Arm | Engine commit | Prefill | Decode |
+| --- | --- | ---: | ---: |
+| 0004 (Q8) | `1e519c35` | 3,968 t/s | 128.23 t/s |
+| 0005 (Q8) | `b3273aeb` | 3,968 t/s | 128.61 t/s |
+| 0006 (Q8) | `d7b36619` | 3,974 t/s | 128.28 t/s |
+| reference (Q8) | `d2d9338`, Nix SDK 26 rebuild | 3,979 t/s | 127.69 t/s |
+| 0005 (MXFP4) | `b3273aeb` | 4,071 t/s | 151.38 t/s |
+| reference (MXFP4) | `d2d9338`, Nix SDK 26 rebuild | 4,063 t/s | 150.70 t/s |
+
+The current-0005 MXFP4 pair is +0.20% prefill and +0.45% decode; the Q8 series is flat within 0.3%
+across 0004→0006 and against the reference. Binary sha256 (first 16): 0004 `cea4138316d1b0d6`, 0005
+`ec85117cefac5e66`, 0006 `ce12609ed5556476`, reference `7c7cbb3436d0ff58`. Raw:
+`/tmp/mellum-perf-sdk26/`.
+
+The tables below are historical and were measured on superseded exports with other toolchains; they are
+kept for provenance only.
+
+## Performance, corrected harness (historical)
 
 Each engine ran from its own tree and wrote a fresh output directory; context 3072, 2,056-token prompt, n=6.
 
@@ -215,12 +241,11 @@ from its own tree, `ARMS=AA`, n=6 after the per-block drop:
 Raw runs: `/tmp/mellum-step2-fixed/{port0005,ref}-{prefill,decode}/runs.txt`. The comparison passes
 its 10% gate **only** with the math-mode fix; without it prefill is 2,254-2,330 t/s, 43% down.
 
-**Superseding note (2026-11-21, Nix-canonical).** The pair above was measured with the Xcode
-toolchain. The Nix toolchain is now the only one used for builds and measurements, and it compiles the
-Metal 4 tensor probe out (`tensor_matmul=off`), so under Nix the reference must be rebuilt the same way
-and the pair is instead port 2,327 t/s against a Nix reference's 2,326 t/s prefill — parity, but on the
-slower path. The math-mode fix is still required for determinism and for SDK-26 builds, but its 43% is
-not recoverable under Nix until the Metal 4 detection is runtime-gated (#37).
+**Superseding note (2026-11-21).** The pair above was measured with the Xcode toolchain. The
+canonical toolchain is Nix with `apple-sdk_26` (see `2026-11-21-devenv-sdk-26.md`), whose build reports
+`tensor_matmul=on` and `language=4.0 mathMode=fast`; the canonical performance series is the
+"absorbed export" section below. The math-mode fix matters there: with Metal 4 compiled in, the 4.0 pin
+applies, and without explicit fast math the shaders compile strict and lose ~43%.
 
 The fix belongs in common patches 0002/0003: set `options.mathMode = MTLMathModeFast;` next to each
 `languageVersion` assignment. That restores the reference's documented fast default (`fastMathEnabled`

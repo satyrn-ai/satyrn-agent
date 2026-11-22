@@ -822,11 +822,20 @@ Changing common re-exports common → Mellum → qwen35, so re-run the oracle, t
 and static gates, and the prefix performance pairs, and disclose the change in the PR body. Main
 carries the same cost until this lands.
 
-- [ ] **Reconcile the evidence before claiming current acceptance.**
+- [x] **Reconcile the evidence before claiming current acceptance.**
 
 Keep raw `ece0d5fe`/`8b8ef87a` runs attached to those measured trees; record any
 source-equivalence claim separately. Capture the current-0005 MXFP4/reference
-n=6 comparison. On the final combined export, rebuild the test executables and
+n=6 comparison. Result: historical runs keep their measured identities (`ece0d5fe`/`8b8ef87a`); the canonical series is
+on the absorbed export (`d7b36619`/`fff1d8f9`, combined `db39d137`/`4d987745`) under the Nix toolchain
+with `apple-sdk_26`, where every arm reports `tensor_matmul=on`. Current-0005 MXFP4 is 4,071 t/s prefill
+and 151.38 t/s decode against the Nix-rebuilt reference's 4,063 / 150.70 (+0.20% / +0.45%); Q8 is flat
+within 0.3% across 0004→0006 and against the reference. Streaming parity is exact on 512 ids for both
+quants (Q8 3+3, 979 slots; MXFP4 3+3, 652 slots). The oracle passes against the Nix-SDK-26 reference
+(exact prefill byte-equal, optimized 63/65 at 1,100 with permitted near-ties and 65/65 at 2,200, greedy
+64/64 equal logits). Qwen's live suite is 48/49 with the unchanged `/switch` baseline failure (#34).
+
+On the final combined export, rebuild the test executables and
 run Mellum config/tokenizer, 992 kernels, rewind, fast paths, the published-Q8
 oracle and 512-token parity (3 resident + 3 streamed per quant), retaining raw
 IDs and exact commit/tree/model/prompt identities. Run Qwen kernel/DFlash/live
