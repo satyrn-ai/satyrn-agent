@@ -774,10 +774,11 @@ reconstruction equals the tree at every boundary and all three builds (`common`,
 - [x] **Step 4: Run the Qwen regressions**
 
 `make test-qwen4-kernels` passes (all qwen4 kernel tests), `make test-mellum-kernels` passes (992 checks,
-0 failures), and `pytest tests/abnormal tests/e2e/live` gives 48 passed, 1 failed. The failure is
-`test_harness_tui`'s `error: model response ended with max_tokens` on the round after `/switch`; running
-the same test against a `ds4py build` of `eed5c4f`'s own qwen35 series fails at the same assertion with
-the same message. This supports a baseline-failure attribution, not a fully green live gate or proof
+0 failures), and `pytest tests/abnormal tests/e2e/live` gave 48 passed, 1 failed at the time. The failure was
+`test_harness_tui`'s `error: model response ended with max_tokens` on the round after `/switch`; it also
+reproduced on a `ds4py build` of `eed5c4f`'s own qwen35 series. It is now **fixed** (#34): the restore was
+verified identical and the round simply needs more than the marginal 256-token cap; the scenario now runs
+at 512 and the live suite is 49/49 (`3a30dd3`).
 of every Qwen behavior. Preserve both build identities and track the failing acceptance explicitly.
 The recorded DFlash parity and metric cases pass.
 
@@ -833,7 +834,8 @@ and 151.38 t/s decode against the Nix-rebuilt reference's 4,063 / 150.70 (+0.20%
 within 0.3% across 0004→0006 and against the reference. Streaming parity is exact on 512 ids for both
 quants (Q8 3+3, 979 slots; MXFP4 3+3, 652 slots). The oracle passes against the Nix-SDK-26 reference
 (exact prefill byte-equal, optimized 63/65 at 1,100 with permitted near-ties and 65/65 at 2,200, greedy
-64/64 equal logits). Qwen's live suite is 48/49 with the unchanged `/switch` baseline failure (#34).
+64/64 equal logits). Qwen's live suite is **49/49** after the #34 cap fix (`3a30dd3`); the old 48/49 was
+the marginal token cap in that scenario, not a restore defect.
 
 On the final combined export, rebuild the test executables and
 run Mellum config/tokenizer, 992 kernels, rewind, fast paths, the published-Q8
